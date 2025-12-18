@@ -1,7 +1,8 @@
 """
-Strategic Foundation Agents (Layers 1-4)
+Strategic Foundation Agents (Layers 0-4)
 
 These agents establish the foundational strategy for the book:
+- Orchestrator (Layer 0)
 - Market & Reader Intelligence
 - Core Concept Definition
 - Thematic Architecture
@@ -10,6 +11,34 @@ These agents establish the foundational strategy for the book:
 
 from typing import Dict, Any
 from core.orchestrator import ExecutionContext
+
+
+# =============================================================================
+# LAYER 0: ORCHESTRATOR
+# =============================================================================
+
+async def execute_orchestrator(context: ExecutionContext) -> Dict[str, Any]:
+    """Execute orchestrator agent - initializes the pipeline."""
+    # The orchestrator doesn't need LLM - it just sets up the pipeline
+    return {
+        "agent_map": list(context.inputs.get("user_constraints", {}).keys()),
+        "stage_order": [
+            "market_intelligence", "concept_definition", "thematic_architecture",
+            "story_question", "world_rules", "character_architecture",
+            "relationship_dynamics", "plot_structure", "pacing_design",
+            "chapter_blueprint", "voice_specification", "draft_generation"
+        ],
+        "state_json": {
+            "initialized": True,
+            "title": context.project.title,
+            "constraints": context.inputs.get("user_constraints", {})
+        },
+        "checkpoint_rules": {
+            "auto_save": True,
+            "save_after_each_layer": True,
+            "max_checkpoints": 10
+        }
+    }
 
 
 # =============================================================================
@@ -354,6 +383,7 @@ async def execute_story_question(context: ExecutionContext) -> Dict[str, Any]:
 # =============================================================================
 
 STRATEGIC_EXECUTORS = {
+    "orchestrator": execute_orchestrator,
     "market_intelligence": execute_market_intelligence,
     "concept_definition": execute_concept_definition,
     "thematic_architecture": execute_thematic_architecture,
