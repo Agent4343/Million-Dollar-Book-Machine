@@ -26,7 +26,7 @@ class ClaudeLLMClient:
         self,
         api_key: Optional[str] = None,
         model: str = "claude-sonnet-4-20250514",
-        max_tokens: int = 4096
+        max_tokens: int = 16000  # Increased for longer content like chapter outlines
     ):
         """
         Initialize the Claude client.
@@ -54,7 +54,8 @@ class ClaudeLLMClient:
         prompt: str,
         response_format: Optional[str] = None,
         system: Optional[str] = None,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None  # Allow per-call override
     ) -> Any:
         """
         Generate content using Claude.
@@ -64,6 +65,7 @@ class ClaudeLLMClient:
             response_format: If "json", parse response as JSON
             system: Optional system prompt
             temperature: Creativity level (0-1)
+            max_tokens: Override default max_tokens for this call
 
         Returns:
             Generated content (dict if JSON, str otherwise)
@@ -73,20 +75,30 @@ class ClaudeLLMClient:
         system_prompt = system or (
             "You are an expert book development AI assistant. "
             "Provide detailed, creative, and professional responses. "
-            "When asked for JSON output, respond ONLY with valid JSON, no markdown or explanations."
+            "When asked for JSON output, respond ONLY with valid JSON, no markdown or explanations. "
+            "Keep responses concise and within token limits."
         )
+
+        tokens = max_tokens or self.max_tokens
 
         try:
             # Use synchronous client (Anthropic SDK handles it)
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=self.max_tokens,
+                max_tokens=tokens,
                 system=system_prompt,
                 messages=messages,
                 temperature=temperature
             )
 
             content = response.content[0].text
+
+            # Check if response was truncated
+            if response.stop_reason == "max_tokens":
+                logger.warning(f"Response truncated due to max_tokens limit ({tokens})")
+                # Try to fix truncated JSON by closing brackets
+                if response_format == "json":
+                    content = self._fix_truncated_json(content)
 
             if response_format == "json":
                 # Extract JSON from response (handle markdown code blocks)
@@ -117,6 +129,32 @@ class ClaudeLLMClient:
             content = content[:-3]
 
         return content.strip()
+
+    def _fix_truncated_json(self, content: str) -> str:
+        """Attempt to fix truncated JSON by closing open brackets."""
+        content = content.strip()
+
+        # Remove trailing incomplete string
+        if content.count('"') % 2 == 1:
+            # Odd number of quotes - find last complete field
+            last_quote = content.rfind('"')
+            if last_quote > 0:
+                # Look for the last complete key-value pair
+                last_colon = content.rfind(':', 0, last_quote)
+                last_comma = content.rfind(',', 0, last_colon) if last_colon > 0 else -1
+                if last_comma > 0:
+                    content = content[:last_comma]
+
+        # Count and close brackets
+        open_braces = content.count('{') - content.count('}')
+        open_brackets = content.count('[') - content.count(']')
+
+        # Add closing brackets in reverse order of opening
+        content = content.rstrip(',')  # Remove trailing comma
+        content += ']' * open_brackets
+        content += '}' * open_braces
+
+        return content
 
     async def generate_structured(
         self,
