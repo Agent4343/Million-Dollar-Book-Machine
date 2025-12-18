@@ -1,145 +1,162 @@
-# Million-Dollar-Book-Machine
+# Million Dollar Book Machine
 
-A book metadata processor with validation, formatting, and a web interface. Deployable to Vercel as a private site.
+AI-powered multi-agent system for developing books from concept to publication.
 
-## Features
+## System Overview
 
-- Validate book metadata (title, author, ISBN, dates, prices, etc.)
-- ISBN-10 and ISBN-13 checksum validation
-- Title case formatting with smart handling of small words
-- XSS protection via HTML sanitization
-- RESTful API with batch processing support
-- Modern web interface
+This system uses **21 specialized agents** across **11 development layers** to take a book from initial concept through to publication-ready manuscript.
+
+### Development Layers
+
+| Layer | Name | Agents |
+|-------|------|--------|
+| 0 | Orchestration & State Control | orchestrator |
+| 1 | Market & Reader Intelligence | market_intelligence |
+| 2 | Core Concept Definition | concept_definition |
+| 3 | Thematic Architecture | thematic_architecture |
+| 4 | Central Story Question | story_question |
+| 5 | World / Context Rules | world_rules |
+| 6 | Character Architecture | character_architecture |
+| 7 | Relationship Dynamics | relationship_dynamics |
+| 8 | Macro Plot Structure | plot_structure |
+| 9 | Pacing & Tension Design | pacing_design |
+| 10 | Chapter & Scene Blueprint | chapter_blueprint |
+| 11 | Style & Voice Specification | voice_specification |
+| 12 | Draft Generation | draft_generation |
+| 13 | Continuity & Logic Audit | continuity_audit |
+| 14 | Emotional Impact Validation | emotional_validation |
+| 15 | Originality & Legal Safety | originality_scan, plagiarism_audit, transformative_verification |
+| 16 | Rewrite & Revalidation | structural_rewrite, post_rewrite_scan |
+| 17 | Line & Copy Edit | line_edit |
+| 18 | Beta Reader Simulation | beta_simulation |
+| 19 | Final Quality Validation | final_validation |
+| 20 | Publishing Package | publishing_package, ip_clearance |
+
+### How It Works
+
+1. **Create a project** with your book idea, genre, and constraints
+2. **Agents execute in order**, each with gate criteria to pass
+3. **Each layer unlocks the next** when all agents pass their gates
+4. **Final output**: Publication-ready manuscript with blurb, metadata, and legal clearance
+
+### Gate System
+
+Every agent has:
+- **Gate Criteria**: What must be true to pass
+- **Fail Condition**: What causes rejection and retry
+
+Failed gates trigger retries (up to 3 attempts) or block progress until resolved.
 
 ## Quick Start
 
 ### Local Development
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run the API locally
 uvicorn api.index:app --reload --port 3000
-
-# Open http://localhost:3000 in your browser
 ```
 
 ### Deploy to Vercel
 
-1. **Install Vercel CLI** (if not already installed):
-   ```bash
-   npm install -g vercel
-   ```
+```bash
+vercel
+```
 
-2. **Login to Vercel**:
-   ```bash
-   vercel login
-   ```
-
-3. **Deploy**:
-   ```bash
-   vercel
-   ```
-
-4. **Make it Private** (in Vercel Dashboard):
-   - Go to your project settings
-   - Navigate to "Deployment Protection"
-   - Enable "Vercel Authentication" to make it private
+Password: `Blake2011@` (configurable via APP_PASSWORD env var)
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check |
-| `/api` | GET | API information |
-| `/api/process` | POST | Process a single book |
-| `/api/batch` | POST | Process multiple books |
-| `/api/genres` | GET | List valid genres |
-| `/api/languages` | GET | List valid language codes |
+### Authentication
+- `POST /api/auth/login` - Login with password
+- `POST /api/auth/logout` - Logout
+- `GET /api/auth/check` - Check auth status
 
-### Example Request
+### System
+- `GET /api/system/agents` - List all agents
+- `GET /api/system/layers` - List all layers
 
-```bash
-curl -X POST https://your-site.vercel.app/api/process \
-  -H "Content-Type: application/json" \
-  -d '{
-    "book": {
-      "title": "the great gatsby",
-      "author": "F. Scott Fitzgerald",
-      "isbn": "978-0743273565",
-      "publication_date": "1925",
-      "price": "$15.99",
-      "pages": "180",
-      "genre": ["fiction", "classic"],
-      "language": "en"
-    },
-    "options": {
-      "title_case": true,
-      "sanitize_output": true
-    }
-  }'
-```
-
-### Example Response
-
-```json
-{
-  "success": true,
-  "errors": [],
-  "warnings": [],
-  "data": {
-    "title": "The Great Gatsby",
-    "authors": ["F. Scott Fitzgerald"],
-    "isbn_10": null,
-    "isbn_13": "9780743273565",
-    "publication_date": "1925-01-01",
-    "publication_year": 1925,
-    "price": 15.99,
-    "price_formatted": "$15.99",
-    "pages": 180,
-    "genres": ["fiction", "classic"],
-    "language": "en",
-    "processed_at": "2024-01-15T10:30:00.000000Z",
-    "processor_version": "2.1.0"
-  }
-}
-```
-
-## Validation Rules
-
-| Field | Rules |
-|-------|-------|
-| Title | Required, 1-500 chars, warns on special characters |
-| Author | Required, 2-200 chars per author |
-| ISBN | Optional, validates ISBN-10/13 checksum |
-| Publication Date | Optional, multiple formats supported |
-| Price | Optional, cannot be negative |
-| Pages | Optional, must be positive integer |
-| Genre | Optional, warns on unknown genres |
-| Language | Optional, warns on unsupported codes |
+### Projects
+- `POST /api/projects` - Create new project
+- `GET /api/projects` - List all projects
+- `GET /api/projects/{id}` - Get project details
+- `GET /api/projects/{id}/available-agents` - Get agents ready to run
+- `POST /api/projects/{id}/execute/{agent}` - Run specific agent
+- `GET /api/projects/{id}/agent/{agent}/output` - Get agent output
+- `GET /api/projects/{id}/manuscript` - Export manuscript
 
 ## Project Structure
 
 ```
 Million-Dollar-Book-Machine/
 ├── api/
-│   └── index.py              # FastAPI serverless function
+│   └── index.py              # FastAPI endpoints
+├── core/
+│   └── orchestrator.py       # Central orchestrator
+├── agents/
+│   ├── strategic.py          # Layers 1-4 agents
+│   ├── story_system.py       # Layers 5-7 agents
+│   ├── structural.py         # Layers 8-12 agents
+│   └── validation.py         # Layers 13-20 agents
+├── models/
+│   ├── state.py              # State management
+│   └── agents.py             # Agent definitions
 ├── public/
 │   └── index.html            # Web interface
-├── book_processor_refactored.py  # Core processing logic
-├── test_book_processor.py    # Unit tests (73 tests)
-├── requirements.txt          # Python dependencies
-├── vercel.json              # Vercel configuration
+├── requirements.txt
+├── vercel.json
 └── README.md
 ```
 
-## Running Tests
+## Agent Details
 
-```bash
-pip install pytest
-pytest test_book_processor.py -v
+### Strategic Foundation (Layers 1-4)
+
+**Market Intelligence**: Analyzes market, defines reader avatar, identifies gaps
+**Concept Definition**: Creates one-line hook, core promise, unique engine
+**Thematic Architecture**: Designs theme, counter-theme, value conflicts
+**Story Question**: Defines central dramatic question and stakes ladder
+
+### Story System Design (Layers 5-7)
+
+**World Rules**: Physical, social, and power rules of the story world
+**Character Architecture**: Protagonist arc, antagonist, supporting cast
+**Relationship Dynamics**: Conflict web, power shifts, dependencies
+
+### Structural Engine (Layers 8-12)
+
+**Plot Structure**: Act structure, beats, reversals, climax design
+**Pacing Design**: Tension curve, scene density, breather points
+**Chapter Blueprint**: Detailed chapter-by-chapter outline with scenes
+**Voice Specification**: Narrative voice, POV rules, style guide
+**Draft Generation**: Produces actual manuscript chapters
+
+### Quality Control (Layers 13-20)
+
+**Continuity Audit**: Timeline, character logic, world rule compliance
+**Emotional Validation**: Arc fulfillment, emotional peak verification
+**Originality Scan**: Structural similarity, phrase recurrence checks
+**Plagiarism Audit**: Legal risk assessment
+**Transformative Verification**: Legal defensibility check
+**Structural Rewrite**: Prose improvement, flag resolution
+**Line Edit**: Grammar, rhythm, editorial polish
+**Beta Simulation**: Simulated reader response, engagement analysis
+**Final Validation**: Core promise fulfillment check
+**Publishing Package**: Blurb, synopsis, metadata, keywords
+**IP Clearance**: Title and naming safety verification
+
+## Connecting to LLM
+
+To enable actual content generation, provide an LLM client to the orchestrator:
+
+```python
+from core.orchestrator import Orchestrator
+from your_llm_client import LLMClient
+
+llm = LLMClient(api_key="your-key")
+orchestrator = Orchestrator(llm_client=llm)
 ```
+
+The system expects the LLM client to have a `.generate(prompt, response_format=None)` method.
 
 ## License
 
