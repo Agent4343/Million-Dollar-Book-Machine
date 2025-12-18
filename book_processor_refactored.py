@@ -5,32 +5,59 @@ This module handles book data processing, validation, and formatting
 using a clean, modular architecture with clear separation of concerns.
 """
 
+import html
+import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Any, Optional, Tuple
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+__all__ = [
+    "ProcessingResult",
+    "ValidationResult",
+    "BookProcessor",
+    "process_book_data",
+    "BookProcessingError",
+]
+
+
+# =============================================================================
+# Exceptions
+# =============================================================================
+
+class BookProcessingError(Exception):
+    """Base exception for book processing errors."""
+    pass
 
 
 # =============================================================================
 # Result Types
 # =============================================================================
 
-@dataclass
+@dataclass(frozen=True)
 class ProcessingResult:
     """Immutable result of book processing."""
     success: bool
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: Tuple[str, ...] = field(default_factory=tuple)
+    warnings: Tuple[str, ...] = field(default_factory=tuple)
     data: Optional[Dict[str, Any]] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ValidationResult:
-    """Result of a single validation check."""
+    """Immutable result of a single validation check."""
     is_valid: bool
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: Tuple[str, ...] = field(default_factory=tuple)
+    warnings: Tuple[str, ...] = field(default_factory=tuple)
 
 
 # =============================================================================
@@ -49,9 +76,16 @@ VALID_LANGUAGES = frozenset([
     "ar", "hi", "nl", "sv", "no", "da", "fi", "pl", "tr", "he"
 ])
 
-DATE_FORMATS = ["%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%m-%d-%Y", "%m/%d/%Y", "%Y"]
+DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%m-%d-%Y", "%m/%d/%Y", "%Y")
 
 TITLE_SMALL_WORDS = frozenset(["a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "of", "in"])
+
+# Pre-compiled regex patterns for performance
+TITLE_PATTERN = re.compile(r'^[a-zA-Z0-9\s\-\'\"\:\!\?\.\,]+$')
+PRICE_CLEANUP_PATTERN = re.compile(r'[$,\s]')
+
+# Tolerance for float comparisons
+PRICE_EPSILON = 0.001
 
 
 # =============================================================================
@@ -70,17 +104,27 @@ class Validator(ABC):
 class TitleValidator(Validator):
     """Validates book title field."""
 
+    MIN_LENGTH = 1
+    MAX_LENGTH = 500
+
     def validate(self, value: Any, book_data: Dict[str, Any]) -> ValidationResult:
-        errors, warnings = [], []
+        errors: List[str] = []
+        warnings: List[str] = []
 
         if not value:
             errors.append("Title is required")
-        elif len(value) > 500:
-            errors.append("Title must be less than 500 characters")
-        elif not re.match(r'^[a-zA-Z0-9\s\-\'\"\:\!\?\.\,]+$', value):
+        elif not isinstance(value, str):
+            errors.append("Title must be a string")
+        elif not value.strip():
+            errors.append("Title cannot be empty or whitespace only")
+        elif len(value) < self.MIN_LENGTH:
+            errors.append(f"Title must be at least {self.MIN_LENGTH} character")
+        elif len(value) > self.MAX_LENGTH:
+            errors.append(f"Title must be less than {self.MAX_LENGTH} characters")
+        elif not TITLE_PATTERN.match(value):
             warnings.append("Title contains special characters that may cause display issues")
 
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return ValidationResult(is_valid=len(errors) == 0, errors=tuple(errors), warnings=tuple(warnings))
 
 
 class AuthorValidator(Validator):
@@ -90,7 +134,8 @@ class AuthorValidator(Validator):
     MAX_LENGTH = 200
 
     def validate(self, value: Any, book_data: Dict[str, Any]) -> ValidationResult:
-        errors, warnings = [], []
+        errors: List[str] = []
+        warnings: List[str] = []
 
         if not value:
             errors.append("Author is required")
@@ -101,11 +146,14 @@ class AuthorValidator(Validator):
                 errors.append("At least one author is required")
             else:
                 for i, author in enumerate(value):
-                    self._validate_single_author(author, i, errors)
+                    if not isinstance(author, str):
+                        errors.append(f"Author {i + 1} must be a string")
+                    else:
+                        self._validate_single_author(author, i, errors)
         else:
             errors.append("Author must be a string or list of strings")
 
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return ValidationResult(is_valid=len(errors) == 0, errors=tuple(errors), warnings=tuple(warnings))
 
     def _validate_single_author(self, author: str, index: int, errors: List[str]) -> None:
         prefix = f"Author {index + 1} " if index > 0 else "Author "
@@ -122,8 +170,12 @@ class ISBNValidator(Validator):
         if not value:
             return ValidationResult(is_valid=True)
 
-        errors = []
-        isbn = str(value).replace("-", "").replace(" ", "")
+        errors: List[str] = []
+
+        try:
+            isbn = str(value).replace("-", "").replace(" ", "")
+        except (TypeError, ValueError):
+            return ValidationResult(is_valid=False, errors=("Invalid ISBN format",))
 
         if len(isbn) == 10:
             self._validate_isbn10(isbn, errors)
@@ -132,7 +184,7 @@ class ISBNValidator(Validator):
         else:
             errors.append("ISBN must be 10 or 13 characters")
 
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors)
+        return ValidationResult(is_valid=len(errors) == 0, errors=tuple(errors))
 
     def _validate_isbn10(self, isbn: str, errors: List[str]) -> None:
         total = 0
@@ -165,60 +217,71 @@ class DateValidator(Validator):
         if not value:
             return ValidationResult(is_valid=True)
 
-        warnings = []
+        warnings: List[str] = []
+
+        if not isinstance(value, str):
+            return ValidationResult(is_valid=False, errors=("Publication date must be a string",))
+
         parsed_date = parse_date(value)
 
         if parsed_date is None:
-            return ValidationResult(is_valid=False, errors=["Invalid publication date format"])
+            return ValidationResult(is_valid=False, errors=("Invalid publication date format",))
 
         if parsed_date > datetime.now():
             warnings.append("Publication date is in the future")
         elif parsed_date.year < 1450:
             warnings.append("Publication date is before the invention of the printing press")
 
-        return ValidationResult(is_valid=True, warnings=warnings)
+        return ValidationResult(is_valid=True, warnings=tuple(warnings))
 
 
 class PriceValidator(Validator):
     """Validates book price."""
 
+    MAX_PRICE = Decimal("10000")
+
     def validate(self, value: Any, book_data: Dict[str, Any]) -> ValidationResult:
         if value is None:
             return ValidationResult(is_valid=True)
 
-        errors, warnings = [], []
+        errors: List[str] = []
+        warnings: List[str] = []
         price = parse_price(value)
 
         if price is None:
             errors.append("Invalid price format")
         elif price < 0:
             errors.append("Price cannot be negative")
-        elif price > 10000:
+        elif price > self.MAX_PRICE:
             warnings.append("Price seems unusually high")
         elif price == 0:
             warnings.append("Book is marked as free")
 
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return ValidationResult(is_valid=len(errors) == 0, errors=tuple(errors), warnings=tuple(warnings))
 
 
 class PagesValidator(Validator):
     """Validates page count."""
 
+    MIN_PAGES = 1
+    MAX_PAGES = 50000
+
     def validate(self, value: Any, book_data: Dict[str, Any]) -> ValidationResult:
         if value is None:
             return ValidationResult(is_valid=True)
 
-        errors, warnings = [], []
+        errors: List[str] = []
+        warnings: List[str] = []
         pages = parse_int(value)
 
         if pages is None:
             errors.append("Pages must be a number")
-        elif pages < 1:
-            errors.append("Pages must be at least 1")
-        elif pages > 50000:
+        elif pages < self.MIN_PAGES:
+            errors.append(f"Pages must be at least {self.MIN_PAGES}")
+        elif pages > self.MAX_PAGES:
             warnings.append("Page count seems unusually high")
 
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return ValidationResult(is_valid=len(errors) == 0, errors=tuple(errors), warnings=tuple(warnings))
 
 
 class GenreValidator(Validator):
@@ -228,14 +291,23 @@ class GenreValidator(Validator):
         if not value:
             return ValidationResult(is_valid=True)
 
-        warnings = []
-        genres = [value] if isinstance(value, str) else value
+        errors: List[str] = []
+        warnings: List[str] = []
 
-        for genre in genres:
-            if genre.lower() not in VALID_GENRES:
+        if isinstance(value, str):
+            genres = [value]
+        elif isinstance(value, list):
+            genres = value
+        else:
+            return ValidationResult(is_valid=False, errors=("Genre must be a string or list of strings",))
+
+        for i, genre in enumerate(genres):
+            if not isinstance(genre, str):
+                errors.append(f"Genre {i + 1} must be a string")
+            elif genre.lower() not in VALID_GENRES:
                 warnings.append(f"Unknown genre: {genre}")
 
-        return ValidationResult(is_valid=True, warnings=warnings)
+        return ValidationResult(is_valid=len(errors) == 0, errors=tuple(errors), warnings=tuple(warnings))
 
 
 class LanguageValidator(Validator):
@@ -245,11 +317,14 @@ class LanguageValidator(Validator):
         if not value:
             return ValidationResult(is_valid=True)
 
-        warnings = []
+        if not isinstance(value, str):
+            return ValidationResult(is_valid=False, errors=("Language must be a string",))
+
+        warnings: List[str] = []
         if value.lower() not in VALID_LANGUAGES:
             warnings.append(f"Unsupported language code: {value}")
 
-        return ValidationResult(is_valid=True, warnings=warnings)
+        return ValidationResult(is_valid=True, warnings=tuple(warnings))
 
 
 # =============================================================================
@@ -257,7 +332,14 @@ class LanguageValidator(Validator):
 # =============================================================================
 
 def parse_date(date_str: str) -> Optional[datetime]:
-    """Parse a date string using multiple formats."""
+    """Parse a date string using multiple formats.
+
+    Args:
+        date_str: Date string to parse
+
+    Returns:
+        Parsed datetime or None if parsing fails
+    """
     for fmt in DATE_FORMATS:
         try:
             return datetime.strptime(date_str, fmt)
@@ -266,20 +348,39 @@ def parse_date(date_str: str) -> Optional[datetime]:
     return None
 
 
-def parse_price(value: Any) -> Optional[float]:
-    """Parse a price value from string or number."""
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.replace("$", "").replace(",", "").strip())
-        except ValueError:
-            return None
+def parse_price(value: Any) -> Optional[Decimal]:
+    """Parse a price value from string or number.
+
+    Uses Decimal for precise monetary calculations.
+
+    Args:
+        value: Price value (string, int, or float)
+
+    Returns:
+        Decimal price or None if parsing fails
+    """
+    try:
+        if isinstance(value, Decimal):
+            return value
+        if isinstance(value, (int, float)):
+            return Decimal(str(value))
+        if isinstance(value, str):
+            cleaned = PRICE_CLEANUP_PATTERN.sub('', value)
+            return Decimal(cleaned)
+    except (InvalidOperation, ValueError, TypeError):
+        return None
     return None
 
 
 def parse_int(value: Any) -> Optional[int]:
-    """Parse an integer value from string or number."""
+    """Parse an integer value from string or number.
+
+    Args:
+        value: Integer value (string or int)
+
+    Returns:
+        Integer or None if parsing fails
+    """
     if isinstance(value, int):
         return value
     if isinstance(value, str):
@@ -291,8 +392,18 @@ def parse_int(value: Any) -> Optional[int]:
 
 
 def format_title_case(title: str) -> str:
-    """Format a title using proper title case rules."""
+    """Format a title using proper title case rules.
+
+    Args:
+        title: Title string to format
+
+    Returns:
+        Title-cased string
+    """
     words = title.strip().split()
+    if not words:
+        return ""
+
     formatted = []
 
     for i, word in enumerate(words):
@@ -305,7 +416,14 @@ def format_title_case(title: str) -> str:
 
 
 def normalize_isbn(isbn: str) -> Tuple[Optional[str], Optional[str]]:
-    """Normalize ISBN and return (isbn_10, isbn_13) tuple."""
+    """Normalize ISBN and return (isbn_10, isbn_13) tuple.
+
+    Args:
+        isbn: ISBN string (may contain dashes/spaces)
+
+    Returns:
+        Tuple of (isbn_10, isbn_13) with None for the format not present
+    """
     clean = isbn.replace("-", "").replace(" ", "")
     if len(clean) == 10:
         return (clean, None)
@@ -314,14 +432,25 @@ def normalize_isbn(isbn: str) -> Tuple[Optional[str], Optional[str]]:
     return (None, None)
 
 
+def sanitize_text(text: str) -> str:
+    """Sanitize text to prevent XSS and injection attacks.
+
+    Args:
+        text: Text to sanitize
+
+    Returns:
+        HTML-escaped text
+    """
+    return html.escape(text)
+
+
 # =============================================================================
 # Book Processor
 # =============================================================================
 
-class BookProcessor:
-    """Processes book data with validation and formatting."""
-
-    DEFAULT_VALIDATORS = {
+def _create_default_validators() -> Dict[str, Validator]:
+    """Factory function to create fresh validator instances."""
+    return {
         "title": TitleValidator(),
         "author": AuthorValidator(),
         "isbn": ISBNValidator(),
@@ -332,49 +461,102 @@ class BookProcessor:
         "language": LanguageValidator(),
     }
 
+
+class BookProcessor:
+    """Processes book data with validation and formatting.
+
+    Example:
+        >>> processor = BookProcessor()
+        >>> result = processor.process({"title": "My Book", "author": "John Doe"})
+        >>> if result.success:
+        ...     print(result.data)
+    """
+
     def __init__(self, options: Optional[Dict[str, Any]] = None):
+        """Initialize the processor with optional configuration.
+
+        Args:
+            options: Configuration options including:
+                - title_case (bool): Apply title case formatting (default: True)
+                - truncate_description (bool): Truncate long descriptions
+                - description_max_length (int): Max description length (default: 500)
+                - sanitize_output (bool): HTML-escape text fields (default: True)
+        """
         self.options = options or {}
-        self.validators = self.DEFAULT_VALIDATORS.copy()
+        self.validators = _create_default_validators()
+        logger.debug("BookProcessor initialized with options: %s", self.options)
 
     def process(self, book_data: Dict[str, Any]) -> ProcessingResult:
-        """Process book data through validation and formatting pipeline."""
+        """Process book data through validation and formatting pipeline.
+
+        Args:
+            book_data: Dictionary containing book information
+
+        Returns:
+            ProcessingResult with success status, errors, warnings, and processed data
+        """
+        logger.info("Processing book data")
+
         if not book_data:
-            return ProcessingResult(success=False, errors=["Book data is required"])
+            logger.warning("Empty book data received")
+            return ProcessingResult(success=False, errors=("Book data is required",))
+
+        if not isinstance(book_data, dict):
+            logger.error("Invalid book data type: %s", type(book_data))
+            return ProcessingResult(success=False, errors=("Book data must be a dictionary",))
 
         # Run validation
         all_errors, all_warnings = self._validate(book_data)
 
         if all_errors:
-            return ProcessingResult(success=False, errors=all_errors, warnings=all_warnings)
+            logger.warning("Validation failed with %d errors", len(all_errors))
+            return ProcessingResult(success=False, errors=tuple(all_errors), warnings=tuple(all_warnings))
 
         # Format and enrich data
-        processed = self._format(book_data)
+        try:
+            processed = self._format(book_data)
+        except Exception as e:
+            logger.exception("Error during formatting: %s", e)
+            return ProcessingResult(success=False, errors=(f"Formatting error: {str(e)}",))
 
-        return ProcessingResult(success=True, errors=[], warnings=all_warnings, data=processed)
+        logger.info("Book processing completed successfully")
+        return ProcessingResult(success=True, errors=(), warnings=tuple(all_warnings), data=processed)
 
     def _validate(self, book_data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         """Run all validators and collect errors/warnings."""
-        all_errors, all_warnings = [], []
+        all_errors: List[str] = []
+        all_warnings: List[str] = []
 
         for field_name, validator in self.validators.items():
             value = book_data.get(field_name)
-            result = validator.validate(value, book_data)
-            all_errors.extend(result.errors)
-            all_warnings.extend(result.warnings)
+            try:
+                result = validator.validate(value, book_data)
+                all_errors.extend(result.errors)
+                all_warnings.extend(result.warnings)
+            except Exception as e:
+                logger.exception("Validator %s raised exception: %s", field_name, e)
+                all_errors.append(f"Validation error for {field_name}: {str(e)}")
 
         return all_errors, all_warnings
 
     def _format(self, book_data: Dict[str, Any]) -> Dict[str, Any]:
         """Format and enrich validated book data."""
-        processed = {}
+        processed: Dict[str, Any] = {}
+        sanitize = self.options.get("sanitize_output", True)
 
         # Title
         title = book_data["title"].strip()
-        processed["title"] = format_title_case(title) if self.options.get("title_case", True) else title
+        if self.options.get("title_case", True):
+            title = format_title_case(title)
+        processed["title"] = sanitize_text(title) if sanitize else title
 
         # Authors
         author = book_data["author"]
-        processed["authors"] = [author.strip()] if isinstance(author, str) else [a.strip() for a in author]
+        if isinstance(author, str):
+            authors = [author.strip()]
+        else:
+            authors = [a.strip() for a in author]
+        processed["authors"] = [sanitize_text(a) if sanitize else a for a in authors]
 
         # ISBN
         if book_data.get("isbn"):
@@ -387,12 +569,12 @@ class BookProcessor:
                 processed["publication_date"] = parsed.strftime("%Y-%m-%d")
                 processed["publication_year"] = parsed.year
 
-        # Price
+        # Price - use Decimal for precision
         if "price" in book_data:
             price = parse_price(book_data["price"])
             if price is not None:
-                processed["price"] = round(price, 2)
-                processed["price_formatted"] = f"${price:.2f}"
+                processed["price"] = float(round(price, 2))
+                processed["price_formatted"] = f"${processed['price']:.2f}"
 
         # Pages
         if "pages" in book_data:
@@ -403,7 +585,10 @@ class BookProcessor:
         # Genres
         if book_data.get("genre"):
             genre = book_data["genre"]
-            processed["genres"] = [genre.lower()] if isinstance(genre, str) else [g.lower() for g in genre]
+            if isinstance(genre, str):
+                processed["genres"] = [genre.lower()]
+            else:
+                processed["genres"] = [g.lower() for g in genre if isinstance(g, str)]
 
         # Language
         if book_data.get("language"):
@@ -411,11 +596,12 @@ class BookProcessor:
 
         # Description
         if book_data.get("description"):
-            processed["description"] = self._format_description(book_data["description"])
+            desc = self._format_description(book_data["description"])
+            processed["description"] = sanitize_text(desc) if sanitize else desc
 
         # Metadata
-        processed["processed_at"] = datetime.now().isoformat()
-        processed["processor_version"] = "2.0.0"
+        processed["processed_at"] = datetime.utcnow().isoformat() + "Z"
+        processed["processor_version"] = "2.1.0"
 
         return processed
 
@@ -436,23 +622,32 @@ class BookProcessor:
 # =============================================================================
 
 def process_book_data(book_data: Dict[str, Any], options: Optional[Dict] = None) -> Dict[str, Any]:
-    """
-    Process book data with validation, formatting, and enrichment.
+    """Process book data with validation, formatting, and enrichment.
 
     This is a backwards-compatible wrapper around the BookProcessor class.
+
+    Args:
+        book_data: Dictionary containing book information
+        options: Optional processing configuration
+
+    Returns:
+        Dictionary with success, errors, warnings, and data fields
     """
     processor = BookProcessor(options)
     result = processor.process(book_data)
 
     return {
         "success": result.success,
-        "errors": result.errors,
-        "warnings": result.warnings,
+        "errors": list(result.errors),
+        "warnings": list(result.warnings),
         "data": result.data,
     }
 
 
 if __name__ == "__main__":
+    # Configure logging for demo
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
     # Example usage
     sample_book = {
         "title": "the great gatsby",
