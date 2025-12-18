@@ -403,3 +403,113 @@ async def save_checkpoint(project_id: str, name: str = "checkpoint", auth: bool 
 
     project.save_checkpoint(name)
     return {"success": True, "checkpoint": name, "total_checkpoints": len(project.checkpoints)}
+
+
+@app.get("/api/projects/{project_id}/export")
+async def export_project(project_id: str, auth: bool = Depends(require_auth)):
+    """Export full project state as JSON for saving."""
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Serialize the entire project state
+    export_data = {
+        "version": "1.0",
+        "project_id": project.project_id,
+        "title": project.title,
+        "status": project.status,
+        "current_layer": project.current_layer,
+        "user_constraints": project.user_constraints,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+        "manuscript": project.manuscript,
+        "layers": {}
+    }
+
+    # Export each layer and agent state
+    for layer_id, layer in project.layers.items():
+        export_data["layers"][str(layer_id)] = {
+            "name": layer.name,
+            "status": layer.status.value,
+            "agents": {}
+        }
+        for agent_id, agent_state in layer.agents.items():
+            agent_export = {
+                "status": agent_state.status.value,
+                "attempts": agent_state.attempts,
+                "output": None
+            }
+            if agent_state.current_output:
+                agent_export["output"] = {
+                    "content": agent_state.current_output.content,
+                    "gate_passed": agent_state.current_output.gate_result.passed if agent_state.current_output.gate_result else None,
+                    "gate_message": agent_state.current_output.gate_result.message if agent_state.current_output.gate_result else None
+                }
+            export_data["layers"][str(layer_id)]["agents"][agent_id] = agent_export
+
+    return export_data
+
+
+class ProjectImport(BaseModel):
+    version: str
+    project_id: str
+    title: str
+    status: str
+    current_layer: int
+    user_constraints: Dict[str, Any]
+    created_at: str
+    updated_at: str
+    manuscript: Dict[str, Any]
+    layers: Dict[str, Any]
+
+
+@app.post("/api/projects/import")
+async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)):
+    """Import a previously exported project."""
+    from models.state import LayerState, AgentState, AgentStatus, LayerStatus, AgentOutput, GateResult
+
+    # Create base project
+    project = orchestrator.create_project(data.title, data.user_constraints)
+
+    # Override with imported data
+    project.project_id = data.project_id
+    project.status = data.status
+    project.current_layer = data.current_layer
+    project.created_at = data.created_at
+    project.updated_at = data.updated_at
+    project.manuscript = data.manuscript
+
+    # Restore layer and agent states
+    for layer_id_str, layer_data in data.layers.items():
+        layer_id = int(layer_id_str)
+        if layer_id in project.layers:
+            project.layers[layer_id].status = LayerStatus(layer_data["status"])
+
+            for agent_id, agent_data in layer_data["agents"].items():
+                if agent_id in project.layers[layer_id].agents:
+                    agent_state = project.layers[layer_id].agents[agent_id]
+                    agent_state.status = AgentStatus(agent_data["status"])
+                    agent_state.attempts = agent_data.get("attempts", 0)
+
+                    if agent_data.get("output"):
+                        output_data = agent_data["output"]
+                        gate_result = None
+                        if output_data.get("gate_passed") is not None:
+                            gate_result = GateResult(
+                                passed=output_data["gate_passed"],
+                                message=output_data.get("gate_message", "")
+                            )
+                        agent_state.current_output = AgentOutput(
+                            content=output_data["content"],
+                            gate_result=gate_result
+                        )
+
+    # Re-register in orchestrator with original ID
+    orchestrator.projects[data.project_id] = project
+
+    return {
+        "success": True,
+        "project_id": project.project_id,
+        "title": project.title,
+        "message": "Project imported successfully"
+    }

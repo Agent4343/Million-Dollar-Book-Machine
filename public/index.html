@@ -239,6 +239,30 @@
             margin-right: 0.5rem;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Save/Load Buttons */
+        .btn-save { background: linear-gradient(90deg, #3498db, #2980b9); color: #fff; }
+        .btn-load { background: rgba(52,152,219,0.2); color: #3498db; border: 1px solid #3498db; }
+        .file-input-hidden { display: none; }
+        .save-load-section {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .auto-save-indicator {
+            font-size: 0.75rem;
+            color: #2ecc71;
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .auto-save-indicator::before {
+            content: "●";
+            font-size: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -275,6 +299,16 @@
                 <div class="card">
                     <h2>Your Projects</h2>
                     <div id="projectsList"></div>
+                    <div class="save-load-section">
+                        <button class="btn btn-load btn-small" onclick="document.getElementById('importFile').click()">
+                            Import Project
+                        </button>
+                        <input type="file" id="importFile" class="file-input-hidden" accept=".json" onchange="importProject(event)">
+                        <button class="btn btn-secondary btn-small" onclick="restoreFromLocalStorage()">
+                            Restore from Browser
+                        </button>
+                        <span class="auto-save-indicator" id="autoSaveStatus">Auto-save enabled</span>
+                    </div>
                 </div>
             </div>
 
@@ -372,6 +406,7 @@
                             <div style="margin-top:1rem;">
                                 <button class="btn btn-primary btn-small" id="runNextBtn" onclick="runNextAgent()">Run Next Agent</button>
                                 <button class="btn btn-secondary btn-small" id="runAvailableBtn" onclick="runAllAvailable()">Run All Available</button>
+                                <button class="btn btn-save btn-small" onclick="exportProject()">Save Project</button>
                             </div>
                         </div>
                         <div class="card">
@@ -672,6 +707,178 @@
                 showTab('pipeline');
             }
         });
+
+        // =================================================================
+        // Save/Load Functions
+        // =================================================================
+
+        const STORAGE_KEY = 'million_dollar_book_projects';
+
+        async function exportProject() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/export`, {credentials: 'include'});
+                if (!res.ok) throw new Error('Export failed');
+
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${data.title.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                // Also save to localStorage
+                saveToLocalStorage(data);
+            } catch (error) {
+                console.error('Export error:', error);
+                alert('Failed to export project');
+            }
+        }
+
+        async function importProject(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                const res = await fetch('/api/projects/import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: text
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Import failed');
+                }
+
+                const result = await res.json();
+                currentProject = result.project_id;
+                await loadProjects();
+                await loadProjectPipeline();
+                showTab('pipeline');
+                alert(`Project "${result.title}" imported successfully!`);
+            } catch (error) {
+                console.error('Import error:', error);
+                alert('Failed to import project: ' + error.message);
+            }
+
+            // Reset file input
+            event.target.value = '';
+        }
+
+        function saveToLocalStorage(projectData) {
+            try {
+                let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                saved[projectData.project_id] = {
+                    ...projectData,
+                    saved_at: new Date().toISOString()
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+                updateAutoSaveStatus('Saved');
+            } catch (error) {
+                console.error('LocalStorage save error:', error);
+            }
+        }
+
+        function getLocalStorageProjects() {
+            try {
+                return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            } catch {
+                return {};
+            }
+        }
+
+        async function restoreFromLocalStorage() {
+            const saved = getLocalStorageProjects();
+            const projects = Object.values(saved);
+
+            if (projects.length === 0) {
+                alert('No saved projects found in browser storage');
+                return;
+            }
+
+            // Show list of saved projects
+            const choices = projects.map((p, i) =>
+                `${i + 1}. ${p.title} (saved: ${new Date(p.saved_at).toLocaleString()})`
+            ).join('\n');
+
+            const choice = prompt(`Select a project to restore:\n\n${choices}\n\nEnter number:`);
+            if (!choice) return;
+
+            const index = parseInt(choice) - 1;
+            if (index < 0 || index >= projects.length) {
+                alert('Invalid selection');
+                return;
+            }
+
+            const project = projects[index];
+
+            try {
+                const res = await fetch('/api/projects/import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(project)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Restore failed');
+                }
+
+                const result = await res.json();
+                currentProject = result.project_id;
+                await loadProjects();
+                await loadProjectPipeline();
+                showTab('pipeline');
+                alert(`Project "${result.title}" restored successfully!`);
+            } catch (error) {
+                console.error('Restore error:', error);
+                alert('Failed to restore project: ' + error.message);
+            }
+        }
+
+        function updateAutoSaveStatus(status) {
+            const el = document.getElementById('autoSaveStatus');
+            if (el) {
+                el.textContent = status;
+                setTimeout(() => {
+                    el.textContent = 'Auto-save enabled';
+                }, 2000);
+            }
+        }
+
+        // Auto-save after each agent execution
+        const originalLoadProjectPipeline = loadProjectPipeline;
+        loadProjectPipeline = async function() {
+            await originalLoadProjectPipeline();
+
+            // Auto-save to localStorage after loading
+            if (currentProject && projectData) {
+                try {
+                    const res = await fetch(`/api/projects/${currentProject}/export`, {credentials: 'include'});
+                    if (res.ok) {
+                        const data = await res.json();
+                        saveToLocalStorage(data);
+                    }
+                } catch (error) {
+                    console.error('Auto-save error:', error);
+                }
+            }
+        };
 
         checkAuth();
     </script>
