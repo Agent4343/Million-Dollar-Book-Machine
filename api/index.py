@@ -6,6 +6,7 @@ Multi-agent system for developing books from concept to publication.
 
 import hashlib
 import hmac
+import io
 import os
 import sys
 import time
@@ -13,6 +14,7 @@ import json
 from typing import Optional, List, Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -661,6 +663,84 @@ async def export_full_manuscript(project_id: str, auth: bool = Depends(require_a
         "format": "markdown",
         "filename": f"{project.title.replace(' ', '_')}_Manuscript.md",
         "content": markdown
+    }
+
+
+@app.get("/api/projects/{project_id}/export/docx")
+async def export_docx(project_id: str, include_outline: bool = False, auth: bool = Depends(require_auth)):
+    """Export manuscript as Word document (.docx)."""
+    from core.export import generate_docx
+
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        docx_bytes = generate_docx(project, include_outline=include_outline)
+        filename = f"{project.title.replace(' ', '_')}.docx"
+
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="python-docx not installed. Please install it with: pip install python-docx"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate Word document: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}/export/epub")
+async def export_epub(project_id: str, auth: bool = Depends(require_auth)):
+    """Export manuscript as EPUB for Kindle/eReaders."""
+    from core.export import generate_epub
+
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        epub_bytes = generate_epub(project)
+        filename = f"{project.title.replace(' ', '_')}.epub"
+
+        return StreamingResponse(
+            io.BytesIO(epub_bytes),
+            media_type="application/epub+zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="ebooklib not installed. Please install it with: pip install ebooklib"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate EPUB: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}/stats")
+async def get_project_stats(project_id: str, auth: bool = Depends(require_auth)):
+    """Get project statistics including word count and chapter status."""
+    from core.export import get_word_count, get_chapter_summary
+
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    chapters = get_chapter_summary(project)
+    total_words = get_word_count(project)
+    target_words = project.user_constraints.get('target_word_count', 80000)
+
+    return {
+        "title": project.title,
+        "total_chapters": len(chapters),
+        "written_chapters": sum(1 for ch in chapters if ch['written']),
+        "total_words": total_words,
+        "target_words": target_words,
+        "progress_percent": round((total_words / target_words) * 100, 1) if target_words > 0 else 0,
+        "chapters": chapters
     }
 
 

@@ -464,10 +464,14 @@
                             <!-- Export Section -->
                             <div class="export-section">
                                 <h3>Export Documents</h3>
+                                <p style="font-size:0.85rem;color:#888;margin-bottom:0.75rem;">Download your book in different formats</p>
                                 <div class="export-buttons">
-                                    <button class="btn btn-export btn-small" onclick="exportOutline()">Download Outline (MD)</button>
-                                    <button class="btn btn-export btn-small" onclick="exportManuscript()">Download Manuscript (MD)</button>
+                                    <button class="btn btn-export btn-small" onclick="exportDocx()">Word Document (.docx)</button>
+                                    <button class="btn btn-export btn-small" onclick="exportEpub()">Kindle/EPUB (.epub)</button>
+                                    <button class="btn btn-secondary btn-small" onclick="exportOutline()">Outline (MD)</button>
+                                    <button class="btn btn-secondary btn-small" onclick="exportManuscript()">Manuscript (MD)</button>
                                 </div>
+                                <p id="exportStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></p>
                             </div>
 
                             <!-- Chapter Writer Section -->
@@ -1082,6 +1086,90 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        async function exportDocx() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            const statusEl = document.getElementById('exportStatus');
+            statusEl.textContent = 'Generating Word document...';
+
+            try {
+                // Ensure project exists on server
+                if (!await ensureProjectOnServer(currentProject)) {
+                    throw new Error('Project not found on server');
+                }
+
+                const res = await fetch(`/api/projects/${currentProject}/export/docx`, {credentials: 'include'});
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Export failed');
+                }
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const filename = (projectData?.title || 'Book').replace(/[^a-z0-9]/gi, '_') + '.docx';
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                statusEl.textContent = 'Word document downloaded!';
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            } catch (error) {
+                console.error('Export DOCX error:', error);
+                statusEl.textContent = 'Error: ' + error.message;
+                alert('Failed to export Word document: ' + error.message);
+            }
+        }
+
+        async function exportEpub() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            const statusEl = document.getElementById('exportStatus');
+            statusEl.textContent = 'Generating EPUB for Kindle...';
+
+            try {
+                // Ensure project exists on server
+                if (!await ensureProjectOnServer(currentProject)) {
+                    throw new Error('Project not found on server');
+                }
+
+                const res = await fetch(`/api/projects/${currentProject}/export/epub`, {credentials: 'include'});
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Export failed');
+                }
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const filename = (projectData?.title || 'Book').replace(/[^a-z0-9]/gi, '_') + '.epub';
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                statusEl.textContent = 'EPUB downloaded! Ready for Kindle.';
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            } catch (error) {
+                console.error('Export EPUB error:', error);
+                statusEl.textContent = 'Error: ' + error.message;
+                alert('Failed to export EPUB: ' + error.message);
+            }
         }
 
         // =================================================================
