@@ -81,23 +81,96 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     # Page break after title
     doc.add_page_break()
 
-    # === Table of Contents placeholder ===
+    # Get all agent outputs for use throughout document
+    outputs = {}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                outputs[agent_id] = agent_state.current_output.content
+
+    # === Table of Contents ===
     toc_heading = doc.add_heading('Table of Contents', level=1)
 
     chapters = project.manuscript.get('chapters', [])
-    if chapters:
+
+    # If no written chapters, use chapter blueprint for TOC
+    if not chapters and 'chapter_blueprint' in outputs:
+        blueprint = outputs['chapter_blueprint']
+        chapter_outline = blueprint.get('chapter_outline', [])
+        for ch in chapter_outline:
+            ch_num = ch.get('number', '?')
+            ch_title = ch.get('title', f'Chapter {ch_num}')
+            toc_entry = doc.add_paragraph(f"Chapter {ch_num}: {ch_title}")
+            toc_entry.paragraph_format.left_indent = Inches(0.5)
+    elif chapters:
         for chapter in sorted(chapters, key=lambda x: x.get('number', 0)):
             ch_num = chapter.get('number', '?')
             ch_title = chapter.get('title', f'Chapter {ch_num}')
             toc_entry = doc.add_paragraph(f"Chapter {ch_num}: {ch_title}")
             toc_entry.paragraph_format.left_indent = Inches(0.5)
     else:
-        doc.add_paragraph("No chapters written yet.")
+        doc.add_paragraph("No chapters planned yet. Run the pipeline first.")
 
     doc.add_page_break()
 
+    # === Core Concept Section (always include if available) ===
+    if 'concept_definition' in outputs:
+        cd = outputs['concept_definition']
+        doc.add_heading("Book Concept", level=1)
+
+        if cd.get('one_line_hook'):
+            hook_para = doc.add_paragraph()
+            hook_para.add_run("Hook: ").bold = True
+            hook_para.add_run(cd['one_line_hook'])
+
+        if cd.get('elevator_pitch'):
+            doc.add_paragraph()
+            pitch_para = doc.add_paragraph()
+            pitch_para.add_run("Elevator Pitch: ").bold = True
+            doc.add_paragraph(cd['elevator_pitch'])
+
+        if cd.get('core_promise'):
+            cp = cd['core_promise']
+            doc.add_paragraph()
+            doc.add_paragraph(f"Transformation: {cp.get('transformation', 'N/A')}")
+            doc.add_paragraph(f"Emotional Payoff: {cp.get('emotional_payoff', 'N/A')}")
+
+        doc.add_page_break()
+
+    # === Character Section (always include if available) ===
+    if 'character_architecture' in outputs:
+        ca = outputs['character_architecture']
+        doc.add_heading("Characters", level=1)
+
+        if ca.get('protagonist_profile'):
+            pp = ca['protagonist_profile']
+            doc.add_heading("Protagonist", level=2)
+            doc.add_paragraph(f"Name: {pp.get('name', 'Unknown')}")
+            doc.add_paragraph(f"Role: {pp.get('role', 'N/A')}")
+            if pp.get('traits'):
+                doc.add_paragraph(f"Traits: {', '.join(pp['traits'])}")
+            if pp.get('backstory_wound'):
+                doc.add_paragraph(f"Wound: {pp.get('backstory_wound')}")
+
+        if ca.get('protagonist_arc'):
+            pa = ca['protagonist_arc']
+            doc.add_heading("Character Arc", level=2)
+            doc.add_paragraph(f"Starting State: {pa.get('starting_state', 'N/A')}")
+            doc.add_paragraph(f"Transformation: {pa.get('transformation', 'N/A')}")
+            doc.add_paragraph(f"Ending State: {pa.get('ending_state', 'N/A')}")
+
+        if ca.get('supporting_cast'):
+            doc.add_heading("Supporting Cast", level=2)
+            for char in ca['supporting_cast'][:5]:
+                doc.add_paragraph(f"• {char.get('name', '?')}: {char.get('function', 'N/A')}")
+
+        doc.add_page_break()
+
     # === Chapters ===
     if chapters:
+        doc.add_heading("Manuscript", level=1)
+        doc.add_page_break()
+
         for chapter in sorted(chapters, key=lambda x: x.get('number', 0)):
             ch_num = chapter.get('number', '?')
             ch_title = chapter.get('title', f'Chapter {ch_num}')
@@ -126,39 +199,52 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
 
             # Page break between chapters
             doc.add_page_break()
+
+    # === Chapter Blueprint (if no written chapters) ===
+    elif 'chapter_blueprint' in outputs:
+        doc.add_heading("Chapter Outline", level=1)
+        doc.add_paragraph("Note: Use the Chapter Writer to generate full prose for each chapter.")
+        doc.add_paragraph()
+
+        blueprint = outputs['chapter_blueprint']
+        chapter_outline = blueprint.get('chapter_outline', [])
+
+        for ch in chapter_outline:
+            ch_num = ch.get('number', '?')
+            ch_title = ch.get('title', f'Chapter {ch_num}')
+
+            doc.add_heading(f"Chapter {ch_num}: {ch_title}", level=2)
+
+            if ch.get('chapter_goal'):
+                goal_para = doc.add_paragraph()
+                goal_para.add_run("Goal: ").bold = True
+                goal_para.add_run(ch['chapter_goal'])
+
+            if ch.get('opening_hook'):
+                hook_para = doc.add_paragraph()
+                hook_para.add_run("Opening: ").bold = True
+                hook_para.add_run(ch['opening_hook'])
+
+            if ch.get('closing_hook'):
+                close_para = doc.add_paragraph()
+                close_para.add_run("Closing: ").bold = True
+                close_para.add_run(ch['closing_hook'])
+
+            # Scenes
+            if ch.get('scenes'):
+                doc.add_paragraph()
+                scenes_para = doc.add_paragraph()
+                scenes_para.add_run("Scenes:").bold = True
+                for scene in ch['scenes']:
+                    doc.add_paragraph(
+                        f"  {scene.get('scene_number', '?')}. {scene.get('scene_question', 'Scene')} "
+                        f"[{scene.get('location', 'Location')}]"
+                    )
+
+            doc.add_paragraph()
     else:
-        doc.add_paragraph("No chapters have been written yet.")
-        doc.add_paragraph("Use the Chapter Writer to generate content from your outline.")
-
-    # === Optional Outline Section ===
-    if include_outline:
-        doc.add_page_break()
-        doc.add_heading("Development Outline", level=1)
-
-        # Get agent outputs
-        outputs = {}
-        for layer in project.layers.values():
-            for agent_id, agent_state in layer.agents.items():
-                if agent_state.current_output:
-                    outputs[agent_id] = agent_state.current_output.content
-
-        # Core concept
-        if 'concept_definition' in outputs:
-            cd = outputs['concept_definition']
-            doc.add_heading("Core Concept", level=2)
-            if cd.get('one_line_hook'):
-                doc.add_paragraph(f"Hook: {cd['one_line_hook']}")
-            if cd.get('elevator_pitch'):
-                doc.add_paragraph(cd['elevator_pitch'])
-
-        # Character info
-        if 'character_architecture' in outputs:
-            ca = outputs['character_architecture']
-            doc.add_heading("Characters", level=2)
-            if ca.get('protagonist_profile'):
-                pp = ca['protagonist_profile']
-                doc.add_paragraph(f"Protagonist: {pp.get('name', 'Unknown')}")
-                doc.add_paragraph(f"Role: {pp.get('role', 'N/A')}")
+        doc.add_heading("No Content Yet", level=1)
+        doc.add_paragraph("Run the pipeline to generate your book outline, then use the Chapter Writer to create full chapters.")
 
     # Save to bytes
     buffer = io.BytesIO()
