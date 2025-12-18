@@ -62,11 +62,32 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
 SESSION_DURATION = 60 * 60 * 24 * 7
 
-# Initialize LLM client (uses ANTHROPIC_API_KEY env var)
-llm_client = create_llm_client()
+# Lazy initialization for LLM client (Vercel env vars may not be ready at import time)
+_llm_client = None
+_orchestrator = None
 
-# Global orchestrator instance with LLM
-orchestrator = Orchestrator(llm_client=llm_client)
+def get_llm_client():
+    """Get or create LLM client with lazy initialization."""
+    global _llm_client
+    if _llm_client is None:
+        # Check for API key at request time, not import time
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            _llm_client = create_llm_client(api_key=api_key)
+    return _llm_client
+
+def get_orchestrator():
+    """Get or create orchestrator with lazy initialization."""
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = Orchestrator(llm_client=get_llm_client())
+        # Register all agent executors
+        for agent_id, executor in ALL_EXECUTORS.items():
+            _orchestrator.register_executor(agent_id, executor)
+    # Update LLM client in case it wasn't available before
+    if _orchestrator.llm_client is None:
+        _orchestrator.llm_client = get_llm_client()
+    return _orchestrator
 
 # Register all agent executors
 ALL_EXECUTORS = {
@@ -75,9 +96,6 @@ ALL_EXECUTORS = {
     **STRUCTURAL_EXECUTORS,
     **VALIDATION_EXECUTORS,
 }
-
-for agent_id, executor in ALL_EXECUTORS.items():
-    orchestrator.register_executor(agent_id, executor)
 
 
 def create_session_token(timestamp: int) -> str:
@@ -176,22 +194,26 @@ async def root():
         "description": "AI-powered book development system",
         "total_agents": len(AGENT_REGISTRY),
         "total_layers": len(LAYERS),
-        "llm_enabled": llm_client is not None
+        "llm_enabled": get_llm_client() is not None
     }
 
 
 @app.get("/api/system/llm-status")
 async def llm_status(auth: bool = Depends(require_auth)):
     """Check LLM configuration status."""
-    if llm_client is None:
+    client = get_llm_client()
+    if client is None:
+        # Also check if env var exists but client creation failed
+        has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
         return {
             "enabled": False,
             "model": None,
-            "message": "No ANTHROPIC_API_KEY configured. Running in demo mode with placeholder responses."
+            "has_env_var": has_key,
+            "message": "No ANTHROPIC_API_KEY configured. Running in demo mode with placeholder responses." if not has_key else "API key found but client initialization failed."
         }
     return {
         "enabled": True,
-        "model": llm_client.model,
+        "model": client.model,
         "message": "Claude API configured and ready"
     }
 
@@ -247,7 +269,7 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
     if request.additional_constraints:
         constraints.update(request.additional_constraints)
 
-    project = orchestrator.create_project(request.title, constraints)
+    project = get_orchestrator().create_project(request.title, constraints)
 
     return {
         "success": True,
@@ -261,7 +283,7 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
 async def list_projects(auth: bool = Depends(require_auth)):
     """List all projects."""
     projects = []
-    for pid, project in orchestrator.projects.items():
+    for pid, project in get_orchestrator().projects.items():
         projects.append({
             "project_id": project.project_id,
             "title": project.title,
@@ -276,20 +298,20 @@ async def list_projects(auth: bool = Depends(require_auth)):
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: str, auth: bool = Depends(require_auth)):
     """Get project details."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return orchestrator.get_project_status(project)
+    return get_orchestrator().get_project_status(project)
 
 
 @app.get("/api/projects/{project_id}/available-agents")
 async def get_available_agents(project_id: str, auth: bool = Depends(require_auth)):
     """Get agents ready to execute."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    available = orchestrator.get_available_agents(project)
+    available = get_orchestrator().get_available_agents(project)
 
     agents = []
     for agent_id in available:
@@ -308,19 +330,19 @@ async def get_available_agents(project_id: str, auth: bool = Depends(require_aut
 @app.post("/api/projects/{project_id}/execute/{agent_id}")
 async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
     """Execute a specific agent."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     if agent_id not in AGENT_REGISTRY:
         raise HTTPException(status_code=400, detail=f"Unknown agent: {agent_id}")
 
-    available = orchestrator.get_available_agents(project)
+    available = get_orchestrator().get_available_agents(project)
     if agent_id not in available:
         raise HTTPException(status_code=400, detail=f"Agent {agent_id} is not available (dependencies not met)")
 
     try:
-        output = await orchestrator.execute_agent(project, agent_id)
+        output = await get_orchestrator().execute_agent(project, agent_id)
         return {
             "success": True,
             "agent_id": agent_id,
@@ -335,18 +357,18 @@ async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(req
 @app.post("/api/projects/{project_id}/run-layer/{layer_id}")
 async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require_auth)):
     """Run all agents in a layer."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     results = []
-    available = orchestrator.get_available_agents(project)
+    available = get_orchestrator().get_available_agents(project)
 
     for agent_id in available:
         agent_def = AGENT_REGISTRY.get(agent_id)
         if agent_def and agent_def.layer == layer_id:
             try:
-                output = await orchestrator.execute_agent(project, agent_id)
+                output = await get_orchestrator().execute_agent(project, agent_id)
                 results.append({
                     "agent_id": agent_id,
                     "success": output.gate_result.passed if output.gate_result else False,
@@ -365,7 +387,7 @@ async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require
 @app.get("/api/projects/{project_id}/agent/{agent_id}/output")
 async def get_agent_output(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
     """Get the output from a specific agent."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -394,17 +416,17 @@ async def get_agent_output(project_id: str, agent_id: str, auth: bool = Depends(
 @app.get("/api/projects/{project_id}/manuscript")
 async def get_manuscript(project_id: str, auth: bool = Depends(require_auth)):
     """Export the manuscript."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    return orchestrator.export_manuscript(project)
+    return get_orchestrator().export_manuscript(project)
 
 
 @app.post("/api/projects/{project_id}/checkpoint")
 async def save_checkpoint(project_id: str, name: str = "checkpoint", auth: bool = Depends(require_auth)):
     """Save a project checkpoint."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -415,7 +437,7 @@ async def save_checkpoint(project_id: str, name: str = "checkpoint", auth: bool 
 @app.get("/api/projects/{project_id}/export")
 async def export_project(project_id: str, auth: bool = Depends(require_auth)):
     """Export full project state as JSON for saving."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -476,7 +498,7 @@ async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)
     from models.state import LayerState, AgentState, AgentStatus, LayerStatus, AgentOutput, GateResult
 
     # Create base project
-    project = orchestrator.create_project(data.title, data.user_constraints)
+    project = get_orchestrator().create_project(data.title, data.user_constraints)
 
     # Override with imported data
     project.project_id = data.project_id
@@ -513,7 +535,7 @@ async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)
                         )
 
     # Re-register in orchestrator with original ID
-    orchestrator.projects[data.project_id] = project
+    get_orchestrator().projects[data.project_id] = project
 
     return {
         "success": True,
@@ -532,7 +554,7 @@ async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depen
     """Write a specific chapter using the chapter writer agent."""
     from core.orchestrator import ExecutionContext
 
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -563,7 +585,7 @@ async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depen
     context = ExecutionContext(
         project=project,
         inputs=inputs,
-        llm_client=llm_client
+        llm_client=get_llm_client()
     )
 
     try:
@@ -599,7 +621,7 @@ async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depen
 @app.get("/api/projects/{project_id}/chapters")
 async def list_chapters(project_id: str, auth: bool = Depends(require_auth)):
     """List all written chapters for a project."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -622,7 +644,7 @@ async def list_chapters(project_id: str, auth: bool = Depends(require_auth)):
 @app.get("/api/projects/{project_id}/chapters/{chapter_number}")
 async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends(require_auth)):
     """Get a specific written chapter."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -641,7 +663,7 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
 @app.get("/api/projects/{project_id}/export/outline")
 async def export_outline(project_id: str, auth: bool = Depends(require_auth)):
     """Export project as structured markdown outline."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -657,7 +679,7 @@ async def export_outline(project_id: str, auth: bool = Depends(require_auth)):
 @app.get("/api/projects/{project_id}/export/manuscript")
 async def export_full_manuscript(project_id: str, auth: bool = Depends(require_auth)):
     """Export full manuscript as markdown."""
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -675,7 +697,7 @@ async def export_docx(project_id: str, include_outline: bool = False, auth: bool
     """Export manuscript as Word document (.docx)."""
     from core.export import generate_docx
 
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -702,7 +724,7 @@ async def export_epub(project_id: str, auth: bool = Depends(require_auth)):
     """Export manuscript as EPUB for Kindle/eReaders."""
     from core.export import generate_epub
 
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -729,7 +751,7 @@ async def get_project_stats(project_id: str, auth: bool = Depends(require_auth))
     """Get project statistics including word count and chapter status."""
     from core.export import get_word_count, get_chapter_summary
 
-    project = orchestrator.get_project(project_id)
+    project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
