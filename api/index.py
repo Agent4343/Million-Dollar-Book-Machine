@@ -22,6 +22,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.state import BookProject, LAYERS, AgentStatus, LayerStatus
 from models.agents import AGENT_REGISTRY, get_agent_execution_order
 from core.orchestrator import Orchestrator
+from core.llm import create_llm_client
+
+# Import agent executors
+from agents.strategic import STRATEGIC_EXECUTORS
+from agents.story_system import STORY_SYSTEM_EXECUTORS
+from agents.structural import STRUCTURAL_EXECUTORS
+from agents.validation import VALIDATION_EXECUTORS
 
 # Initialize app
 app = FastAPI(
@@ -48,8 +55,22 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
 SESSION_DURATION = 60 * 60 * 24 * 7
 
-# Global orchestrator instance
-orchestrator = Orchestrator()
+# Initialize LLM client (uses ANTHROPIC_API_KEY env var)
+llm_client = create_llm_client()
+
+# Global orchestrator instance with LLM
+orchestrator = Orchestrator(llm_client=llm_client)
+
+# Register all agent executors
+ALL_EXECUTORS = {
+    **STRATEGIC_EXECUTORS,
+    **STORY_SYSTEM_EXECUTORS,
+    **STRUCTURAL_EXECUTORS,
+    **VALIDATION_EXECUTORS,
+}
+
+for agent_id, executor in ALL_EXECUTORS.items():
+    orchestrator.register_executor(agent_id, executor)
 
 
 def create_session_token(timestamp: int) -> str:
@@ -147,7 +168,24 @@ async def root():
         "version": "1.0.0",
         "description": "AI-powered book development system",
         "total_agents": len(AGENT_REGISTRY),
-        "total_layers": len(LAYERS)
+        "total_layers": len(LAYERS),
+        "llm_enabled": llm_client is not None
+    }
+
+
+@app.get("/api/system/llm-status")
+async def llm_status(auth: bool = Depends(require_auth)):
+    """Check LLM configuration status."""
+    if llm_client is None:
+        return {
+            "enabled": False,
+            "model": None,
+            "message": "No ANTHROPIC_API_KEY configured. Running in demo mode with placeholder responses."
+        }
+    return {
+        "enabled": True,
+        "model": llm_client.model,
+        "message": "Claude API configured and ready"
     }
 
 

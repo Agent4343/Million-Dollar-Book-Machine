@@ -74,6 +74,7 @@ Password: `Blake2011@` (configurable via APP_PASSWORD env var)
 ### System
 - `GET /api/system/agents` - List all agents
 - `GET /api/system/layers` - List all layers
+- `GET /api/system/llm-status` - Check Claude API configuration
 
 ### Projects
 - `POST /api/projects` - Create new project
@@ -91,7 +92,8 @@ Million-Dollar-Book-Machine/
 ├── api/
 │   └── index.py              # FastAPI endpoints
 ├── core/
-│   └── orchestrator.py       # Central orchestrator
+│   ├── orchestrator.py       # Central orchestrator
+│   └── llm.py                # Claude API client
 ├── agents/
 │   ├── strategic.py          # Layers 1-4 agents
 │   ├── story_system.py       # Layers 5-7 agents
@@ -144,19 +146,54 @@ Million-Dollar-Book-Machine/
 **Publishing Package**: Blurb, synopsis, metadata, keywords
 **IP Clearance**: Title and naming safety verification
 
-## Connecting to LLM
+## Claude API Configuration
 
-To enable actual content generation, provide an LLM client to the orchestrator:
+The system uses the **Anthropic Claude API** for content generation.
 
-```python
-from core.orchestrator import Orchestrator
-from your_llm_client import LLMClient
+### Environment Variables
 
-llm = LLMClient(api_key="your-key")
-orchestrator = Orchestrator(llm_client=llm)
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key | Required for AI generation |
+| `APP_PASSWORD` | Login password | `Blake2011@` |
+| `SESSION_SECRET` | Session signing secret | Auto-generated |
+
+### Local Development
+
+```bash
+# Set your API key
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Install and run
+pip install -r requirements.txt
+uvicorn api.index:app --reload --port 3000
 ```
 
-The system expects the LLM client to have a `.generate(prompt, response_format=None)` method.
+### Vercel Deployment
+
+1. Deploy to Vercel:
+```bash
+vercel
+```
+
+2. Add environment variable in Vercel dashboard:
+   - Go to Project Settings → Environment Variables
+   - Add `ANTHROPIC_API_KEY` with your API key
+
+### Demo Mode
+
+Without an API key, the system runs in **demo mode** with placeholder responses. This lets you explore the UI and pipeline without API costs.
+
+### Check LLM Status
+
+After login, check `/api/system/llm-status` to verify Claude is configured:
+```json
+{
+  "enabled": true,
+  "model": "claude-sonnet-4-20250514",
+  "message": "Claude API configured and ready"
+}
+```
 
 ## License
 
