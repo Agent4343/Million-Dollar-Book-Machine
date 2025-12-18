@@ -500,6 +500,7 @@ async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)
                                 message=output_data.get("gate_message", "")
                             )
                         agent_state.current_output = AgentOutput(
+                            agent_id=agent_id,
                             content=output_data["content"],
                             gate_result=gate_result
                         )
