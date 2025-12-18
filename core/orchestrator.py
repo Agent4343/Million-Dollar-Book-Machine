@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 class ExecutionContext:
     """Context passed to agent executors."""
     project: BookProject
-    agent_def: AgentDefinition
     inputs: Dict[str, Any]
+    agent_def: Optional[AgentDefinition] = None
     llm_client: Any = None  # LLM client for generation
 
 
@@ -221,8 +221,8 @@ class Orchestrator:
         # Create execution context
         context = ExecutionContext(
             project=project,
-            agent_def=agent_def,
             inputs=inputs,
+            agent_def=agent_def,
             llm_client=self.llm_client
         )
 
