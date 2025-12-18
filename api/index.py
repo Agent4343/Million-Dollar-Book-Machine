@@ -13,6 +13,10 @@ import time
 import json
 from typing import Optional, List, Any, Dict
 
+# Load .env file before accessing environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
