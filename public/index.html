@@ -170,6 +170,46 @@
         /* Hidden */
         .hidden { display: none !important; }
 
+        /* API Status Indicator */
+        .api-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .api-status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #888;
+            animation: pulse 2s infinite;
+        }
+        .api-status.active .api-status-dot {
+            background: #2ecc71;
+            box-shadow: 0 0 10px rgba(46,204,113,0.5);
+        }
+        .api-status.inactive .api-status-dot {
+            background: #e74c3c;
+            box-shadow: 0 0 10px rgba(231,76,60,0.5);
+            animation: none;
+        }
+        .api-status.active {
+            border-color: rgba(46,204,113,0.3);
+            background: rgba(46,204,113,0.1);
+        }
+        .api-status.inactive {
+            border-color: rgba(231,76,60,0.3);
+            background: rgba(231,76,60,0.1);
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         /* Stats */
         .stat { text-align: center; padding: 1rem; }
         .stat-value { font-size: 2rem; font-weight: 700; color: #00d4ff; }
@@ -336,7 +376,13 @@
         <div id="appContent" class="hidden">
             <div class="header">
                 <h1>Million Dollar Book Machine</h1>
-                <button class="btn btn-danger btn-small" onclick="logout()">Sign Out</button>
+                <div style="display:flex;align-items:center;gap:1rem;">
+                    <div id="apiStatus" class="api-status">
+                        <span class="api-status-dot"></span>
+                        <span class="api-status-text">Checking API...</span>
+                    </div>
+                    <button class="btn btn-danger btn-small" onclick="logout()">Sign Out</button>
+                </div>
             </div>
 
             <!-- Tabs -->
@@ -564,6 +610,7 @@
                 document.getElementById('loginScreen').classList.add('hidden');
                 document.getElementById('appContent').classList.remove('hidden');
                 loadProjects();
+                checkApiStatus(); // Check API status after login
             } else {
                 document.getElementById('loginError').classList.remove('hidden');
             }
@@ -581,8 +628,37 @@
                 document.getElementById('loginScreen').classList.add('hidden');
                 document.getElementById('appContent').classList.remove('hidden');
                 loadProjects();
+                checkApiStatus(); // Check API status after login
             }
         }
+
+        // API Status Check
+        async function checkApiStatus() {
+            const statusEl = document.getElementById('apiStatus');
+            const dotEl = statusEl.querySelector('.api-status-dot');
+            const textEl = statusEl.querySelector('.api-status-text');
+
+            try {
+                const res = await fetch('/api/system/llm-status', {credentials: 'include'});
+                const data = await res.json();
+
+                if (data.enabled) {
+                    statusEl.className = 'api-status active';
+                    textEl.textContent = `API Active (${data.model || 'Claude'})`;
+                } else {
+                    statusEl.className = 'api-status inactive';
+                    textEl.textContent = 'API Inactive - Demo Mode';
+                    console.warn('API Status:', data.message);
+                }
+            } catch (error) {
+                statusEl.className = 'api-status inactive';
+                textEl.textContent = 'API Error';
+                console.error('API Status Error:', error);
+            }
+        }
+
+        // Refresh API status periodically
+        setInterval(checkApiStatus, 60000); // Check every minute
 
         // Tabs
         function showTab(tab) {
