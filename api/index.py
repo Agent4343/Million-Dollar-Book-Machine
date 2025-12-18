@@ -618,6 +618,137 @@ async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depen
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class BatchWriteRequest(BaseModel):
+    """Request model for batch chapter writing."""
+    timeout_seconds: int = 8  # Stop before Vercel's 10s limit
+    max_chapters: int = 1     # How many chapters to attempt
+
+
+@app.post("/api/projects/{project_id}/write-chapters-batch")
+async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth: bool = Depends(require_auth)):
+    """
+    Write chapters with timeout awareness.
+    Stops before timeout and returns progress so frontend can resume.
+    """
+    import time
+    from core.orchestrator import ExecutionContext
+
+    start_time = time.time()
+    timeout = request.timeout_seconds
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get chapter blueprint
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        return {
+            "success": False,
+            "error": "Chapter blueprint not yet generated",
+            "chapters_written": [],
+            "chapters_remaining": [],
+            "should_continue": False
+        }
+
+    # Get chapter outline
+    chapter_outline = chapter_blueprint.get("chapter_outline", [])
+    if not chapter_outline:
+        return {
+            "success": False,
+            "error": "No chapters in blueprint",
+            "chapters_written": [],
+            "chapters_remaining": [],
+            "should_continue": False
+        }
+
+    # Find which chapters are already written
+    existing_chapters = {ch.get("number") for ch in project.manuscript.get("chapters", [])}
+    chapters_to_write = [ch for ch in chapter_outline if ch.get("number") not in existing_chapters]
+
+    if not chapters_to_write:
+        return {
+            "success": True,
+            "message": "All chapters already written",
+            "chapters_written": list(existing_chapters),
+            "chapters_remaining": [],
+            "should_continue": False
+        }
+
+    # Build inputs for chapter writing
+    inputs = {"chapter_blueprint": chapter_blueprint}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    chapters_written = []
+    chapters_failed = []
+
+    # Write chapters until timeout approaches
+    for i, ch in enumerate(chapters_to_write[:request.max_chapters]):
+        elapsed = time.time() - start_time
+
+        # Stop if we're approaching timeout (leave 2 seconds buffer)
+        if elapsed > (timeout - 2):
+            break
+
+        chapter_num = ch.get("number")
+        try:
+            result = await execute_chapter_writer(context, chapter_num)
+
+            if result.get("text") and not result.get("error"):
+                # Store chapter
+                if "chapters" not in project.manuscript:
+                    project.manuscript["chapters"] = []
+
+                chapter_exists = False
+                for idx, existing_ch in enumerate(project.manuscript["chapters"]):
+                    if existing_ch.get("number") == chapter_num:
+                        project.manuscript["chapters"][idx] = result
+                        chapter_exists = True
+                        break
+
+                if not chapter_exists:
+                    project.manuscript["chapters"].append(result)
+
+                project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+                chapters_written.append(chapter_num)
+            else:
+                chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
+
+        except Exception as e:
+            chapters_failed.append({"number": chapter_num, "error": str(e)})
+
+    # Calculate remaining chapters
+    all_written = existing_chapters.union(set(chapters_written))
+    remaining = [ch.get("number") for ch in chapter_outline if ch.get("number") not in all_written]
+
+    return {
+        "success": True,
+        "chapters_written": chapters_written,
+        "chapters_failed": chapters_failed,
+        "chapters_remaining": remaining,
+        "total_chapters": len(chapter_outline),
+        "completed_count": len(all_written),
+        "should_continue": len(remaining) > 0,
+        "elapsed_seconds": time.time() - start_time
+    }
+
+
 @app.get("/api/projects/{project_id}/chapters")
 async def list_chapters(project_id: str, auth: bool = Depends(require_auth)):
     """List all written chapters for a project."""

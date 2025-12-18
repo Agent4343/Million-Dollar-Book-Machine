@@ -1380,8 +1380,10 @@
         }
 
         let isWritingAllChapters = false;
+        let chapterWriteRetries = 0;
+        const MAX_CHAPTER_RETRIES = 50; // Allow many retries for 20 chapters
 
-        // Auto-write chapters as part of pipeline (no confirmation needed)
+        // Auto-write chapters with timeout-aware batch processing and auto-resume
         async function autoWriteAllChapters() {
             if (!currentProject) return;
 
@@ -1393,59 +1395,108 @@
                 return;
             }
 
-            const chapters = chapterBlueprint.chapter_outline;
-            const unwritten = chapters.filter(ch => !writtenChapters[ch.number]);
-
-            if (unwritten.length === 0) {
-                console.log('All chapters already written');
-                return;
-            }
-
-            console.log(`Auto-writing ${unwritten.length} chapters...`);
-            document.getElementById('progressStatus').textContent = `Writing ${unwritten.length} chapters...`;
+            const totalChapters = chapterBlueprint.chapter_outline.length;
+            console.log(`Starting auto-write for ${totalChapters} chapters...`);
+            document.getElementById('progressStatus').textContent = `Writing chapters...`;
 
             const btn = document.getElementById('runFullPipelineBtn');
             btn.innerHTML = '<span class="running-indicator"></span>Writing Chapters...';
 
             isWritingAllChapters = true;
+            chapterWriteRetries = 0;
 
             try {
-                for (let i = 0; i < unwritten.length; i++) {
-                    const ch = unwritten[i];
-                    document.getElementById('progressStatus').textContent =
-                        `Writing Chapter ${ch.number} of ${chapters.length}...`;
-                    document.getElementById('chapterWriteProgress').textContent =
-                        `Writing chapter ${ch.number} (${i + 1}/${unwritten.length})...`;
+                let shouldContinue = true;
+                let consecutiveFailures = 0;
 
-                    // Write the chapter
+                while (shouldContinue && chapterWriteRetries < MAX_CHAPTER_RETRIES) {
+                    chapterWriteRetries++;
+
+                    document.getElementById('progressStatus').textContent =
+                        `Writing chapters... (batch ${chapterWriteRetries})`;
+
                     try {
-                        const res = await fetch(`/api/projects/${currentProject}/write-chapter/${ch.number}`, {
+                        // Call batch endpoint - writes one chapter at a time to stay under timeout
+                        const res = await fetch(`/api/projects/${currentProject}/write-chapters-batch`, {
                             method: 'POST',
-                            credentials: 'include'
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                timeout_seconds: 8,  // Stop before Vercel's 10s limit
+                                max_chapters: 1      // One chapter per request to avoid timeout
+                            })
                         });
 
                         if (res.ok) {
                             const data = await res.json();
-                            if (data.success && data.chapter) {
-                                writtenChapters[ch.number] = data.chapter;
-                                console.log(`Chapter ${ch.number} written: ${data.chapter.word_count} words`);
+                            consecutiveFailures = 0; // Reset on success
+
+                            if (data.chapters_written && data.chapters_written.length > 0) {
+                                console.log(`Batch ${chapterWriteRetries}: Wrote chapters ${data.chapters_written.join(', ')}`);
+                                document.getElementById('chapterWriteProgress').textContent =
+                                    `Completed ${data.completed_count} of ${data.total_chapters} chapters`;
                             }
+
+                            if (data.chapters_failed && data.chapters_failed.length > 0) {
+                                console.warn('Some chapters failed:', data.chapters_failed);
+                            }
+
+                            shouldContinue = data.should_continue;
+
+                            if (!shouldContinue) {
+                                console.log('All chapters written!');
+                                document.getElementById('progressStatus').textContent = 'Book Complete!';
+                                document.getElementById('chapterWriteProgress').textContent =
+                                    `All ${data.total_chapters} chapters written!`;
+                            }
+
+                            // Update UI after each batch
+                            await updateChapterWriter();
+
                         } else {
-                            console.error(`Failed to write chapter ${ch.number}`);
+                            consecutiveFailures++;
+                            console.error(`Batch ${chapterWriteRetries} failed with status ${res.status}`);
+
+                            // If server error, wait and retry
+                            if (res.status >= 500 && consecutiveFailures < 5) {
+                                const waitTime = Math.min(consecutiveFailures * 2000, 10000);
+                                console.log(`Waiting ${waitTime}ms before retry...`);
+                                document.getElementById('progressStatus').textContent =
+                                    `Server busy, retrying in ${waitTime/1000}s...`;
+                                await new Promise(r => setTimeout(r, waitTime));
+                            } else if (consecutiveFailures >= 5) {
+                                console.error('Too many consecutive failures, stopping');
+                                shouldContinue = false;
+                            }
                         }
+
                     } catch (err) {
-                        console.error(`Error writing chapter ${ch.number}:`, err);
+                        consecutiveFailures++;
+                        console.error(`Batch ${chapterWriteRetries} error:`, err);
+
+                        // Network error - wait and retry
+                        if (consecutiveFailures < 5) {
+                            const waitTime = Math.min(consecutiveFailures * 2000, 10000);
+                            console.log(`Network error, waiting ${waitTime}ms before retry...`);
+                            document.getElementById('progressStatus').textContent =
+                                `Connection issue, retrying in ${waitTime/1000}s...`;
+                            await new Promise(r => setTimeout(r, waitTime));
+                        } else {
+                            console.error('Too many consecutive failures, stopping');
+                            shouldContinue = false;
+                        }
                     }
 
-                    // Update UI
-                    await updateChapterWriter();
-
-                    // Small delay between chapters to avoid overwhelming the API
-                    await new Promise(r => setTimeout(r, 500));
+                    // Small delay between batches to be nice to the server
+                    if (shouldContinue) {
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
                 }
 
-                document.getElementById('progressStatus').textContent = 'Book Complete!';
-                document.getElementById('chapterWriteProgress').textContent = 'All chapters written!';
+                if (chapterWriteRetries >= MAX_CHAPTER_RETRIES) {
+                    console.warn('Reached max retries');
+                    document.getElementById('progressStatus').textContent = 'Writing paused - refresh to continue';
+                }
 
                 // Final update
                 await loadProjectPipeline();
