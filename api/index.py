@@ -29,6 +29,7 @@ from agents.strategic import STRATEGIC_EXECUTORS
 from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
+from agents.chapter_writer import execute_chapter_writer
 
 # Initialize app
 app = FastAPI(
@@ -514,3 +515,499 @@ async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)
         "title": project.title,
         "message": "Project imported successfully"
     }
+
+
+# =============================================================================
+# Chapter Writing
+# =============================================================================
+
+@app.post("/api/projects/{project_id}/write-chapter/{chapter_number}")
+async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depends(require_auth)):
+    """Write a specific chapter using the chapter writer agent."""
+    from core.orchestrator import ExecutionContext
+
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check if chapter blueprint exists
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise HTTPException(
+            status_code=400,
+            detail="Chapter blueprint not yet generated. Run pipeline through layer 10 first."
+        )
+
+    # Build execution context with all inputs
+    inputs = {"chapter_blueprint": chapter_blueprint}
+
+    # Gather all previous agent outputs as inputs
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=llm_client
+    )
+
+    try:
+        result = await execute_chapter_writer(context, chapter_number)
+
+        # Store chapter in manuscript
+        if result.get("text") and not result.get("error"):
+            if "chapters" not in project.manuscript:
+                project.manuscript["chapters"] = []
+
+            # Update or add chapter
+            chapter_exists = False
+            for i, ch in enumerate(project.manuscript["chapters"]):
+                if ch.get("number") == chapter_number:
+                    project.manuscript["chapters"][i] = result
+                    chapter_exists = True
+                    break
+
+            if not chapter_exists:
+                project.manuscript["chapters"].append(result)
+
+            # Sort chapters by number
+            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+
+        return {
+            "success": True,
+            "chapter": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/chapters")
+async def list_chapters(project_id: str, auth: bool = Depends(require_auth)):
+    """List all written chapters for a project."""
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    chapters = project.manuscript.get("chapters", [])
+
+    return {
+        "total_chapters": len(chapters),
+        "chapters": [
+            {
+                "number": ch.get("number"),
+                "title": ch.get("title"),
+                "word_count": ch.get("word_count", 0),
+                "has_text": bool(ch.get("text"))
+            }
+            for ch in chapters
+        ]
+    }
+
+
+@app.get("/api/projects/{project_id}/chapters/{chapter_number}")
+async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends(require_auth)):
+    """Get a specific written chapter."""
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    chapters = project.manuscript.get("chapters", [])
+    for ch in chapters:
+        if ch.get("number") == chapter_number:
+            return ch
+
+    raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
+
+
+# =============================================================================
+# Export Endpoints
+# =============================================================================
+
+@app.get("/api/projects/{project_id}/export/outline")
+async def export_outline(project_id: str, auth: bool = Depends(require_auth)):
+    """Export project as structured markdown outline."""
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    markdown = generate_outline_markdown(project)
+
+    return {
+        "format": "markdown",
+        "filename": f"{project.title.replace(' ', '_')}_Outline.md",
+        "content": markdown
+    }
+
+
+@app.get("/api/projects/{project_id}/export/manuscript")
+async def export_full_manuscript(project_id: str, auth: bool = Depends(require_auth)):
+    """Export full manuscript as markdown."""
+    project = orchestrator.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    markdown = generate_manuscript_markdown(project)
+
+    return {
+        "format": "markdown",
+        "filename": f"{project.title.replace(' ', '_')}_Manuscript.md",
+        "content": markdown
+    }
+
+
+def generate_outline_markdown(project) -> str:
+    """Generate a comprehensive markdown outline from project data."""
+    lines = []
+
+    # Title and metadata
+    lines.append(f"# {project.title}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # User constraints
+    constraints = project.user_constraints
+    lines.append("## Project Overview")
+    lines.append("")
+    lines.append(f"**Genre:** {constraints.get('genre', 'N/A')}")
+    lines.append(f"**Target Word Count:** {constraints.get('target_word_count', 'N/A'):,}")
+    lines.append(f"**Target Audience:** {constraints.get('target_audience', 'N/A')}")
+    lines.append("")
+
+    if constraints.get('description'):
+        lines.append("### Description")
+        lines.append(constraints['description'])
+        lines.append("")
+
+    if constraints.get('themes'):
+        lines.append("### Themes")
+        for theme in constraints['themes']:
+            lines.append(f"- {theme}")
+        lines.append("")
+
+    if constraints.get('comparable_titles'):
+        lines.append("### Comparable Titles")
+        for title in constraints['comparable_titles']:
+            lines.append(f"- {title}")
+        lines.append("")
+
+    # Get agent outputs
+    outputs = {}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                outputs[agent_id] = agent_state.current_output.content
+
+    # Market Intelligence
+    if "market_intelligence" in outputs:
+        mi = outputs["market_intelligence"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Market Intelligence")
+        lines.append("")
+
+        if mi.get("reader_avatar"):
+            ra = mi["reader_avatar"]
+            lines.append("### Target Reader")
+            lines.append(f"**Demographics:** {ra.get('demographics', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Psychographics:** {ra.get('psychographics', 'N/A')}")
+            lines.append("")
+            if ra.get("problems_to_solve"):
+                lines.append("**Problems to Solve:**")
+                for prob in ra["problems_to_solve"]:
+                    lines.append(f"- {prob}")
+            lines.append("")
+
+        if mi.get("market_gap"):
+            mg = mi["market_gap"]
+            lines.append("### Market Gap")
+            lines.append(f"**Unmet Need:** {mg.get('unmet_need', 'N/A')}")
+            lines.append("")
+
+        if mi.get("positioning_angle"):
+            pa = mi["positioning_angle"]
+            lines.append("### Positioning")
+            lines.append(f"**Unique Value:** {pa.get('unique_value', 'N/A')}")
+            lines.append("")
+            if pa.get("differentiators"):
+                lines.append("**Differentiators:**")
+                for diff in pa["differentiators"]:
+                    lines.append(f"- {diff}")
+            lines.append("")
+
+    # Core Concept
+    if "concept_definition" in outputs:
+        cd = outputs["concept_definition"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Core Concept")
+        lines.append("")
+        lines.append(f"### One-Line Hook")
+        lines.append(f"> {cd.get('one_line_hook', 'N/A')}")
+        lines.append("")
+
+        if cd.get("core_promise"):
+            cp = cd["core_promise"]
+            lines.append("### Core Promise")
+            lines.append(f"**Transformation:** {cp.get('transformation', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Emotional Payoff:** {cp.get('emotional_payoff', 'N/A')}")
+            lines.append("")
+
+        if cd.get("elevator_pitch"):
+            lines.append("### Elevator Pitch")
+            lines.append(cd["elevator_pitch"])
+            lines.append("")
+
+    # Thematic Architecture
+    if "thematic_architecture" in outputs:
+        ta = outputs["thematic_architecture"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Thematic Architecture")
+        lines.append("")
+
+        if ta.get("primary_theme"):
+            pt = ta["primary_theme"]
+            lines.append("### Primary Theme")
+            lines.append(f"> {pt.get('statement', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Universal Truth:** {pt.get('universal_truth', 'N/A')}")
+            lines.append("")
+
+        if ta.get("counter_theme"):
+            ct = ta["counter_theme"]
+            lines.append("### Counter-Theme")
+            lines.append(f"> {ct.get('statement', 'N/A')}")
+            lines.append("")
+
+        if ta.get("thematic_question"):
+            lines.append("### Thematic Question")
+            lines.append(f"*{ta['thematic_question']}*")
+            lines.append("")
+
+    # Story Question & Stakes
+    if "story_question" in outputs:
+        sq = outputs["story_question"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Central Story Question")
+        lines.append("")
+        lines.append(f"> {sq.get('central_dramatic_question', 'N/A')}")
+        lines.append("")
+
+        if sq.get("stakes_ladder"):
+            sl = sq["stakes_ladder"]
+            lines.append("### Stakes Ladder")
+            for level, data in sl.items():
+                if isinstance(data, dict):
+                    lines.append(f"**{level.replace('_', ' ').title()}:** {data.get('risk', 'N/A')} → {data.get('consequence', 'N/A')}")
+            lines.append("")
+
+    # Characters
+    if "character_architecture" in outputs:
+        ca = outputs["character_architecture"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Character Architecture")
+        lines.append("")
+
+        if ca.get("protagonist_profile"):
+            pp = ca["protagonist_profile"]
+            lines.append("### Protagonist")
+            lines.append(f"**Name:** {pp.get('name', 'N/A')}")
+            lines.append(f"**Role:** {pp.get('role', 'N/A')}")
+            lines.append("")
+            if pp.get("traits"):
+                lines.append(f"**Traits:** {', '.join(pp['traits'])}")
+            lines.append("")
+            lines.append(f"**Wound:** {pp.get('backstory_wound', 'N/A')}")
+            lines.append("")
+
+        if ca.get("protagonist_arc"):
+            pa = ca["protagonist_arc"]
+            lines.append("### Character Arc")
+            lines.append(f"**Starting State:** {pa.get('starting_state', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Transformation:** {pa.get('transformation', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Ending State:** {pa.get('ending_state', 'N/A')}")
+            lines.append("")
+
+        if ca.get("want_vs_need"):
+            wvn = ca["want_vs_need"]
+            lines.append("### Want vs Need")
+            lines.append(f"**Want:** {wvn.get('want', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Need:** {wvn.get('need', 'N/A')}")
+            lines.append("")
+
+        if ca.get("antagonist_profile"):
+            ap = ca["antagonist_profile"]
+            lines.append("### Antagonist")
+            lines.append(f"**Name:** {ap.get('name', 'N/A')}")
+            lines.append(f"**Role:** {ap.get('role', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Worldview:** {ap.get('worldview', 'N/A')}")
+            lines.append("")
+
+        if ca.get("supporting_cast"):
+            lines.append("### Supporting Cast")
+            for char in ca["supporting_cast"]:
+                lines.append(f"- **{char.get('name', '?')}:** {char.get('function', 'N/A')}")
+            lines.append("")
+
+    # Plot Structure
+    if "plot_structure" in outputs:
+        ps = outputs["plot_structure"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Plot Structure")
+        lines.append("")
+
+        if ps.get("act_structure"):
+            lines.append("### Three-Act Structure")
+            for act_name, act_data in ps["act_structure"].items():
+                if isinstance(act_data, dict):
+                    lines.append(f"**{act_name.replace('_', ' ').title()}** ({act_data.get('percentage', '?')}%)")
+                    lines.append(f"*Purpose:* {act_data.get('purpose', 'N/A')}")
+                    if act_data.get("key_events"):
+                        for event in act_data["key_events"]:
+                            lines.append(f"  - {event}")
+                    lines.append("")
+
+        if ps.get("major_beats"):
+            lines.append("### Major Beats")
+            for beat in ps["major_beats"]:
+                lines.append(f"- **{beat.get('name', '?')}:** {beat.get('description', 'N/A')}")
+            lines.append("")
+
+        if ps.get("climax_design"):
+            cd = ps["climax_design"]
+            lines.append("### Climax Design")
+            lines.append(f"**Setup:** {cd.get('setup', 'N/A')}")
+            lines.append(f"**Confrontation:** {cd.get('confrontation', 'N/A')}")
+            lines.append(f"**Resolution:** {cd.get('resolution', 'N/A')}")
+            lines.append("")
+
+    # Chapter Blueprint
+    if "chapter_blueprint" in outputs:
+        cb = outputs["chapter_blueprint"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Chapter Outline")
+        lines.append("")
+
+        chapter_outline = cb.get("chapter_outline", [])
+        for chapter in chapter_outline:
+            ch_num = chapter.get("number", "?")
+            ch_title = chapter.get("title", f"Chapter {ch_num}")
+            lines.append(f"### Chapter {ch_num}: {ch_title}")
+            lines.append("")
+            lines.append(f"**Act:** {chapter.get('act', '?')} | **POV:** {chapter.get('pov', '?')} | **Words:** ~{chapter.get('word_target', 3000):,}")
+            lines.append("")
+            lines.append(f"**Goal:** {chapter.get('chapter_goal', 'N/A')}")
+            lines.append("")
+            lines.append(f"**Opening Hook:** *{chapter.get('opening_hook', 'N/A')}*")
+            lines.append("")
+
+            if chapter.get("scenes"):
+                lines.append("**Scenes:**")
+                for scene in chapter["scenes"]:
+                    lines.append(f"  {scene.get('scene_number', '?')}. {scene.get('scene_question', 'N/A')}")
+                    lines.append(f"     - Location: {scene.get('location', '?')} | Conflict: {scene.get('conflict_type', '?')}")
+                lines.append("")
+
+            lines.append(f"**Closing Hook:** *{chapter.get('closing_hook', 'N/A')}*")
+            lines.append("")
+
+    # Voice Specification
+    if "voice_specification" in outputs:
+        vs = outputs["voice_specification"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Voice & Style Guide")
+        lines.append("")
+
+        if vs.get("narrative_voice"):
+            nv = vs["narrative_voice"]
+            lines.append("### Narrative Voice")
+            lines.append(f"**POV Type:** {nv.get('pov_type', 'N/A')}")
+            lines.append(f"**Distance:** {nv.get('distance', 'N/A')}")
+            lines.append(f"**Tone:** {nv.get('tone', 'N/A')}")
+            lines.append("")
+
+        if vs.get("style_guide"):
+            sg = vs["style_guide"]
+            if sg.get("dos"):
+                lines.append("### Do")
+                for do in sg["dos"]:
+                    lines.append(f"- {do}")
+                lines.append("")
+            if sg.get("donts"):
+                lines.append("### Don't")
+                for dont in sg["donts"]:
+                    lines.append(f"- {dont}")
+                lines.append("")
+
+    # Footer
+    lines.append("---")
+    lines.append("")
+    lines.append(f"*Generated by Million Dollar Book Machine*")
+    lines.append(f"*Project ID: {project.project_id}*")
+
+    return "\n".join(lines)
+
+
+def generate_manuscript_markdown(project) -> str:
+    """Generate full manuscript markdown from written chapters."""
+    lines = []
+
+    lines.append(f"# {project.title}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    chapters = project.manuscript.get("chapters", [])
+
+    if not chapters:
+        lines.append("*No chapters have been written yet.*")
+        lines.append("")
+        lines.append("Use the chapter writer to generate chapters from the outline.")
+    else:
+        total_words = sum(ch.get("word_count", 0) for ch in chapters)
+        lines.append(f"**Total Chapters:** {len(chapters)} | **Total Words:** {total_words:,}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        for chapter in sorted(chapters, key=lambda x: x.get("number", 0)):
+            ch_num = chapter.get("number", "?")
+            ch_title = chapter.get("title", f"Chapter {ch_num}")
+
+            lines.append(f"## Chapter {ch_num}: {ch_title}")
+            lines.append("")
+
+            if chapter.get("text"):
+                lines.append(chapter["text"])
+            else:
+                lines.append("*Chapter not yet written.*")
+
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+    lines.append(f"*{project.title}*")
+    lines.append(f"*Generated by Million Dollar Book Machine*")
+
+    return "\n".join(lines)

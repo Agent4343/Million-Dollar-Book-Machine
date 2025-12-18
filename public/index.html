@@ -243,6 +243,8 @@
         /* Save/Load Buttons */
         .btn-save { background: linear-gradient(90deg, #3498db, #2980b9); color: #fff; }
         .btn-load { background: rgba(52,152,219,0.2); color: #3498db; border: 1px solid #3498db; }
+        .btn-export { background: linear-gradient(90deg, #9b59b6, #8e44ad); color: #fff; }
+        .btn-write { background: linear-gradient(90deg, #e67e22, #d35400); color: #fff; }
         .file-input-hidden { display: none; }
         .save-load-section {
             display: flex;
@@ -262,6 +264,56 @@
         .auto-save-indicator::before {
             content: "●";
             font-size: 0.5rem;
+        }
+
+        /* Chapter Writer Section */
+        .chapter-writer-section {
+            background: rgba(230,126,34,0.1);
+            border: 1px solid rgba(230,126,34,0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .chapter-writer-section h3 {
+            color: #e67e22;
+            margin-bottom: 0.75rem;
+        }
+        .chapter-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .chapter-item {
+            padding: 0.5rem 0.75rem;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .chapter-item:hover { background: rgba(230,126,34,0.2); }
+        .chapter-item.written { background: rgba(46,204,113,0.2); color: #2ecc71; }
+        .chapter-item.writing { background: rgba(243,156,18,0.2); color: #f39c12; }
+
+        /* Export Section */
+        .export-section {
+            background: rgba(155,89,182,0.1);
+            border: 1px solid rgba(155,89,182,0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .export-section h3 {
+            color: #9b59b6;
+            margin-bottom: 0.75rem;
+        }
+        .export-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
         }
     </style>
 </head>
@@ -408,12 +460,41 @@
                                 <button class="btn btn-secondary btn-small" id="runAvailableBtn" onclick="runAllAvailable()">Run All Available</button>
                                 <button class="btn btn-save btn-small" onclick="exportProject()">Save Project</button>
                             </div>
+
+                            <!-- Export Section -->
+                            <div class="export-section">
+                                <h3>Export Documents</h3>
+                                <div class="export-buttons">
+                                    <button class="btn btn-export btn-small" onclick="exportOutline()">Download Outline (MD)</button>
+                                    <button class="btn btn-export btn-small" onclick="exportManuscript()">Download Manuscript (MD)</button>
+                                </div>
+                            </div>
+
+                            <!-- Chapter Writer Section -->
+                            <div class="chapter-writer-section" id="chapterWriterSection">
+                                <h3>Chapter Writer</h3>
+                                <p style="font-size:0.85rem;color:#888;margin-bottom:0.5rem;">Write individual chapters after completing Layer 10 (Chapter Blueprint)</p>
+                                <div id="chapterWriterStatus"></div>
+                                <div class="chapter-list" id="chapterList"></div>
+                                <div style="margin-top:0.75rem;">
+                                    <button class="btn btn-write btn-small" id="writeAllChaptersBtn" onclick="writeAllChapters()">Write All Chapters</button>
+                                    <span id="chapterWriteProgress" style="margin-left:0.5rem;font-size:0.85rem;color:#888;"></span>
+                                </div>
+                            </div>
                         </div>
                         <div class="card">
                             <h2>Agent Output</h2>
                             <p id="selectedAgentName" style="color:#888;margin-bottom:0.5rem;">Select an agent to view output</p>
                             <div class="output-panel">
                                 <pre id="agentOutput">No output yet</pre>
+                            </div>
+
+                            <!-- Chapter Preview -->
+                            <div id="chapterPreview" class="hidden" style="margin-top:1rem;">
+                                <h3 style="color:#e67e22;margin-bottom:0.5rem;">Chapter Preview</h3>
+                                <div class="output-panel" style="max-height:300px;">
+                                    <pre id="chapterText" style="white-space:pre-wrap;color:#fff;"></pre>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -945,7 +1026,261 @@
                     console.error('Auto-save error:', error);
                 }
             }
+
+            // Update chapter writer section
+            await updateChapterWriter();
         };
+
+        // =================================================================
+        // Export Functions
+        // =================================================================
+
+        async function exportOutline() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/export/outline`, {credentials: 'include'});
+                if (!res.ok) throw new Error('Export failed');
+
+                const data = await res.json();
+                downloadMarkdown(data.filename, data.content);
+            } catch (error) {
+                console.error('Export outline error:', error);
+                alert('Failed to export outline. Make sure the pipeline has been run.');
+            }
+        }
+
+        async function exportManuscript() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/export/manuscript`, {credentials: 'include'});
+                if (!res.ok) throw new Error('Export failed');
+
+                const data = await res.json();
+                downloadMarkdown(data.filename, data.content);
+            } catch (error) {
+                console.error('Export manuscript error:', error);
+                alert('Failed to export manuscript');
+            }
+        }
+
+        function downloadMarkdown(filename, content) {
+            const blob = new Blob([content], {type: 'text/markdown'});
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // =================================================================
+        // Chapter Writer Functions
+        // =================================================================
+
+        let writtenChapters = {};
+        let chapterBlueprint = null;
+
+        async function updateChapterWriter() {
+            if (!currentProject || !projectData) return;
+
+            const statusEl = document.getElementById('chapterWriterStatus');
+            const listEl = document.getElementById('chapterList');
+            const writeAllBtn = document.getElementById('writeAllChaptersBtn');
+
+            // Check if chapter_blueprint agent has passed
+            let blueprintPassed = false;
+            chapterBlueprint = null;
+
+            for (const [layerId, layer] of Object.entries(projectData.layers)) {
+                if (layer.agents && layer.agents.chapter_blueprint) {
+                    const agent = layer.agents.chapter_blueprint;
+                    if (agent.status === 'passed' && agent.output) {
+                        blueprintPassed = true;
+                        chapterBlueprint = agent.output.content;
+                        break;
+                    }
+                }
+            }
+
+            if (!blueprintPassed) {
+                statusEl.innerHTML = '<span style="color:#f39c12;">Complete Layer 10 (Chapter Blueprint) first</span>';
+                listEl.innerHTML = '';
+                writeAllBtn.disabled = true;
+                return;
+            }
+
+            // Get written chapters
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/chapters`, {credentials: 'include'});
+                if (res.ok) {
+                    const data = await res.json();
+                    writtenChapters = {};
+                    data.chapters.forEach(ch => {
+                        writtenChapters[ch.number] = ch;
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load chapters:', error);
+            }
+
+            // Render chapter list
+            const chapters = chapterBlueprint.chapter_outline || [];
+            const totalChapters = chapters.length;
+            const writtenCount = Object.keys(writtenChapters).length;
+
+            statusEl.innerHTML = `<span style="color:#2ecc71;">${writtenCount} / ${totalChapters} chapters written</span>`;
+            writeAllBtn.disabled = false;
+
+            listEl.innerHTML = chapters.map(ch => {
+                const isWritten = writtenChapters[ch.number];
+                const className = isWritten ? 'chapter-item written' : 'chapter-item';
+                const icon = isWritten ? '✓' : '○';
+                return `<span class="${className}" onclick="writeChapter(${ch.number})" title="${ch.title}">${icon} Ch ${ch.number}</span>`;
+            }).join('');
+        }
+
+        async function writeChapter(chapterNumber) {
+            if (!currentProject) return;
+
+            // Ensure project exists
+            if (!await ensureProjectOnServer(currentProject)) {
+                alert('Project not found on server');
+                return;
+            }
+
+            const chapterItem = document.querySelector(`.chapter-item[onclick="writeChapter(${chapterNumber})"]`);
+            if (chapterItem) {
+                chapterItem.classList.add('writing');
+                chapterItem.classList.remove('written');
+            }
+
+            document.getElementById('chapterWriteProgress').textContent = `Writing Chapter ${chapterNumber}...`;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/write-chapter/${chapterNumber}`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to write chapter');
+                }
+
+                const data = await res.json();
+
+                if (data.success && data.chapter) {
+                    writtenChapters[chapterNumber] = data.chapter;
+
+                    // Update UI
+                    if (chapterItem) {
+                        chapterItem.classList.remove('writing');
+                        chapterItem.classList.add('written');
+                        chapterItem.innerHTML = `✓ Ch ${chapterNumber}`;
+                    }
+
+                    // Show chapter preview
+                    document.getElementById('chapterPreview').classList.remove('hidden');
+                    document.getElementById('chapterText').textContent =
+                        `Chapter ${chapterNumber}: ${data.chapter.title}\n` +
+                        `Words: ${data.chapter.word_count}\n\n` +
+                        (data.chapter.text || 'No text generated');
+
+                    document.getElementById('chapterWriteProgress').textContent = `Chapter ${chapterNumber} complete!`;
+                }
+
+                await updateChapterWriter();
+            } catch (error) {
+                console.error('Write chapter error:', error);
+                alert('Failed to write chapter: ' + error.message);
+
+                if (chapterItem) {
+                    chapterItem.classList.remove('writing');
+                }
+                document.getElementById('chapterWriteProgress').textContent = 'Error writing chapter';
+            }
+        }
+
+        let isWritingAllChapters = false;
+
+        async function writeAllChapters() {
+            if (!currentProject || isWritingAllChapters) return;
+
+            if (!chapterBlueprint || !chapterBlueprint.chapter_outline) {
+                alert('Chapter blueprint not available');
+                return;
+            }
+
+            const chapters = chapterBlueprint.chapter_outline;
+            const unwritten = chapters.filter(ch => !writtenChapters[ch.number]);
+
+            if (unwritten.length === 0) {
+                alert('All chapters have already been written!');
+                return;
+            }
+
+            if (!confirm(`This will write ${unwritten.length} chapters. This may take several minutes. Continue?`)) {
+                return;
+            }
+
+            isWritingAllChapters = true;
+            const btn = document.getElementById('writeAllChaptersBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Writing...';
+
+            try {
+                for (let i = 0; i < unwritten.length; i++) {
+                    const ch = unwritten[i];
+                    document.getElementById('chapterWriteProgress').textContent =
+                        `Writing chapter ${ch.number} (${i + 1}/${unwritten.length})...`;
+
+                    await writeChapter(ch.number);
+
+                    // Small delay between chapters
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                document.getElementById('chapterWriteProgress').textContent = 'All chapters complete!';
+                alert('All chapters have been written!');
+            } catch (error) {
+                console.error('Write all chapters error:', error);
+                alert('Error during chapter writing: ' + error.message);
+            } finally {
+                isWritingAllChapters = false;
+                btn.disabled = false;
+                btn.innerHTML = 'Write All Chapters';
+            }
+        }
+
+        async function viewWrittenChapter(chapterNumber) {
+            if (!currentProject) return;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/chapters/${chapterNumber}`, {credentials: 'include'});
+                if (!res.ok) throw new Error('Chapter not found');
+
+                const chapter = await res.json();
+
+                document.getElementById('chapterPreview').classList.remove('hidden');
+                document.getElementById('chapterText').textContent =
+                    `Chapter ${chapter.number}: ${chapter.title}\n` +
+                    `Words: ${chapter.word_count}\n\n` +
+                    (chapter.text || 'No text');
+            } catch (error) {
+                console.error('View chapter error:', error);
+            }
+        }
 
         checkAuth();
     </script>
