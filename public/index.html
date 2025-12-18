@@ -891,6 +891,9 @@
 
                 if (iterations >= maxIterations) {
                     alert('Pipeline stopped: maximum iterations reached. Some agents may have failed.');
+                } else {
+                    // Pipeline complete - now automatically write all chapters
+                    await autoWriteAllChapters();
                 }
             } catch (error) {
                 console.error('Pipeline error:', error);
@@ -1377,6 +1380,82 @@
         }
 
         let isWritingAllChapters = false;
+
+        // Auto-write chapters as part of pipeline (no confirmation needed)
+        async function autoWriteAllChapters() {
+            if (!currentProject) return;
+
+            // Refresh chapter writer data
+            await updateChapterWriter();
+
+            if (!chapterBlueprint || !chapterBlueprint.chapter_outline) {
+                console.log('No chapter blueprint available yet');
+                return;
+            }
+
+            const chapters = chapterBlueprint.chapter_outline;
+            const unwritten = chapters.filter(ch => !writtenChapters[ch.number]);
+
+            if (unwritten.length === 0) {
+                console.log('All chapters already written');
+                return;
+            }
+
+            console.log(`Auto-writing ${unwritten.length} chapters...`);
+            document.getElementById('progressStatus').textContent = `Writing ${unwritten.length} chapters...`;
+
+            const btn = document.getElementById('runFullPipelineBtn');
+            btn.innerHTML = '<span class="running-indicator"></span>Writing Chapters...';
+
+            isWritingAllChapters = true;
+
+            try {
+                for (let i = 0; i < unwritten.length; i++) {
+                    const ch = unwritten[i];
+                    document.getElementById('progressStatus').textContent =
+                        `Writing Chapter ${ch.number} of ${chapters.length}...`;
+                    document.getElementById('chapterWriteProgress').textContent =
+                        `Writing chapter ${ch.number} (${i + 1}/${unwritten.length})...`;
+
+                    // Write the chapter
+                    try {
+                        const res = await fetch(`/api/projects/${currentProject}/write-chapter/${ch.number}`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        });
+
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data.success && data.chapter) {
+                                writtenChapters[ch.number] = data.chapter;
+                                console.log(`Chapter ${ch.number} written: ${data.chapter.word_count} words`);
+                            }
+                        } else {
+                            console.error(`Failed to write chapter ${ch.number}`);
+                        }
+                    } catch (err) {
+                        console.error(`Error writing chapter ${ch.number}:`, err);
+                    }
+
+                    // Update UI
+                    await updateChapterWriter();
+
+                    // Small delay between chapters to avoid overwhelming the API
+                    await new Promise(r => setTimeout(r, 500));
+                }
+
+                document.getElementById('progressStatus').textContent = 'Book Complete!';
+                document.getElementById('chapterWriteProgress').textContent = 'All chapters written!';
+
+                // Final update
+                await loadProjectPipeline();
+
+            } catch (error) {
+                console.error('Auto-write chapters error:', error);
+            } finally {
+                isWritingAllChapters = false;
+            }
+        }
 
         async function writeAllChapters() {
             if (!currentProject || isWritingAllChapters) return;
