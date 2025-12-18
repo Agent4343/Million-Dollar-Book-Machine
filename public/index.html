@@ -174,6 +174,71 @@
         .stat { text-align: center; padding: 1rem; }
         .stat-value { font-size: 2rem; font-weight: 700; color: #00d4ff; }
         .stat-label { font-size: 0.8rem; color: #888; }
+
+        /* Progress Bar */
+        .progress-container {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .progress-title { font-weight: 600; font-size: 1.1rem; }
+        .progress-percent { color: #00d4ff; font-weight: 700; font-size: 1.2rem; }
+        .progress-bar {
+            height: 12px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            border-radius: 6px;
+            transition: width 0.5s ease;
+        }
+        .progress-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        /* Run Full Button */
+        .btn-full-pipeline {
+            background: linear-gradient(90deg, #2ecc71, #27ae60);
+            color: #fff;
+            width: 100%;
+            padding: 1rem;
+            font-size: 1.1rem;
+            margin-top: 1rem;
+        }
+        .btn-full-pipeline:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(46,204,113,0.3); }
+        .btn-full-pipeline:disabled {
+            background: rgba(255,255,255,0.1);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Running State */
+        .running-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #fff;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -267,6 +332,24 @@
                     <p style="text-align:center;color:#888;">Select a project from the Projects tab to view its pipeline</p>
                 </div>
                 <div id="pipelineView" class="hidden">
+                    <!-- Progress Bar -->
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span class="progress-title" id="progressTitle">Book Development Progress</span>
+                            <span class="progress-percent" id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-details">
+                            <span id="progressStatus">Ready to start</span>
+                            <span id="progressAgents">0 / 0 agents completed</span>
+                        </div>
+                        <button class="btn btn-full-pipeline" id="runFullPipelineBtn" onclick="runFullPipeline()">
+                            Run Full Pipeline
+                        </button>
+                    </div>
+
                     <div class="grid-3" style="margin-bottom:1rem;">
                         <div class="card stat">
                             <div class="stat-value" id="statLayers">0</div>
@@ -287,8 +370,8 @@
                             <h2 id="pipelineProjectTitle">Pipeline</h2>
                             <div class="pipeline" id="pipelineLayers"></div>
                             <div style="margin-top:1rem;">
-                                <button class="btn btn-primary btn-small" onclick="runNextAgent()">Run Next Agent</button>
-                                <button class="btn btn-secondary btn-small" onclick="runAllAvailable()">Run All Available</button>
+                                <button class="btn btn-primary btn-small" id="runNextBtn" onclick="runNextAgent()">Run Next Agent</button>
+                                <button class="btn btn-secondary btn-small" id="runAvailableBtn" onclick="runAllAvailable()">Run All Available</button>
                             </div>
                         </div>
                         <div class="card">
@@ -401,6 +484,24 @@
             document.getElementById('statAgents').textContent = agents;
             document.getElementById('statCompleted').textContent = completed;
 
+            // Update progress bar
+            const percent = agents > 0 ? Math.round((completed / agents) * 100) : 0;
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressAgents').textContent = `${completed} / ${agents} agents completed`;
+
+            // Update progress status
+            let status = 'Ready to start';
+            if (completed === agents && agents > 0) {
+                status = 'Pipeline complete!';
+                document.getElementById('runFullPipelineBtn').textContent = 'Pipeline Complete';
+                document.getElementById('runFullPipelineBtn').disabled = true;
+            } else if (completed > 0) {
+                const currentLayer = projectData.current_layer || 0;
+                status = `Layer ${currentLayer} in progress`;
+            }
+            document.getElementById('progressStatus').textContent = status;
+
             // Render pipeline
             const container = document.getElementById('pipelineLayers');
             container.innerHTML = '';
@@ -469,6 +570,76 @@
                 });
             }
             await loadProjectPipeline();
+        }
+
+        let isRunningPipeline = false;
+
+        async function runFullPipeline() {
+            if (!currentProject || isRunningPipeline) return;
+
+            isRunningPipeline = true;
+            const btn = document.getElementById('runFullPipelineBtn');
+            const nextBtn = document.getElementById('runNextBtn');
+            const availBtn = document.getElementById('runAvailableBtn');
+
+            btn.disabled = true;
+            nextBtn.disabled = true;
+            availBtn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Running Pipeline...';
+
+            try {
+                let hasMore = true;
+                let iterations = 0;
+                const maxIterations = 100; // Safety limit
+
+                while (hasMore && iterations < maxIterations) {
+                    iterations++;
+
+                    // Get available agents
+                    const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
+                    const data = await res.json();
+
+                    if (data.available_agents.length === 0) {
+                        hasMore = false;
+                        break;
+                    }
+
+                    // Execute each available agent
+                    for (const agent of data.available_agents) {
+                        document.getElementById('progressStatus').textContent = `Running: ${agent.name}`;
+
+                        const execRes = await fetch(`/api/projects/${currentProject}/execute/${agent.id}`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        });
+
+                        if (!execRes.ok) {
+                            console.error(`Failed to execute ${agent.id}`);
+                        }
+
+                        // Update progress after each agent
+                        await loadProjectPipeline();
+                        viewAgent(agent.id);
+                    }
+                }
+
+                // Final update
+                await loadProjectPipeline();
+
+                if (iterations >= maxIterations) {
+                    alert('Pipeline stopped: maximum iterations reached. Some agents may have failed.');
+                }
+            } catch (error) {
+                console.error('Pipeline error:', error);
+                alert('An error occurred during pipeline execution. Check the console for details.');
+            } finally {
+                isRunningPipeline = false;
+                btn.innerHTML = 'Run Full Pipeline';
+                btn.disabled = false;
+                nextBtn.disabled = false;
+                availBtn.disabled = false;
+                await loadProjectPipeline();
+            }
         }
 
         // New Project
