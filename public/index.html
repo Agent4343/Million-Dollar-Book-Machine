@@ -426,6 +426,46 @@
         let currentProject = null;
         let projectData = null;
 
+        // =================================================================
+        // Auto-restore helper for stateless serverless
+        // =================================================================
+
+        async function ensureProjectOnServer(projectId) {
+            // Check if project exists on server
+            const res = await fetch(`/api/projects/${projectId}`, {credentials: 'include'});
+
+            if (res.ok) {
+                return true; // Project exists
+            }
+
+            if (res.status === 404) {
+                // Try to restore from localStorage
+                const saved = getLocalStorageProjects();
+                const project = saved[projectId];
+
+                if (project) {
+                    console.log('Auto-restoring project from localStorage...');
+                    try {
+                        const importRes = await fetch('/api/projects/import', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            credentials: 'include',
+                            body: JSON.stringify(project)
+                        });
+
+                        if (importRes.ok) {
+                            console.log('Project restored successfully');
+                            return true;
+                        }
+                    } catch (error) {
+                        console.error('Failed to restore project:', error);
+                    }
+                }
+            }
+
+            return false;
+        }
+
         // Auth
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -498,6 +538,15 @@
 
         async function loadProjectPipeline() {
             if (!currentProject) return;
+
+            // Ensure project exists on server (auto-restore if needed)
+            const exists = await ensureProjectOnServer(currentProject);
+            if (!exists) {
+                alert('Project not found. Please create a new project.');
+                currentProject = null;
+                showTab('projects');
+                return;
+            }
 
             const res = await fetch(`/api/projects/${currentProject}`, {credentials: 'include'});
             projectData = await res.json();
@@ -576,6 +625,12 @@
         async function runNextAgent() {
             if (!currentProject) return;
 
+            // Ensure project exists
+            if (!await ensureProjectOnServer(currentProject)) {
+                alert('Project not found on server');
+                return;
+            }
+
             const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
             const data = await res.json();
 
@@ -595,6 +650,12 @@
         async function runAllAvailable() {
             if (!currentProject) return;
 
+            // Ensure project exists
+            if (!await ensureProjectOnServer(currentProject)) {
+                alert('Project not found on server');
+                return;
+            }
+
             const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
             const data = await res.json();
 
@@ -611,6 +672,12 @@
 
         async function runFullPipeline() {
             if (!currentProject || isRunningPipeline) return;
+
+            // Ensure project exists before starting
+            if (!await ensureProjectOnServer(currentProject)) {
+                alert('Project not found on server');
+                return;
+            }
 
             isRunningPipeline = true;
             const btn = document.getElementById('runFullPipelineBtn');
