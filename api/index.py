@@ -549,10 +549,22 @@ async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)
 # Chapter Writing
 # =============================================================================
 
+class ChapterWriteRequest(BaseModel):
+    """Request model for chapter writing."""
+    quick_mode: bool = False  # If True, write shorter preview chapters
+
+
 @app.post("/api/projects/{project_id}/write-chapter/{chapter_number}")
-async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depends(require_auth)):
+async def write_chapter(
+    project_id: str,
+    chapter_number: int,
+    request: Optional[ChapterWriteRequest] = None,
+    auth: bool = Depends(require_auth)
+):
     """Write a specific chapter using the chapter writer agent."""
     from core.orchestrator import ExecutionContext
+
+    quick_mode = request.quick_mode if request else False
 
     project = get_orchestrator().get_project(project_id)
     if not project:
@@ -589,7 +601,7 @@ async def write_chapter(project_id: str, chapter_number: int, auth: bool = Depen
     )
 
     try:
-        result = await execute_chapter_writer(context, chapter_number)
+        result = await execute_chapter_writer(context, chapter_number, quick_mode=quick_mode)
 
         # Store chapter in manuscript
         if result.get("text") and not result.get("error"):
@@ -622,6 +634,7 @@ class BatchWriteRequest(BaseModel):
     """Request model for batch chapter writing."""
     timeout_seconds: int = 8  # Stop before Vercel's 10s limit
     max_chapters: int = 1     # How many chapters to attempt
+    quick_mode: bool = True   # Use quick mode by default for Vercel (shorter chapters)
 
 
 @app.post("/api/projects/{project_id}/write-chapters-batch")
@@ -708,7 +721,7 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
 
         chapter_num = ch.get("number")
         try:
-            result = await execute_chapter_writer(context, chapter_num)
+            result = await execute_chapter_writer(context, chapter_num, quick_mode=request.quick_mode)
 
             if result.get("text") and not result.get("error"):
                 # Store chapter

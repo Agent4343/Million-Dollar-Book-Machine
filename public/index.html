@@ -1417,13 +1417,16 @@
 
                     try {
                         // Call batch endpoint - writes one chapter at a time to stay under timeout
+                        // quick_mode: true writes ~500 word preview chapters (faster, works on Vercel)
+                        // quick_mode: false writes full ~3000 word chapters (requires longer timeout)
                         const res = await fetch(`/api/projects/${currentProject}/write-chapters-batch`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             credentials: 'include',
                             body: JSON.stringify({
-                                timeout_seconds: 8,  // Stop before Vercel's 10s limit
-                                max_chapters: 1      // One chapter per request to avoid timeout
+                                timeout_seconds: 55,  // Use most of 60s limit
+                                max_chapters: 1,      // One chapter per request
+                                quick_mode: true      // Preview mode for Vercel (faster generation)
                             })
                         });
 

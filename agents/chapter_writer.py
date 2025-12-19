@@ -58,7 +58,8 @@ BEGIN CHAPTER {chapter_number}:
 
 async def execute_chapter_writer(
     context: ExecutionContext,
-    chapter_number: int
+    chapter_number: int,
+    quick_mode: bool = False
 ) -> Dict[str, Any]:
     """
     Write a single chapter with full context from the pipeline.
@@ -66,6 +67,7 @@ async def execute_chapter_writer(
     Args:
         context: Execution context with all pipeline inputs
         chapter_number: Which chapter to write (1-indexed)
+        quick_mode: If True, write a shorter preview (~500 words) for faster generation
 
     Returns:
         Dict containing the chapter text and metadata
@@ -137,6 +139,9 @@ async def execute_chapter_writer(
 - Thematic Question: {thematic.get('thematic_question', 'N/A')}
 """
 
+    # Adjust word target for quick mode
+    word_target = 500 if quick_mode else chapter_data.get("word_target", 3000)
+
     # Build the prompt
     prompt = CHAPTER_WRITING_PROMPT.format(
         chapter_number=chapter_number,
@@ -146,7 +151,7 @@ async def execute_chapter_writer(
         pov=chapter_data.get("pov", "Protagonist"),
         opening_hook=chapter_data.get("opening_hook", ""),
         closing_hook=chapter_data.get("closing_hook", ""),
-        word_target=chapter_data.get("word_target", 3000),
+        word_target=word_target,
         scenes=scenes_text,
         character_reference=character_reference,
         world_rules=_format_world_rules(context.inputs.get("world_rules", {})),
@@ -154,16 +159,27 @@ async def execute_chapter_writer(
         thematic_focus=thematic_focus
     )
 
+    # Add quick mode instruction
+    if quick_mode:
+        prompt += "\n\n**IMPORTANT: Write a CONDENSED version (~500 words) focusing on the key moments and dialogue. This is a preview draft.**\n\n"
+
     if llm:
-        # Generate the chapter with higher token limit for prose
+        # Adjust token limit based on mode
+        max_tokens = 1500 if quick_mode else 12000
+
+        # Generate the chapter
         chapter_text = await llm.generate(
             prompt,
-            max_tokens=12000,  # Chapters need more tokens
+            max_tokens=max_tokens,
             temperature=0.8   # Slightly more creative for prose
         )
 
-        # Generate a summary for context in next chapter
-        summary_prompt = f"""Summarize this chapter in 2-3 sentences, focusing on:
+        # Skip summary in quick mode to save time
+        if quick_mode:
+            summary = f"Preview of Chapter {chapter_number}"
+        else:
+            # Generate a summary for context in next chapter
+            summary_prompt = f"""Summarize this chapter in 2-3 sentences, focusing on:
 1. Key plot developments
 2. Character emotional state at end
 3. Any cliffhangers or hooks
@@ -172,8 +188,7 @@ Chapter text:
 {chapter_text[:3000]}...
 
 Summary:"""
-
-        summary = await llm.generate(summary_prompt, max_tokens=200)
+            summary = await llm.generate(summary_prompt, max_tokens=200)
 
         word_count = len(chapter_text.split())
 
@@ -183,9 +198,10 @@ Summary:"""
             "text": chapter_text,
             "summary": summary,
             "word_count": word_count,
-            "target_word_count": chapter_data.get("word_target", 3000),
+            "target_word_count": word_target,
             "pov": chapter_data.get("pov", "Unknown"),
-            "scenes_written": len(chapter_data.get("scenes", []))
+            "scenes_written": len(chapter_data.get("scenes", [])),
+            "quick_mode": quick_mode
         }
     else:
         # Demo mode placeholder
