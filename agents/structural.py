@@ -184,6 +184,13 @@ For each scene include:
 - Conflict type
 - Outcome
 
+## Hard Requirements (must comply)
+- Return ONLY valid JSON (no markdown).
+- Chapter numbers must be contiguous and increasing starting at 1 (1..N).
+- Each chapter must have at least 1 scene.
+- Each scene must have a numeric word_target.
+- For each chapter: sum(scene.word_target) should be close to chapter.word_target (within ±35%).
+
 ## Output Format (JSON):
 {{
     "chapter_outline": [
@@ -259,6 +266,11 @@ Define the complete voice specification:
    - Character voice differentiation
 
 7. **Style Guide**: Dos and don'ts
+
+## Hard Requirements (must comply)
+- Return ONLY valid JSON (no markdown).
+- Include at least 1 non-empty example passage in style_guide.example_passages.
+- Example passage(s) must demonstrate the POV + tense + tone rules you specify.
 
 ## Output Format (JSON):
 {{
@@ -537,7 +549,9 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
             "style_guide": {
                 "dos": ["Show don't tell", "Active voice", "Specific details"],
                 "donts": ["Adverb overuse", "Purple prose", "Info dumps"],
-                "example_passages": ["[Example of ideal style]"]
+                "example_passages": [
+                    "He watched the elevator numbers climb as if they were a verdict. When the doors opened, the air on the executive floor smelled faintly of citrus and expensive coffee, and he felt his jaw tighten before he could stop it."
+                ]
             }
         }
 

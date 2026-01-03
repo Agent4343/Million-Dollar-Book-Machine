@@ -101,7 +101,7 @@ class ClaudeLLMClient:
                     content = self._fix_truncated_json(content)
 
             if response_format == "json":
-                # Extract JSON from response (handle markdown code blocks)
+                # Extract JSON from response (handle markdown code blocks / stray text)
                 json_str = self._extract_json(content)
                 return json.loads(json_str)
 
@@ -116,7 +116,11 @@ class ClaudeLLMClient:
             raise ValueError(f"Invalid JSON response from Claude: {e}")
 
     def _extract_json(self, content: str) -> str:
-        """Extract JSON from response, handling markdown code blocks."""
+        """
+        Extract JSON from a response, handling:
+        - Markdown code fences
+        - Leading/trailing commentary
+        """
         content = content.strip()
 
         # Remove markdown code blocks if present
@@ -128,7 +132,41 @@ class ClaudeLLMClient:
         if content.endswith("```"):
             content = content[:-3]
 
-        return content.strip()
+        content = content.strip()
+
+        # Fast path: already valid JSON
+        if content and content[0] in "{[":
+            return content
+
+        # If there's surrounding text, try to grab the outermost JSON object/array.
+        first_obj = content.find("{")
+        first_arr = content.find("[")
+        starts = [i for i in [first_obj, first_arr] if i != -1]
+        if not starts:
+            return content
+
+        start = min(starts)
+        # Heuristic end: last closing brace/bracket
+        last_obj = content.rfind("}")
+        last_arr = content.rfind("]")
+        end = max(last_obj, last_arr)
+        if end == -1 or end <= start:
+            return content[start:]
+
+        candidate = content[start : end + 1].strip()
+
+        # Try trimming from the end until JSON parses (handles extra trailing text).
+        # Keep this bounded to avoid pathological behavior.
+        for _ in range(25):
+            try:
+                json.loads(candidate)
+                return candidate
+            except Exception:
+                candidate = candidate[:-1].rstrip()
+                if not candidate:
+                    break
+
+        return content[start : end + 1].strip()
 
     def _fix_truncated_json(self, content: str) -> str:
         """Attempt to fix truncated JSON by closing open brackets."""

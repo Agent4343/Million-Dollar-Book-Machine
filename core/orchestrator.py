@@ -17,6 +17,7 @@ from models.state import (
     AgentStatus, LayerStatus, LAYERS
 )
 from models.agents import AGENT_REGISTRY, AgentDefinition, get_agent_execution_order
+from core.gates import validate_agent_output
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ class Orchestrator:
 
         # Unlock layer 0
         project.layers[0].status = LayerStatus.AVAILABLE
+        project.current_layer = 0
 
         self.projects[project.project_id] = project
         logger.info(f"Created project: {project.project_id} - {title}")
@@ -236,18 +238,41 @@ class Orchestrator:
                 # Default executor that returns placeholder
                 result = self._default_executor(context)
 
+            # Optional self-heal loop: if we expect JSON/dict and gates fail, ask the LLM
+            # to repair the output using the gate errors and retry within this attempt.
+            repair_rounds = 0
+            max_repairs = 2
+            gate_result, normalized = self._validate_and_normalize_gate(agent_def, result)
+            while (
+                not gate_result.passed
+                and self.llm_client is not None
+                and isinstance(result, dict)
+                and repair_rounds < max_repairs
+            ):
+                repaired = await self._repair_output(
+                    agent_def=agent_def,
+                    inputs=inputs,
+                    bad_output=result,
+                    gate_result=gate_result,
+                )
+                if repaired is None:
+                    break
+                result = repaired
+                repair_rounds += 1
+                gate_result, normalized = self._validate_and_normalize_gate(agent_def, result)
+
             # Create output
             output = AgentOutput(
                 agent_id=agent_id,
-                content=result,
+                content=normalized if isinstance(normalized, dict) and normalized else (result if isinstance(result, dict) else {"result": result}),
                 metadata={
                     "attempt": agent_state.attempts,
-                    "inputs_used": list(inputs.keys())
+                    "inputs_used": list(inputs.keys()),
+                    "repair_rounds": repair_rounds,
                 }
             )
 
-            # Validate gate
-            gate_result = self._validate_gate(agent_def, output)
+            # Gate result from validation above
             output.gate_result = gate_result
 
             if gate_result.passed:
@@ -295,40 +320,99 @@ class Orchestrator:
 
         return result
 
-    def _validate_gate(self, agent_def: AgentDefinition, output: AgentOutput) -> GateResult:
+    def _validate_and_normalize_gate(
+        self,
+        agent_def: AgentDefinition,
+        result: Any,
+    ) -> tuple[GateResult, Dict[str, Any]]:
         """
-        Validate an agent's output against its gate criteria.
+        Validate and normalize an agent's output against its gate.
 
-        In production, this would do sophisticated validation.
-        For now, checks that all expected outputs exist.
+        This performs:
+        - Required key checks (backwards compatible with agent_def.outputs)
+        - Pydantic schema checks for supported agents
+        - Lightweight semantic sanity checks
         """
-        content = output.content
-        missing_outputs = []
-
-        for expected in agent_def.outputs:
-            if expected not in content:
-                missing_outputs.append(expected)
-
-        if missing_outputs:
-            return GateResult(
-                passed=False,
-                message=f"Missing outputs: {missing_outputs}",
-                details={"missing": missing_outputs}
+        if not isinstance(result, dict):
+            return (
+                GateResult(
+                    passed=False,
+                    message="Agent returned non-JSON output where JSON was expected.",
+                    details={"error": "non_dict_output", "type": str(type(result))},
+                ),
+                {},
             )
 
-        # Check for explicit failure markers
-        if content.get("_gate_failed"):
-            return GateResult(
-                passed=False,
-                message=content.get("_gate_message", "Gate validation failed"),
-                details=content.get("_gate_details", {})
+        # Explicit failure markers from agents (kept for compatibility)
+        if result.get("_gate_failed"):
+            return (
+                GateResult(
+                    passed=False,
+                    message=result.get("_gate_message", "Gate validation failed"),
+                    details=result.get("_gate_details", {}),
+                ),
+                result,
             )
 
-        return GateResult(
-            passed=True,
-            message="All outputs present and gate passed",
-            details={"outputs": list(content.keys())}
+        passed, message, details, normalized = validate_agent_output(
+            agent_id=agent_def.agent_id,
+            content=result,
+            expected_outputs=agent_def.outputs,
         )
+
+        return GateResult(passed=passed, message=message, details=details), normalized
+
+    async def _repair_output(
+        self,
+        *,
+        agent_def: AgentDefinition,
+        inputs: Dict[str, Any],
+        bad_output: Dict[str, Any],
+        gate_result: GateResult,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Ask the LLM to repair an invalid JSON output.
+
+        This is a focused "fix the JSON to satisfy constraints" step, not a re-run.
+        """
+        if self.llm_client is None:
+            return None
+
+        # Keep repair prompt small: inputs can be huge.
+        # We send only the *keys* of inputs plus user_constraints if present.
+        input_keys = list(inputs.keys())
+        user_constraints = inputs.get("user_constraints", {})
+
+        prompt = f"""You are repairing the output of agent "{agent_def.agent_id}" ({agent_def.name}).
+
+The previous JSON output FAILED validation.
+
+## Validation failure
+Message: {gate_result.message}
+Details: {json.dumps(gate_result.details, ensure_ascii=False)}
+
+## Required output keys
+{json.dumps(agent_def.outputs)}
+
+## Available input keys (do not request more)
+{json.dumps(input_keys)}
+
+## User constraints (if relevant)
+{json.dumps(user_constraints, ensure_ascii=False)}
+
+## Bad JSON output to repair
+{json.dumps(bad_output, ensure_ascii=False)}
+
+Return ONLY corrected JSON (no markdown, no commentary)."""
+
+        try:
+            repaired = await self.llm_client.generate(prompt, response_format="json", temperature=0.2, max_tokens=8000)
+            if isinstance(repaired, dict):
+                return repaired
+            return None
+        except Exception:
+            logger.exception("Repair attempt failed")
+            return None
 
     def _check_layer_completion(self, project: BookProject, layer_id: int) -> None:
         """Check if a layer is complete and unlock the next one."""
@@ -343,11 +427,13 @@ class Orchestrator:
         if all_passed:
             layer.status = LayerStatus.COMPLETED
             layer.completed_at = datetime.utcnow().isoformat()
+            project.current_layer = layer_id
 
             # Unlock next layer
             next_layer_id = layer_id + 1
             if next_layer_id in project.layers:
                 project.layers[next_layer_id].status = LayerStatus.AVAILABLE
+                project.current_layer = next_layer_id
 
             logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
 

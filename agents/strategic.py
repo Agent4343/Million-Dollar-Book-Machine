@@ -11,6 +11,7 @@ These agents establish the foundational strategy for the book:
 
 from typing import Dict, Any
 from core.orchestrator import ExecutionContext
+from models.agents import AGENT_REGISTRY, get_agent_execution_order
 
 
 # =============================================================================
@@ -21,13 +22,8 @@ async def execute_orchestrator(context: ExecutionContext) -> Dict[str, Any]:
     """Execute orchestrator agent - initializes the pipeline."""
     # The orchestrator doesn't need LLM - it just sets up the pipeline
     return {
-        "agent_map": list(context.inputs.get("user_constraints", {}).keys()),
-        "stage_order": [
-            "market_intelligence", "concept_definition", "thematic_architecture",
-            "story_question", "world_rules", "character_architecture",
-            "relationship_dynamics", "plot_structure", "pacing_design",
-            "chapter_blueprint", "voice_specification", "draft_generation"
-        ],
+        "agent_map": sorted(list(AGENT_REGISTRY.keys())),
+        "stage_order": get_agent_execution_order(),
         "state_json": {
             "initialized": True,
             "title": context.project.title,
