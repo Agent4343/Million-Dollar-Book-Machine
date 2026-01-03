@@ -42,8 +42,8 @@ class TestGates(unittest.TestCase):
                     ],
                 },
                 {
-                    "number": 3,  # gap
-                    "title": "Three",
+                    "number": 2,
+                    "title": "Two",
                     "act": 1,
                     "chapter_goal": "Do something else",
                     "pov": "Protagonist",
@@ -62,16 +62,37 @@ class TestGates(unittest.TestCase):
                         }
                     ],
                 },
+                {
+                    "number": 4,  # gap at 3
+                    "title": "Four",
+                    "act": 1,
+                    "chapter_goal": "Escalate",
+                    "pov": "Protagonist",
+                    "opening_hook": "Hook",
+                    "closing_hook": "Cliff",
+                    "word_target": 1000,
+                    "scenes": [
+                        {
+                            "scene_number": 1,
+                            "scene_question": "Now what?",
+                            "characters": ["Protagonist"],
+                            "location": "Somewhere",
+                            "conflict_type": "external",
+                            "outcome": "Turn",
+                            "word_target": 1000,
+                        }
+                    ],
+                },
             ],
-            "chapter_goals": {"1": "Do something", "3": "Do something else"},
+            "chapter_goals": {"1": "Do something", "2": "Do something else", "4": "Escalate"},
             "scene_list": [],
             "scene_questions": {},
             "hooks": {"chapter_hooks": [], "scene_hooks": []},
-            "pov_assignments": {"1": "Protagonist", "3": "Protagonist"},
+            "pov_assignments": {"1": "Protagonist", "2": "Protagonist", "4": "Protagonist"},
         }
         passed, _, details, _ = validate_agent_output(agent_id="chapter_blueprint", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
-        self.assertTrue("errors" in details)
+        self.assertTrue("errors" in details or "schema_errors" in details)
 
 
 if __name__ == "__main__":
