@@ -415,6 +415,19 @@ FINAL_VALIDATION = AgentDefinition(
     dependencies=["beta_simulation"]
 )
 
+PRODUCTION_READINESS = AgentDefinition(
+    agent_id="production_readiness",
+    name="Production Readiness Report",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Create a QA-style release checklist and blockers for publication",
+    inputs=["edited_chapters", "release_recommendation", "metadata", "user_constraints"],
+    outputs=["quality_score", "release_blockers", "major_issues", "minor_issues", "recommended_actions"],
+    gate_criteria="No release blockers and quality_score >= 85",
+    fail_condition="Release blockers present or quality score below threshold",
+    dependencies=["final_validation"]
+)
+
 PUBLISHING_PACKAGE = AgentDefinition(
     agent_id="publishing_package",
     name="Publishing Package",
@@ -425,7 +438,7 @@ PUBLISHING_PACKAGE = AgentDefinition(
     outputs=["blurb", "synopsis", "metadata", "keywords", "series_hooks", "author_bio"],
     gate_criteria="Platform-ready package complete",
     fail_condition="Weak positioning or missing elements",
-    dependencies=["final_validation"]
+    dependencies=["final_validation", "production_readiness"]
 )
 
 IP_CLEARANCE = AgentDefinition(
@@ -481,6 +494,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "beta_simulation": BETA_SIMULATION,
     # Layer 19-20: Final
     "final_validation": FINAL_VALIDATION,
+    "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
     "ip_clearance": IP_CLEARANCE,
 }

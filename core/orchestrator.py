@@ -159,6 +159,7 @@ class Orchestrator:
 
         # Add user constraints
         inputs["user_constraints"] = project.user_constraints
+        inputs["title"] = project.title
 
         # Gather from dependencies and their outputs
         for dep_id in agent_def.dependencies:
@@ -170,6 +171,38 @@ class Orchestrator:
         for input_name in agent_def.inputs:
             if input_name in project.user_constraints:
                 inputs[input_name] = project.user_constraints[input_name]
+
+            # If the input name is an agent id, include that agent's full output
+            # (this fixes common wiring issues like draft_generation needing chapter_blueprint).
+            if input_name in AGENT_REGISTRY:
+                upstream = self._find_agent_state(project, input_name)
+                if upstream and upstream.current_output:
+                    inputs[input_name] = upstream.current_output.content
+
+            # Derived inputs
+            if input_name == "title":
+                inputs["title"] = project.title
+            if input_name == "character_names":
+                ca = self._find_agent_state(project, "character_architecture")
+                names: List[str] = []
+                if ca and ca.current_output and isinstance(ca.current_output.content, dict):
+                    cap = ca.current_output.content
+                    pro = (cap.get("protagonist_profile") or {}) if isinstance(cap.get("protagonist_profile"), dict) else {}
+                    ant = (cap.get("antagonist_profile") or {}) if isinstance(cap.get("antagonist_profile"), dict) else {}
+                    if pro.get("name"):
+                        names.append(pro["name"])
+                    if ant.get("name"):
+                        names.append(ant["name"])
+                    for s in cap.get("supporting_cast") or []:
+                        if isinstance(s, dict) and s.get("name"):
+                            names.append(s["name"])
+                # De-dup while preserving order
+                deduped: List[str] = []
+                for n in names:
+                    if n and n not in deduped:
+                        deduped.append(n)
+                if deduped:
+                    inputs["character_names"] = deduped
 
             # Search all completed agents for this output
             for layer in project.layers.values():
@@ -513,8 +546,8 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
 
     def export_manuscript(self, project: BookProject) -> Dict[str, Any]:
         """Export the generated manuscript and metadata."""
-        # Gather all chapter content from draft_generation agent
-        draft_agent = self._find_agent_state(project, "draft_generation")
+        # Prefer explicitly written chapters (chapter writer endpoint),
+        # then edited/revised drafts, then raw draft_generation output.
 
         manuscript = {
             "title": project.title,
@@ -523,9 +556,32 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
             "metadata": {}
         }
 
-        if draft_agent and draft_agent.current_output:
-            content = draft_agent.current_output.content
-            manuscript["chapters"] = content.get("chapters", [])
+        # 1) Chapters written via chapter writer endpoint
+        if isinstance(project.manuscript.get("chapters"), list) and project.manuscript.get("chapters"):
+            manuscript["chapters"] = project.manuscript.get("chapters", [])
+        else:
+            # 2) Prefer line-edited chapters if available
+            line_edit = self._find_agent_state(project, "line_edit")
+            if line_edit and line_edit.current_output:
+                content = line_edit.current_output.content
+                if isinstance(content, dict) and isinstance(content.get("edited_chapters"), list):
+                    manuscript["chapters"] = content.get("edited_chapters", [])
+
+            # 3) Revised chapters
+            if not manuscript["chapters"]:
+                rewrite = self._find_agent_state(project, "structural_rewrite")
+                if rewrite and rewrite.current_output:
+                    content = rewrite.current_output.content
+                    if isinstance(content, dict) and isinstance(content.get("revised_chapters"), list):
+                        manuscript["chapters"] = content.get("revised_chapters", [])
+
+            # 4) Raw draft generation
+            if not manuscript["chapters"]:
+                draft_agent = self._find_agent_state(project, "draft_generation")
+                if draft_agent and draft_agent.current_output:
+                    content = draft_agent.current_output.content
+                    if isinstance(content, dict) and isinstance(content.get("chapters"), list):
+                        manuscript["chapters"] = content.get("chapters", [])
 
         # Gather publishing package
         pub_agent = self._find_agent_state(project, "publishing_package")

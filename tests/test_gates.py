@@ -1,6 +1,8 @@
 import unittest
 
 from core.gates import validate_agent_output
+from core.orchestrator import Orchestrator
+from models.state import AgentStatus
 
 
 class TestGates(unittest.TestCase):
@@ -93,6 +95,20 @@ class TestGates(unittest.TestCase):
         passed, _, details, _ = validate_agent_output(agent_id="chapter_blueprint", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
         self.assertTrue("errors" in details or "schema_errors" in details)
+
+    def test_gather_inputs_includes_agent_id_inputs(self):
+        orch = Orchestrator(llm_client=None)
+        project = orch.create_project("Test", {"genre": "Fiction"})
+
+        # Mark chapter_blueprint as passed with a minimal valid structure
+        cb_state = orch._find_agent_state(project, "chapter_blueprint")  # type: ignore[attr-defined]
+        self.assertIsNotNone(cb_state)
+        cb_state.status = AgentStatus.PASSED
+        cb_state.current_output = type("O", (), {"content": {"chapter_outline": []}})()  # minimal stub
+
+        inputs = orch.gather_inputs(project, "draft_generation")
+        # draft_generation declares "chapter_blueprint" as an input; ensure it gets the upstream output by agent id.
+        self.assertIn("chapter_blueprint", inputs)
 
 
 if __name__ == "__main__":

@@ -20,9 +20,29 @@ from core.orchestrator import ExecutionContext
 # EXECUTOR FUNCTIONS
 # =============================================================================
 
+def _best_available_chapters(context: ExecutionContext) -> List[Dict[str, Any]]:
+    """
+    Try to locate the best available chapter list in a consistent order.
+
+    This keeps the executors aligned with AgentDefinition.inputs, while remaining
+    backwards-compatible with earlier wiring that passed draft_generation output
+    under the "draft_generation" key.
+    """
+    for key in ("edited_chapters", "revised_chapters", "chapters"):
+        val = context.inputs.get(key)
+        if isinstance(val, list):
+            return val
+    dg = context.inputs.get("draft_generation")
+    if isinstance(dg, dict):
+        chapters = dg.get("chapters")
+        if isinstance(chapters, list):
+            return chapters
+    return []
+
+
 async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
     """Audit for continuity and logic errors."""
-    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
+    chapters = _best_available_chapters(context)
     world_rules = context.inputs.get("world_rules", {})
     characters = context.inputs.get("character_architecture", {})
 
@@ -54,8 +74,8 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
 
 async def execute_emotional_validation(context: ExecutionContext) -> Dict[str, Any]:
     """Validate emotional impact and arc fulfillment."""
-    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
-    protagonist_arc = context.inputs.get("character_architecture", {}).get("protagonist_arc", {})
+    chapters = _best_available_chapters(context)
+    protagonist_arc = context.inputs.get("protagonist_arc") or context.inputs.get("character_architecture", {}).get("protagonist_arc", {})
 
     return {
         "scene_resonance_scores": {
@@ -83,7 +103,7 @@ async def execute_emotional_validation(context: ExecutionContext) -> Dict[str, A
 
 async def execute_originality_scan(context: ExecutionContext) -> Dict[str, Any]:
     """Scan for creative originality issues."""
-    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
+    chapters = _best_available_chapters(context)
 
     return {
         "structural_similarity_report": {
@@ -149,7 +169,7 @@ async def execute_transformative_verification(context: ExecutionContext) -> Dict
 
 async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any]:
     """Perform structural and prose rewrites."""
-    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
+    chapters = _best_available_chapters(context)
     continuity_report = context.inputs.get("continuity_audit", {}).get("continuity_report", {})
 
     # In production, this would rewrite flagged sections
@@ -178,8 +198,8 @@ async def execute_post_rewrite_scan(context: ExecutionContext) -> Dict[str, Any]
 
 async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
     """Perform line and copy editing."""
-    revised_chapters = context.inputs.get("structural_rewrite", {}).get("revised_chapters", [])
-    style_guide = context.inputs.get("voice_specification", {}).get("style_guide", {})
+    revised_chapters = context.inputs.get("revised_chapters") or context.inputs.get("structural_rewrite", {}).get("revised_chapters", [])
+    style_guide = context.inputs.get("style_guide") or context.inputs.get("voice_specification", {}).get("style_guide", {})
 
     # In production, this would edit each chapter
     edited_chapters = revised_chapters.copy()
@@ -199,8 +219,8 @@ async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
 
 async def execute_beta_simulation(context: ExecutionContext) -> Dict[str, Any]:
     """Simulate beta reader response."""
-    edited_chapters = context.inputs.get("line_edit", {}).get("edited_chapters", [])
-    reader_avatar = context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
+    edited_chapters = context.inputs.get("edited_chapters") or context.inputs.get("line_edit", {}).get("edited_chapters", [])
+    reader_avatar = context.inputs.get("reader_avatar") or context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
 
     return {
         "dropoff_points": [],
@@ -222,8 +242,8 @@ async def execute_beta_simulation(context: ExecutionContext) -> Dict[str, Any]:
 
 async def execute_final_validation(context: ExecutionContext) -> Dict[str, Any]:
     """Final quality validation before release."""
-    core_promise = context.inputs.get("concept_definition", {}).get("core_promise", {})
-    theme = context.inputs.get("thematic_architecture", {}).get("primary_theme", {})
+    core_promise = context.inputs.get("core_promise") or context.inputs.get("concept_definition", {}).get("core_promise", {})
+    theme = context.inputs.get("primary_theme") or context.inputs.get("thematic_architecture", {}).get("primary_theme", {})
 
     return {
         "concept_match_score": 92,
@@ -245,10 +265,71 @@ async def execute_final_validation(context: ExecutionContext) -> Dict[str, Any]:
     }
 
 
+async def execute_production_readiness(context: ExecutionContext) -> Dict[str, Any]:
+    """Generate a professional production-readiness QA report."""
+    llm = context.llm_client
+    chapters = _best_available_chapters(context)
+    release = context.inputs.get("release_recommendation") or context.inputs.get("final_validation", {}).get("release_recommendation", {})
+    constraints = context.inputs.get("user_constraints", {})
+
+    # If we have an LLM, generate a structured QA report based on actual manuscript content.
+    if llm and chapters:
+        sample_text = ""
+        # Keep token use bounded: sample opening + mid + ending snippets if present.
+        picks = []
+        if len(chapters) >= 1:
+            picks.append(chapters[0])
+        if len(chapters) >= 3:
+            picks.append(chapters[len(chapters) // 2])
+        if len(chapters) >= 2:
+            picks.append(chapters[-1])
+        for ch in picks:
+            if isinstance(ch, dict) and isinstance(ch.get("text"), str):
+                sample_text += f"\n\n---\nCHAPTER {ch.get('chapter_number') or ch.get('number')}: {ch.get('title','')}\n{ch.get('text')[:1800]}\n"
+
+        prompt = f"""You are a senior publishing editor producing a production-readiness QA report.
+
+Project constraints: {constraints}
+Release recommendation (if present): {release}
+
+Manuscript sample:
+{sample_text}
+
+Return ONLY valid JSON with this shape:
+{{
+  "quality_score": <int 0-100>,
+  "release_blockers": [<string>],
+  "major_issues": [<string>],
+  "minor_issues": [<string>],
+  "recommended_actions": [<string>]
+}}
+
+Guidance:
+- Release blockers are issues that must be fixed before publication (e.g., continuity break, legal risk, severe grammar).
+- Keep items actionable and specific."""
+        return await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=2500)
+
+    # Demo / fallback
+    return {
+        "quality_score": 85,
+        "release_blockers": [],
+        "major_issues": ["Run full LLM-based QA on the completed manuscript for continuity, style consistency, and copyedit polish."],
+        "minor_issues": ["Consider tightening mid-book pacing based on beta simulation feedback."],
+        "recommended_actions": ["Perform final proofread pass", "Verify front/back matter and metadata", "Generate ARC copy for beta readers"]
+    }
+
+
 async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any]:
     """Create publishing-ready materials."""
-    core_promise = context.inputs.get("concept_definition", {})
-    reader_avatar = context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
+    core_promise = context.inputs.get("core_promise") or context.inputs.get("concept_definition", {})
+    reader_avatar = context.inputs.get("reader_avatar") or context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
+    chapters = _best_available_chapters(context)
+    word_count = 0
+    for c in chapters:
+        if isinstance(c, dict):
+            wc = c.get("word_count")
+            if isinstance(wc, int):
+                word_count += wc
 
     return {
         "blurb": "[Compelling 150-word book description would be generated here]",
@@ -256,7 +337,7 @@ async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any
         "metadata": {
             "title": context.project.title,
             "genre": context.inputs.get("user_constraints", {}).get("genre", "Fiction"),
-            "word_count": sum(c.get("word_count", 0) for c in context.inputs.get("draft_generation", {}).get("chapters", [])),
+            "word_count": word_count,
             "audience": "Adult"
         },
         "keywords": ["transformation", "journey", "discovery", "contemporary"],
@@ -303,6 +384,7 @@ VALIDATION_EXECUTORS = {
     "line_edit": execute_line_edit,
     "beta_simulation": execute_beta_simulation,
     "final_validation": execute_final_validation,
+    "production_readiness": execute_production_readiness,
     "publishing_package": execute_publishing_package,
     "ip_clearance": execute_ip_clearance,
 }

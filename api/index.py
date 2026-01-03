@@ -36,6 +36,7 @@ from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
+from core.schemas import AGENT_OUTPUT_MODELS
 
 # Initialize app
 app = FastAPI(
@@ -231,7 +232,8 @@ async def list_agents(auth: bool = Depends(require_auth)):
             "type": agent_def.agent_type.value,
             "purpose": agent_def.purpose,
             "gate": agent_def.gate_criteria,
-            "fail_condition": agent_def.fail_condition
+            "fail_condition": agent_def.fail_condition,
+            "has_executor": agent_def.agent_id in ALL_EXECUTORS,
         })
     return {"agents": sorted(agents, key=lambda x: (x["layer"], x["id"]))}
 
@@ -248,6 +250,28 @@ async def list_layers(auth: bool = Depends(require_auth)):
             "agents": agents
         })
     return {"layers": layers}
+
+
+@app.get("/api/system/executors-health")
+async def executors_health(auth: bool = Depends(require_auth)):
+    """Check whether every registered agent has an executor."""
+    missing = []
+    for agent_id in AGENT_REGISTRY.keys():
+        if agent_id not in ALL_EXECUTORS:
+            missing.append(
+                {
+                    "agent_id": agent_id,
+                    "name": AGENT_REGISTRY[agent_id].name,
+                    "layer": AGENT_REGISTRY[agent_id].layer,
+                    "schema_backed": agent_id in AGENT_OUTPUT_MODELS,
+                }
+            )
+    return {
+        "ok": len(missing) == 0,
+        "missing_executors": missing,
+        "total_agents": len(AGENT_REGISTRY),
+        "total_executors": len(ALL_EXECUTORS),
+    }
 
 
 # =============================================================================
