@@ -19,6 +19,16 @@ class TestGates(unittest.TestCase):
         passed, _, _, _ = validate_agent_output(agent_id="voice_specification", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
 
+    def test_draft_generation_requires_chapters(self):
+        bad = {
+            "chapters": [],
+            "chapter_metadata": [],
+            "word_counts": {},
+            "scene_tags": {},
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
     def test_chapter_blueprint_requires_contiguous_numbers(self):
         bad = {
             "chapter_outline": [

@@ -312,7 +312,8 @@ PLAGIARISM_AUDIT = AgentDefinition(
     layer=15,
     agent_type=AgentType.LEGAL,
     purpose="Assess legal risk from similarity to existing works",
-    inputs=["chapters", "originality_scan_results"],
+    # Use the producing agent id so orchestrator wiring is reliable.
+    inputs=["chapters", "originality_scan"],
     outputs=[
         "substantial_similarity_check", "character_likeness_check",
         "scene_replication_check", "protected_expression_check", "legal_risk_score"
@@ -328,7 +329,7 @@ TRANSFORMATIVE_VERIFICATION = AgentDefinition(
     layer=15,
     agent_type=AgentType.LEGAL,
     purpose="Verify legal defensibility of creative choices",
-    inputs=["plagiarism_audit_results", "chapters"],
+    inputs=["chapters", "plagiarism_audit"],
     outputs=["independent_creation_proof", "market_confusion_check", "transformative_distance"],
     gate_criteria="Sufficient transformative distance",
     fail_condition="Derivative exposure risk",
@@ -346,7 +347,8 @@ STRUCTURAL_REWRITE = AgentDefinition(
     layer=16,
     agent_type=AgentType.EDITING,
     purpose="Improve clarity, force, and resolve flagged issues",
-    inputs=["chapters", "continuity_report", "emotional_validation_results", "originality_flags"],
+    # Use producing agent ids so inputs are always discoverable.
+    inputs=["chapters", "continuity_audit", "emotional_validation", "originality_scan", "plagiarism_audit", "transformative_verification"],
     outputs=["revised_chapters", "revision_log", "resolved_flags"],
     gate_criteria="All flagged issues resolved",
     fail_condition="New inconsistencies introduced",

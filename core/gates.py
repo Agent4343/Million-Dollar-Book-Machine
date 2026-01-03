@@ -128,6 +128,42 @@ def validate_agent_output(
                 normalized_content,
             )
 
+    if agent_id == "draft_generation":
+        chapters = normalized_content.get("chapters") or []
+        if not isinstance(chapters, list) or not chapters:
+            return False, "Draft must include at least one chapter.", {"errors": [{"msg": "empty_chapters"}]}, normalized_content
+
+        bad = []
+        for ch in chapters[:5]:  # only sample-check first 5 to keep it cheap
+            if not isinstance(ch, dict):
+                bad.append({"msg": "non_object_chapter"})
+                continue
+            text = ch.get("text")
+            wc = ch.get("word_count", 0)
+            if isinstance(wc, int) and wc > 0 and isinstance(text, str):
+                approx = len(text.split())
+                # allow drift, but catch obviously wrong metadata
+                if approx and abs(approx - wc) > max(200, int(wc * 0.25)):
+                    bad.append({"chapter": ch.get("number"), "word_count": wc, "approx": approx})
+        if bad:
+            return (
+                False,
+                "Draft chapter word_count metadata appears inconsistent with text.",
+                {"errors": [{"msg": "word_count_mismatch", "examples": bad}]},
+                normalized_content,
+            )
+
+    if agent_id == "production_readiness":
+        blockers = normalized_content.get("release_blockers") if isinstance(normalized_content, dict) else None
+        score = normalized_content.get("quality_score") if isinstance(normalized_content, dict) else None
+        if isinstance(score, int) and score < 85 and (not blockers):
+            return (
+                False,
+                "Production readiness score is below threshold but release_blockers is empty.",
+                {"errors": [{"msg": "low_score_without_blockers", "quality_score": score}]},
+                normalized_content,
+            )
+
     if agent_id == "voice_specification":
         sg = (normalized_content.get("style_guide") or {}) if isinstance(normalized_content, dict) else {}
         examples = sg.get("example_passages") if isinstance(sg, dict) else None

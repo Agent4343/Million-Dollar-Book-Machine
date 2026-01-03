@@ -212,6 +212,43 @@ class CharacterArchitectureOutput(BaseModel):
     character_functions: CharacterFunctions
 
 
+class ConflictWebItem(BaseModel):
+    characters: List[str] = Field(min_length=2)
+    tension: str = Field(min_length=3)
+    source: str = Field(min_length=3)
+    each_wants: Dict[str, str] = Field(default_factory=dict)
+
+
+class PowerShiftItem(BaseModel):
+    characters: List[str] = Field(min_length=2)
+    initial_balance: str = Field(min_length=3)
+    shift_moment: str = Field(min_length=3)
+    final_state: str = Field(min_length=3)
+
+
+class DependencyArcItem(BaseModel):
+    dependent: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    nature: str = Field(min_length=3)
+    evolution: str = Field(min_length=3)
+    breaking_point: str = Field(min_length=3)
+
+
+class RelationshipMatrixItem(BaseModel):
+    char_a: str = Field(min_length=1)
+    char_b: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    start_state: str = Field(min_length=3)
+    end_state: str = Field(min_length=3)
+
+
+class RelationshipDynamicsOutput(BaseModel):
+    conflict_web: List[ConflictWebItem] = Field(min_length=1)
+    power_shifts: List[PowerShiftItem] = Field(min_length=1)
+    dependency_arcs: List[DependencyArcItem] = Field(min_length=1)
+    relationship_matrix: List[RelationshipMatrixItem] = Field(min_length=1)
+
+
 class PlotAct(BaseModel):
     percentage: int = Field(ge=1, le=100)
     purpose: str = Field(min_length=3)
@@ -388,6 +425,281 @@ class VoiceSpecificationOutput(BaseModel):
     style_guide: StyleGuide
 
 
+class ChapterText(BaseModel):
+    number: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    word_count: int = Field(ge=0)
+
+
+class ChapterMetadataItem(BaseModel):
+    number: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    scenes: int = Field(ge=0)
+    pov: str = Field(min_length=1)
+
+
+class DraftGenerationOutput(BaseModel):
+    chapters: List[ChapterText] = Field(min_length=1)
+    chapter_metadata: List[ChapterMetadataItem] = Field(min_length=1)
+    word_counts: Dict[str, int] = Field(default_factory=dict)
+    scene_tags: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditIssue(BaseModel):
+    chapter: Optional[int] = Field(default=None, ge=1)
+    location: str = Field(min_length=1)
+    severity: Literal["critical", "major", "minor"] = "minor"
+    description: str = Field(min_length=3)
+    suggested_fix: str = Field(min_length=3)
+
+
+class AuditCheck(BaseModel):
+    status: Literal["passed", "failed", "warning"] = "passed"
+    issues: List[AuditIssue] = Field(default_factory=list)
+    notes: str = Field(min_length=1)
+
+
+class ContinuityReport(BaseModel):
+    total_issues: int = Field(ge=0)
+    critical_issues: int = Field(ge=0)
+    warnings: int = Field(ge=0)
+    recommendation: str = Field(min_length=3)
+
+
+class ContinuityAuditOutput(BaseModel):
+    timeline_check: AuditCheck
+    character_logic_check: AuditCheck
+    world_rule_check: AuditCheck
+    continuity_report: ContinuityReport
+
+
+class ArcFulfillmentCheck(BaseModel):
+    protagonist_arc_complete: bool
+    transformation_earned: bool
+    supporting_arcs_resolved: bool
+    notes: str = Field(min_length=1)
+
+
+class EmotionalPeak(BaseModel):
+    chapter: int = Field(ge=1)
+    type: str = Field(min_length=1)
+    intensity: int = Field(ge=1, le=10)
+
+
+class EmotionalValidationOutput(BaseModel):
+    scene_resonance_scores: Dict[str, Any]
+    arc_fulfillment_check: ArcFulfillmentCheck
+    emotional_peaks_map: List[EmotionalPeak] = Field(default_factory=list)
+
+
+class StructuralSimilarityReport(BaseModel):
+    similar_works_found: List[str] = Field(default_factory=list)
+    similarity_level: str = Field(min_length=1)
+    unique_elements: List[str] = Field(default_factory=list)
+
+
+class PhraseRecurrenceCheck(BaseModel):
+    overused_phrases: List[str] = Field(default_factory=list)
+    cliches_found: List[str] = Field(default_factory=list)
+    recommendation: str = Field(min_length=1)
+
+
+class OriginalityScanOutput(BaseModel):
+    structural_similarity_report: StructuralSimilarityReport
+    phrase_recurrence_check: PhraseRecurrenceCheck
+    originality_score: int = Field(ge=0, le=100)
+
+
+class SimilarityCheck(BaseModel):
+    status: str = Field(min_length=1)
+    flags: List[str] = Field(default_factory=list)
+    confidence: int = Field(ge=0, le=100)
+
+
+class LikenessCheck(BaseModel):
+    status: str = Field(min_length=1)
+    similar_characters: List[str] = Field(default_factory=list)
+    notes: str = Field(min_length=1)
+
+
+class SceneReplicationCheck(BaseModel):
+    status: str = Field(min_length=1)
+    similar_scenes: List[str] = Field(default_factory=list)
+    notes: str = Field(min_length=1)
+
+
+class ProtectedExpressionCheck(BaseModel):
+    status: str = Field(min_length=1)
+    flags: List[str] = Field(default_factory=list)
+    notes: str = Field(min_length=1)
+
+
+class PlagiarismAuditOutput(BaseModel):
+    substantial_similarity_check: SimilarityCheck
+    character_likeness_check: LikenessCheck
+    scene_replication_check: SceneReplicationCheck
+    protected_expression_check: ProtectedExpressionCheck
+    legal_risk_score: int = Field(ge=0, le=100)
+
+
+class IndependentCreationProof(BaseModel):
+    documented: bool
+    creation_timeline: str = Field(min_length=1)
+    influence_sources: str = Field(min_length=1)
+
+
+class MarketConfusionCheck(BaseModel):
+    risk_level: str = Field(min_length=1)
+    similar_titles: List[str] = Field(default_factory=list)
+    recommendation: str = Field(min_length=1)
+
+
+class TransformativeDistance(BaseModel):
+    score: int = Field(ge=0, le=100)
+    analysis: str = Field(min_length=3)
+
+
+class TransformativeVerificationOutput(BaseModel):
+    independent_creation_proof: IndependentCreationProof
+    market_confusion_check: MarketConfusionCheck
+    transformative_distance: TransformativeDistance
+
+
+class RevisionLogItem(BaseModel):
+    chapter: int = Field(ge=1)
+    changes: str = Field(min_length=3)
+
+
+class StructuralRewriteOutput(BaseModel):
+    revised_chapters: List[ChapterText] = Field(min_length=1)
+    revision_log: List[RevisionLogItem] = Field(default_factory=list)
+    resolved_flags: int = Field(ge=0)
+
+
+class RewriteOriginalityCheck(BaseModel):
+    status: str = Field(min_length=1)
+    new_issues: List[str] = Field(default_factory=list)
+
+
+class PostRewriteScanOutput(BaseModel):
+    rewrite_originality_check: RewriteOriginalityCheck
+    new_similarity_flags: List[str] = Field(default_factory=list)
+
+
+class EditReport(BaseModel):
+    total_changes: int = Field(ge=0)
+    major_changes: int = Field(ge=0)
+    minor_changes: int = Field(ge=0)
+    readability_improvement: str = Field(min_length=1)
+
+
+class LineEditOutput(BaseModel):
+    edited_chapters: List[ChapterText] = Field(min_length=1)
+    grammar_fixes: int = Field(ge=0)
+    rhythm_improvements: int = Field(ge=0)
+    edit_report: EditReport
+
+
+class EngagementScores(BaseModel):
+    opening: float = Field(ge=0, le=10)
+    middle: float = Field(ge=0, le=10)
+    climax: float = Field(ge=0, le=10)
+    ending: float = Field(ge=0, le=10)
+    overall: float = Field(ge=0, le=10)
+
+
+class FeedbackSummary(BaseModel):
+    strengths: List[str] = Field(default_factory=list)
+    weaknesses: List[str] = Field(default_factory=list)
+    quotes: List[str] = Field(default_factory=list)
+
+
+class BetaSimulationOutput(BaseModel):
+    dropoff_points: List[str] = Field(default_factory=list)
+    confusion_zones: List[str] = Field(default_factory=list)
+    engagement_scores: EngagementScores
+    feedback_summary: FeedbackSummary
+
+
+class ThemePayoffCheck(BaseModel):
+    theme_delivered: bool
+    thematic_question_addressed: bool
+    value_conflict_resolved: bool
+
+
+class PromiseFulfillment(BaseModel):
+    core_promise_delivered: bool
+    reader_expectation_met: bool
+    emotional_payoff_achieved: bool
+
+
+class ReleaseRecommendation(BaseModel):
+    approved: bool
+    confidence: int = Field(ge=0, le=100)
+    notes: str = Field(min_length=1)
+
+
+class FinalValidationOutput(BaseModel):
+    concept_match_score: int = Field(ge=0, le=100)
+    theme_payoff_check: ThemePayoffCheck
+    promise_fulfillment: PromiseFulfillment
+    release_recommendation: ReleaseRecommendation
+
+
+class ProductionReadinessOutput(BaseModel):
+    quality_score: int = Field(ge=0, le=100)
+    release_blockers: List[str] = Field(default_factory=list)
+    major_issues: List[str] = Field(default_factory=list)
+    minor_issues: List[str] = Field(default_factory=list)
+    recommended_actions: List[str] = Field(default_factory=list)
+
+
+class PublishingMetadata(BaseModel):
+    title: str = Field(min_length=1)
+    genre: str = Field(min_length=1)
+    word_count: int = Field(ge=0)
+    audience: str = Field(min_length=1)
+
+
+class PublishingPackageOutput(BaseModel):
+    blurb: str = Field(min_length=1)
+    synopsis: str = Field(min_length=1)
+    metadata: PublishingMetadata
+    keywords: List[str] = Field(min_length=1)
+    series_hooks: List[str] = Field(default_factory=list)
+    author_bio: str = Field(min_length=1)
+
+
+class TitleConflictCheck(BaseModel):
+    status: str = Field(min_length=1)
+    similar_titles: List[str] = Field(default_factory=list)
+    recommendation: str = Field(min_length=1)
+
+
+class SeriesNamingCheck(BaseModel):
+    status: str = Field(min_length=1)
+    conflicts: List[str] = Field(default_factory=list)
+
+
+class CharacterNamingCheck(BaseModel):
+    status: str = Field(min_length=1)
+    conflicts: List[str] = Field(default_factory=list)
+
+
+class ClearanceStatus(BaseModel):
+    approved: bool
+    notes: str = Field(min_length=1)
+
+
+class IPClearanceOutput(BaseModel):
+    title_conflict_check: TitleConflictCheck
+    series_naming_check: SeriesNamingCheck
+    character_naming_check: CharacterNamingCheck
+    clearance_status: ClearanceStatus
+
+
 AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "market_intelligence": MarketIntelligenceOutput,
     "concept_definition": ConceptDefinitionOutput,
@@ -395,9 +707,24 @@ AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "story_question": StoryQuestionOutput,
     "world_rules": WorldRulesOutput,
     "character_architecture": CharacterArchitectureOutput,
+    "relationship_dynamics": RelationshipDynamicsOutput,
     "plot_structure": PlotStructureOutput,
     "pacing_design": PacingDesignOutput,
     "chapter_blueprint": ChapterBlueprintOutput,
     "voice_specification": VoiceSpecificationOutput,
+    "draft_generation": DraftGenerationOutput,
+    "continuity_audit": ContinuityAuditOutput,
+    "emotional_validation": EmotionalValidationOutput,
+    "originality_scan": OriginalityScanOutput,
+    "plagiarism_audit": PlagiarismAuditOutput,
+    "transformative_verification": TransformativeVerificationOutput,
+    "structural_rewrite": StructuralRewriteOutput,
+    "post_rewrite_scan": PostRewriteScanOutput,
+    "line_edit": LineEditOutput,
+    "beta_simulation": BetaSimulationOutput,
+    "final_validation": FinalValidationOutput,
+    "production_readiness": ProductionReadinessOutput,
+    "publishing_package": PublishingPackageOutput,
+    "ip_clearance": IPClearanceOutput,
 }
 
