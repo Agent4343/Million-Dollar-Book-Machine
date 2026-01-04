@@ -601,6 +601,58 @@ Rules:
     }
 
 
+async def execute_human_editor_review(context: ExecutionContext) -> Dict[str, Any]:
+    """Simulate a professional human editor review with required changes."""
+    llm = context.llm_client
+    chapters = _best_available_chapters(context)
+    constraints = context.inputs.get("user_constraints", {})
+    voice = context.inputs.get("voice_specification", {})
+    blueprint = context.inputs.get("chapter_blueprint", {})
+    concept = context.inputs.get("concept_definition", {})
+    theme = context.inputs.get("thematic_architecture", {})
+    story_q = context.inputs.get("story_question", {})
+
+    if llm and chapters:
+        prompt = f"""You are a senior publishing editor doing a final editorial review.
+
+You must be honest and specific. If the manuscript is not ready, set approved=false and list required_changes.
+
+Project constraints: {constraints}
+Concept: {concept}
+Theme: {theme}
+Story question: {story_q}
+Voice spec: {voice}
+Blueprint (outline): {blueprint}
+
+Manuscript sample:
+{_sample_manuscript(chapters)}
+
+Return ONLY valid JSON:
+{{
+  "approved": true,
+  "confidence": 0,
+  "editorial_letter": "...",
+  "required_changes": ["..."],
+  "optional_suggestions": ["..."]
+}}
+
+Rules:
+- confidence is 0-100.
+- If approved=true then required_changes MUST be empty.
+- If approved=false then required_changes MUST be non-empty and actionable.
+- editorial_letter should read like a real editor letter (strengths, weaknesses, priorities, next steps)."""
+        return await llm.generate(prompt, response_format="json", temperature=0.25, max_tokens=2400)
+
+    # Demo / fallback
+    return {
+        "approved": True,
+        "confidence": 70,
+        "editorial_letter": "Overall, the manuscript has a clear through-line and a readable voice. Before publication, run a full continuity pass, tighten mid-book pacing, and complete a final copyedit/proofread for consistency.",
+        "required_changes": [],
+        "optional_suggestions": ["Strengthen chapter-to-chapter hooks to increase momentum.", "Reduce repeated phrasing in high-tension scenes."]
+    }
+
+
 async def execute_production_readiness(context: ExecutionContext) -> Dict[str, Any]:
     """Generate a professional production-readiness QA report."""
     llm = context.llm_client
@@ -739,6 +791,7 @@ VALIDATION_EXECUTORS = {
     "post_rewrite_scan": execute_post_rewrite_scan,
     "line_edit": execute_line_edit,
     "beta_simulation": execute_beta_simulation,
+    "human_editor_review": execute_human_editor_review,
     "final_validation": execute_final_validation,
     "production_readiness": execute_production_readiness,
     "publishing_package": execute_publishing_package,

@@ -423,6 +423,28 @@ FINAL_VALIDATION = AgentDefinition(
     outputs=["concept_match_score", "theme_payoff_check", "promise_fulfillment", "release_recommendation"],
     gate_criteria="Release approved",
     fail_condition="Core promise not delivered",
+    dependencies=["human_editor_review"]
+)
+
+HUMAN_EDITOR_REVIEW = AgentDefinition(
+    agent_id="human_editor_review",
+    name="Human Editor Review (AI Simulation)",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Simulate a professional human editor's review with required changes and an editorial letter",
+    inputs=[
+        "edited_chapters",
+        "voice_specification",
+        "chapter_blueprint",
+        "market_intelligence",
+        "concept_definition",
+        "thematic_architecture",
+        "story_question",
+        "user_constraints",
+    ],
+    outputs=["approved", "confidence", "editorial_letter", "required_changes", "optional_suggestions"],
+    gate_criteria="approved=true and required_changes empty",
+    fail_condition="Editor requests required changes before publication",
     dependencies=["beta_simulation"]
 )
 
@@ -505,6 +527,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "beta_simulation": BETA_SIMULATION,
     # Layer 19-20: Final
     "final_validation": FINAL_VALIDATION,
+    "human_editor_review": HUMAN_EDITOR_REVIEW,
     "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
     "ip_clearance": IP_CLEARANCE,

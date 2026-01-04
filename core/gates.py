@@ -199,6 +199,24 @@ def validate_agent_output(
                 normalized_content,
             )
 
+    if agent_id == "human_editor_review":
+        approved = normalized_content.get("approved") if isinstance(normalized_content, dict) else None
+        required = normalized_content.get("required_changes") if isinstance(normalized_content, dict) else None
+        if approved is False and (not isinstance(required, list) or len(required) == 0):
+            return (
+                False,
+                "If approved=false, required_changes must be a non-empty list.",
+                {"errors": [{"msg": "not_approved_without_required_changes"}]},
+                normalized_content,
+            )
+        if approved is True and isinstance(required, list) and len(required) > 0:
+            return (
+                False,
+                "If approved=true, required_changes must be empty (or omit approval).",
+                {"errors": [{"msg": "approved_with_required_changes"}]},
+                normalized_content,
+            )
+
     if agent_id == "voice_specification":
         sg = (normalized_content.get("style_guide") or {}) if isinstance(normalized_content, dict) else {}
         examples = sg.get("example_passages") if isinstance(sg, dict) else None

@@ -660,6 +660,14 @@ class ProductionReadinessOutput(BaseModel):
     recommended_actions: List[str] = Field(default_factory=list)
 
 
+class HumanEditorReviewOutput(BaseModel):
+    approved: bool
+    confidence: int = Field(ge=0, le=100)
+    editorial_letter: str = Field(min_length=10)
+    required_changes: List[str] = Field(default_factory=list)
+    optional_suggestions: List[str] = Field(default_factory=list)
+
+
 class PublishingMetadata(BaseModel):
     title: str = Field(min_length=1)
     genre: str = Field(min_length=1)
@@ -727,6 +735,7 @@ AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "line_edit": LineEditOutput,
     "beta_simulation": BetaSimulationOutput,
     "final_validation": FinalValidationOutput,
+    "human_editor_review": HumanEditorReviewOutput,
     "production_readiness": ProductionReadinessOutput,
     "publishing_package": PublishingPackageOutput,
     "ip_clearance": IPClearanceOutput,

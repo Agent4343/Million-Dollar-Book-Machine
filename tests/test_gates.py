@@ -48,6 +48,17 @@ class TestGates(unittest.TestCase):
         self.assertFalse(passed)
         self.assertTrue("errors" in details)
 
+    def test_human_editor_review_not_approved_requires_required_changes(self):
+        bad = {
+            "approved": False,
+            "confidence": 60,
+            "editorial_letter": "Needs work.",
+            "required_changes": [],
+            "optional_suggestions": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="human_editor_review", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
     def test_chapter_blueprint_requires_contiguous_numbers(self):
         bad = {
             "chapter_outline": [
