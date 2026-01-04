@@ -563,6 +563,10 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
 
     chapters = []
     chapter_metadata = []
+    scene_tags: Dict[str, Any] = {}
+    deviations: List[Dict[str, Any]] = []
+    fix_plan: List[str] = []
+    chapter_scores: Dict[str, int] = {}
 
     outline = chapter_blueprint.get("chapter_outline", [])
 
@@ -589,6 +593,43 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
             chapter_text = await llm.generate(prompt)
             summary = await llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}")
 
+            # Evaluate outline adherence (structured) for this chapter
+            adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
+
+Blueprint for this chapter:
+{chapter}
+
+Generated chapter (truncated if needed):
+{chapter_text[:4500]}
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "outline_adherence_score": 0,
+  "scene_checks": [
+    {{"scene_number": 1, "present": true, "notes": "...", "deviation": false, "suggested_fix": "..."}}
+  ],
+  "chapter_deviations": [
+    {{"chapter": 1, "severity": "major|minor", "description": "...", "suggested_fix": "..."}}
+  ]
+}}
+
+Rules:
+- outline_adherence_score is 0-100.
+- scene_checks must include every scene_number listed in the blueprint.
+- If deviation=true, suggested_fix must be specific."""
+            adherence = await llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600)
+
+            score = adherence.get("outline_adherence_score")
+            if isinstance(score, int):
+                chapter_scores[str(chapter_num)] = score
+            else:
+                chapter_scores[str(chapter_num)] = 0
+
+            scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
+            for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
+                if isinstance(d, dict):
+                    deviations.append(d)
+
             chapters.append({
                 "number": chapter_num,
                 "title": chapter_title,
@@ -605,6 +646,8 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
                 "summary": f"Chapter {chapter_num} summary placeholder",
                 "word_count": 0
             })
+            chapter_scores[str(chapter_num)] = 0
+            scene_tags[f"Ch{chapter_num}"] = []
 
         chapter_metadata.append({
             "number": chapter_num,
@@ -613,11 +656,34 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
             "pov": chapter.get("pov", "Unknown")
         })
 
+    # Consolidate adherence across chapters
+    overall = 0
+    if chapter_scores:
+        overall = int(sum(chapter_scores.values()) / max(1, len(chapter_scores)))
+
+    outline_adherence = {
+        "overall_score": overall,
+        "chapter_scores": chapter_scores,
+        "notes": "Scores reflect blueprint adherence; investigate deviations for rewrite targets."
+    }
+
+    # Create a simple prioritized fix plan from deviations (fallback). LLM can refine later in rewrite agents.
+    if deviations:
+        fix_plan = [
+            f"Chapter {d.get('chapter','?')}: {d.get('suggested_fix') or d.get('description')}"
+            for d in deviations[:12]
+            if isinstance(d, dict)
+        ]
+
     return {
         "chapters": chapters,
         "chapter_metadata": chapter_metadata,
         "word_counts": {str(c["number"]): c["word_count"] for c in chapters},
-        "scene_tags": {}
+        "scene_tags": scene_tags,
+        "outline_adherence": outline_adherence,
+        "chapter_scores": chapter_scores,
+        "deviations": deviations,
+        "fix_plan": fix_plan
     }
 
 

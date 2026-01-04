@@ -445,6 +445,10 @@ class DraftGenerationOutput(BaseModel):
     chapter_metadata: List[ChapterMetadataItem] = Field(min_length=1)
     word_counts: Dict[str, int] = Field(default_factory=dict)
     scene_tags: Dict[str, Any] = Field(default_factory=dict)
+    outline_adherence: Dict[str, Any] = Field(default_factory=dict)
+    chapter_scores: Dict[str, int] = Field(default_factory=dict)
+    deviations: List[Dict[str, Any]] = Field(default_factory=list)
+    fix_plan: List[str] = Field(default_factory=list)
 
 
 class AuditIssue(BaseModel):

@@ -25,9 +25,28 @@ class TestGates(unittest.TestCase):
             "chapter_metadata": [],
             "word_counts": {},
             "scene_tags": {},
+            "outline_adherence": {},
+            "chapter_scores": {},
+            "deviations": [],
+            "fix_plan": [],
         }
         passed, _, _, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
+
+    def test_draft_generation_low_score_requires_deviations(self):
+        bad = {
+            "chapters": [{"number": 1, "title": "One", "text": "Hello", "summary": "Hi", "word_count": 1}],
+            "chapter_metadata": [{"number": 1, "title": "One", "scenes": 1, "pov": "Protagonist"}],
+            "word_counts": {"1": 1},
+            "scene_tags": {"Ch1": []},
+            "outline_adherence": {"overall_score": 50, "chapter_scores": {"1": 50}, "notes": "x"},
+            "chapter_scores": {"1": 50},
+            "deviations": [],
+            "fix_plan": [],
+        }
+        passed, _, details, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+        self.assertTrue("errors" in details)
 
     def test_chapter_blueprint_requires_contiguous_numbers(self):
         bad = {

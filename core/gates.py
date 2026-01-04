@@ -133,6 +133,41 @@ def validate_agent_output(
         if not isinstance(chapters, list) or not chapters:
             return False, "Draft must include at least one chapter.", {"errors": [{"msg": "empty_chapters"}]}, normalized_content
 
+        # Require structured adherence outputs (production-grade)
+        if "outline_adherence" not in normalized_content or "deviations" not in normalized_content or "fix_plan" not in normalized_content:
+            return (
+                False,
+                "Draft must include outline_adherence, deviations, and fix_plan.",
+                {"errors": [{"msg": "missing_adherence_outputs"}]},
+                normalized_content,
+            )
+
+        outline = normalized_content.get("outline_adherence") or {}
+        score = outline.get("overall_score") if isinstance(outline, dict) else None
+        deviations = normalized_content.get("deviations") or []
+        fix_plan = normalized_content.get("fix_plan") or []
+        if not isinstance(score, int) or score < 0 or score > 100:
+            return (
+                False,
+                "outline_adherence.overall_score must be an int 0-100.",
+                {"errors": [{"msg": "bad_overall_score", "value": score}]},
+                normalized_content,
+            )
+        if score < 80 and (not isinstance(deviations, list) or len(deviations) == 0):
+            return (
+                False,
+                "Low outline adherence score requires a non-empty deviations list.",
+                {"errors": [{"msg": "low_score_without_deviations", "overall_score": score}]},
+                normalized_content,
+            )
+        if isinstance(deviations, list) and deviations and (not isinstance(fix_plan, list) or len(fix_plan) == 0):
+            return (
+                False,
+                "If deviations are present, fix_plan must be a non-empty list of actions.",
+                {"errors": [{"msg": "deviations_without_fix_plan"}]},
+                normalized_content,
+            )
+
         bad = []
         for ch in chapters[:5]:  # only sample-check first 5 to keep it cheap
             if not isinstance(ch, dict):

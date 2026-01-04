@@ -251,7 +251,16 @@ DRAFT_GENERATION = AgentDefinition(
         "chapter_blueprint", "voice_specification", "character_architecture",
         "world_rules", "style_guide"
     ],
-    outputs=["chapters", "chapter_metadata", "word_counts", "scene_tags"],
+    outputs=[
+        "chapters",
+        "chapter_metadata",
+        "word_counts",
+        "scene_tags",
+        "outline_adherence",
+        "chapter_scores",
+        "deviations",
+        "fix_plan",
+    ],
     gate_criteria="Draft follows outline and voice spec",
     fail_condition="Off-outline drift or voice inconsistency",
     dependencies=["voice_specification"]
