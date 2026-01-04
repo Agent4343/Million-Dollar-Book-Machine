@@ -91,6 +91,7 @@ class JobManager:
         if max_concurrent < 1:
             max_concurrent = 1
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._scheduler_task: Optional[asyncio.Task] = None
 
     async def load_persisted_jobs(self) -> None:
         """Load persisted jobs and mark running ones as interrupted."""
@@ -101,12 +102,21 @@ class JobManager:
                 if not isinstance(raw, dict):
                     continue
                 job = JobRecord.from_dict(raw)
-                if job.status in (JobStatus.running, JobStatus.queued):
+                # A job that was RUNNING during a process restart is interrupted.
+                # A job that was QUEUED can still be executed.
+                if job.status == JobStatus.running:
                     job.status = JobStatus.interrupted
                     job.error = "Job was interrupted (process restart). Start a new job to resume."
                     job.finished_at = datetime.utcnow().isoformat()
                 self._jobs[job.job_id] = job
                 store.save_raw(job.job_id, job.to_dict())
+
+    async def start(self) -> None:
+        """Start the scheduler loop (idempotent)."""
+        async with self._lock:
+            if self._scheduler_task and not self._scheduler_task.done():
+                return
+            self._scheduler_task = asyncio.create_task(self._scheduler_loop())
 
     async def create_run_pipeline_job(
         self,
@@ -131,10 +141,7 @@ class JobManager:
 
         async with self._lock:
             self._jobs[job.job_id] = job
-            task = asyncio.create_task(
-                self._run_pipeline(job_id=job.job_id, orchestrator=orchestrator, max_iterations=max_iterations)
-            )
-            self._tasks[job.job_id] = task
+        await self.start()
 
         return job
 
@@ -163,10 +170,7 @@ class JobManager:
         store.save_raw(job.job_id, job.to_dict())
         async with self._lock:
             self._jobs[job.job_id] = job
-            task = asyncio.create_task(
-                self._run_pipeline(job_id=job.job_id, orchestrator=orchestrator, max_iterations=max_iterations)
-            )
-            self._tasks[job.job_id] = task
+        await self.start()
         return job
 
     async def cancel(self, job_id: str) -> JobRecord:
@@ -198,6 +202,41 @@ class JobManager:
                 if job.project_id == project_id and job.status in (JobStatus.queued, JobStatus.running):
                     return job
         return None
+
+    async def _scheduler_loop(self) -> None:
+        """
+        Periodically starts queued jobs.
+
+        This makes job execution resilient to request/loop quirks and helps with
+        cases where the job record exists but a task wasn't started.
+        """
+        while True:
+            try:
+                await asyncio.sleep(1.0)
+                async with self._lock:
+                    queued = [j for j in self._jobs.values() if j.status == JobStatus.queued]
+                    # Avoid starting multiple tasks for same job
+                    startable = [j for j in queued if j.job_id not in self._tasks]
+                for job in startable:
+                    # Concurrency guard: only one active job per project.
+                    active = await self.find_active_job_for_project(job.project_id)
+                    if active and active.job_id != job.job_id and active.status in (JobStatus.queued, JobStatus.running):
+                        continue
+                    async with self._lock:
+                        if job.job_id in self._tasks:
+                            continue
+                        # Schedule execution; actual status transitions happen inside _run_pipeline
+                        # NOTE: orchestrator is captured from last run/resume call via job.progress.
+                        orchestrator = job.progress.get("_orchestrator") if isinstance(job.progress, dict) else None
+                        if orchestrator is None:
+                            # Can't run without orchestrator reference; keep queued.
+                            continue
+                        max_iterations = int(job.progress.get("_max_iterations") or 200) if isinstance(job.progress, dict) else 200
+                        task = asyncio.create_task(self._run_pipeline(job_id=job.job_id, orchestrator=orchestrator, max_iterations=max_iterations))
+                        self._tasks[job.job_id] = task
+            except Exception:
+                # Never crash the scheduler
+                continue
 
     def _append_event(self, job: JobRecord, kind: str, message: str, **extra: Any) -> None:
         job.events.append(
