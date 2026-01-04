@@ -129,6 +129,12 @@ class JobManager:
         job = JobRecord(job_id=str(uuid.uuid4()), project_id=project.project_id)
 
         store = get_job_store()
+        # Mark as running immediately so clients don't see a long "queued" period
+        # before the async task gets CPU time.
+        job.status = JobStatus.running
+        job.started_at = datetime.utcnow().isoformat()
+        job.updated_at = datetime.utcnow().isoformat()
+        self._append_event(job, "start", "Job scheduled")
         store.save_raw(job.job_id, job.to_dict())
 
         async with self._lock:
@@ -162,6 +168,10 @@ class JobManager:
 
         job = JobRecord(job_id=str(uuid.uuid4()), project_id=project.project_id, resumed_from_job_id=prior.job_id)
         store = get_job_store()
+        job.status = JobStatus.running
+        job.started_at = datetime.utcnow().isoformat()
+        job.updated_at = datetime.utcnow().isoformat()
+        self._append_event(job, "start", "Job scheduled (resume)", resumed_from=prior.job_id)
         store.save_raw(job.job_id, job.to_dict())
         async with self._lock:
             self._jobs[job.job_id] = job
