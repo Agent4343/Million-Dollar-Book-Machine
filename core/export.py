@@ -36,6 +36,23 @@ def _front_matter_defaults(project) -> Dict[str, Any]:
     }
 
 
+def _supplemental_matter(project) -> Dict[str, Any]:
+    c = project.user_constraints or {}
+    also_by = c.get("also_by") or c.get("also_by_titles") or []
+    if isinstance(also_by, str):
+        also_by = [t.strip() for t in also_by.split(",") if t.strip()]
+    if not isinstance(also_by, list):
+        also_by = []
+    also_by = [str(t).strip() for t in also_by if str(t).strip()]
+    return {
+        "also_by": also_by,
+        "acknowledgements": (c.get("acknowledgements") or "").strip(),
+        "about_author": (c.get("about_author") or c.get("about_author_text") or "").strip(),
+        "newsletter_cta": (c.get("newsletter_cta") or "").strip(),
+        "newsletter_url": (c.get("newsletter_url") or "").strip(),
+    }
+
+
 def generate_docx(project, include_outline: bool = False, chapters_override: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
     Generate a Word document from the project manuscript.
@@ -124,6 +141,15 @@ def generate_docx(project, include_outline: bool = False, chapters_override: Opt
         doc.add_paragraph(fm.get("disclaimer_text", ""))
 
     doc.add_page_break()
+
+    sup = _supplemental_matter(project)
+
+    # === Also By (optional) ===
+    if sup["also_by"]:
+        doc.add_heading("Also By", level=1)
+        for t in sup["also_by"]:
+            doc.add_paragraph(t)
+        doc.add_page_break()
 
     # Get all agent outputs for use throughout document
     outputs = {}
@@ -290,6 +316,25 @@ def generate_docx(project, include_outline: bool = False, chapters_override: Opt
         doc.add_heading("No Content Yet", level=1)
         doc.add_paragraph("Run the pipeline to generate your book outline, then use the Chapter Writer to create full chapters.")
 
+    # === Back Matter (optional) ===
+    if sup.get("acknowledgements"):
+        doc.add_heading("Acknowledgements", level=1)
+        doc.add_paragraph(sup["acknowledgements"])
+        doc.add_page_break()
+
+    if sup.get("newsletter_cta") or sup.get("newsletter_url"):
+        doc.add_heading("Stay in Touch", level=1)
+        if sup.get("newsletter_cta"):
+            doc.add_paragraph(sup["newsletter_cta"])
+        if sup.get("newsletter_url"):
+            doc.add_paragraph(sup["newsletter_url"])
+        doc.add_page_break()
+
+    if sup.get("about_author"):
+        doc.add_heading("About the Author", level=1)
+        doc.add_paragraph(sup["about_author"])
+        doc.add_page_break()
+
     # Save to bytes
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -318,7 +363,8 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     book.set_language('en')
 
     # Add author (placeholder - could be made configurable)
-    book.add_author('Author Name')
+    fm = _front_matter_defaults(project)
+    book.add_author(fm["author_name"])
 
     # Add description
     if project.user_constraints.get('description'):
@@ -331,7 +377,7 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     # Create chapters
     chapters = _get_best_chapters(project, chapters_override=chapters_override)
     epub_chapters = []
-    fm = _front_matter_defaults(project)
+    sup = _supplemental_matter(project)
 
     # Title page
     title_page = epub.EpubHtml(title='Title Page', file_name='title.xhtml', lang='en')
@@ -370,6 +416,22 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     """
     book.add_item(copyright_page)
     epub_chapters.append(copyright_page)
+
+    # Also By (optional)
+    if sup["also_by"]:
+        also_by_page = epub.EpubHtml(title="Also By", file_name="also_by.xhtml", lang="en")
+        items = "".join(f"<li>{t}</li>" for t in sup["also_by"])
+        also_by_page.content = f"""
+        <html>
+        <head><title>Also By</title></head>
+        <body>
+            <h1>Also By</h1>
+            <ul>{items}</ul>
+        </body>
+        </html>
+        """
+        book.add_item(also_by_page)
+        epub_chapters.append(also_by_page)
 
     if chapters:
         for chapter in sorted(chapters, key=lambda x: x.get('number', 0)):
@@ -431,6 +493,34 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
         '''
         book.add_item(empty_ch)
         epub_chapters.append(empty_ch)
+
+    # Back matter (optional)
+    if sup.get("acknowledgements"):
+        acks = epub.EpubHtml(title="Acknowledgements", file_name="acknowledgements.xhtml", lang="en")
+        txt = sup["acknowledgements"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        acks.content = f"<html><head><title>Acknowledgements</title></head><body><h1>Acknowledgements</h1><p>{txt}</p></body></html>"
+        book.add_item(acks)
+        epub_chapters.append(acks)
+
+    if sup.get("newsletter_cta") or sup.get("newsletter_url"):
+        news = epub.EpubHtml(title="Stay in Touch", file_name="newsletter.xhtml", lang="en")
+        cta = sup.get("newsletter_cta", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        url = sup.get("newsletter_url", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts = []
+        if cta:
+            parts.append(f"<p>{cta}</p>")
+        if url:
+            parts.append(f"<p>{url}</p>")
+        news.content = f"<html><head><title>Stay in Touch</title></head><body><h1>Stay in Touch</h1>{''.join(parts)}</body></html>"
+        book.add_item(news)
+        epub_chapters.append(news)
+
+    if sup.get("about_author"):
+        about = epub.EpubHtml(title="About the Author", file_name="about_author.xhtml", lang="en")
+        txt = sup["about_author"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        about.content = f"<html><head><title>About the Author</title></head><body><h1>About the Author</h1><p>{txt}</p></body></html>"
+        book.add_item(about)
+        epub_chapters.append(about)
 
     # Define Table of Contents
     book.toc = tuple(epub_chapters)

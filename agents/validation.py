@@ -803,7 +803,7 @@ async def execute_kdp_readiness(context: ExecutionContext) -> Dict[str, Any]:
     except Exception as e:
         docx_issues.append(f"Failed to generate DOCX: {e}")
 
-    # Validate EPUB structure for common KDP issues (basic)
+    # Validate EPUB structure for common KDP issues (stronger)
     epub_valid = False
     if epub_bytes:
         try:
@@ -824,10 +824,61 @@ async def execute_kdp_readiness(context: ExecutionContext) -> Dict[str, Any]:
                 except Exception as e:
                     epub_issues.append(f"Invalid XHTML ({n}): {e}")
 
-            # Basic nav/toc expectations
-            has_nav = any("nav" in n.lower() and n.endswith(".xhtml") for n in names) or ("nav.xhtml" in names)
+            # OPF / manifest / spine checks (common KDP failures)
+            opf_files = [n for n in names if n.endswith(".opf")]
+            if not opf_files:
+                epub_issues.append("Missing OPF package file (.opf)")
+            else:
+                opf_name = sorted(opf_files)[0]
+                try:
+                    opf_xml = etree.fromstring(zf.read(opf_name), parser=parser)
+                    nsmap = opf_xml.nsmap.copy()
+                    # Default namespace handling
+                    def _xp(expr: str):
+                        return opf_xml.xpath(expr, namespaces=nsmap)
+
+                    # Manifest references must exist
+                    manifest_items = _xp("//opf:manifest/opf:item") if "opf" in nsmap else opf_xml.xpath("//*[local-name()='manifest']/*[local-name()='item']")
+                    hrefs = []
+                    for it in manifest_items:
+                        href = it.get("href")
+                        if href:
+                            hrefs.append(href)
+                    # Resolve relative paths based on OPF directory
+                    base_dir = opf_name.rsplit("/", 1)[0] if "/" in opf_name else ""
+                    for href in hrefs:
+                        path = f"{base_dir}/{href}" if base_dir else href
+                        if path not in names:
+                            epub_issues.append(f"Manifest href missing in EPUB: {path}")
+
+                    # Spine references must exist in manifest
+                    spine_refs = opf_xml.xpath("//*[local-name()='spine']/*[local-name()='itemref']")
+                    manifest_ids = {it.get("id") for it in manifest_items if it.get("id")}
+                    for ref in spine_refs:
+                        rid = ref.get("idref")
+                        if rid and rid not in manifest_ids:
+                            epub_issues.append(f"Spine idref not found in manifest: {rid}")
+
+                    # Required metadata presence
+                    # Title/lang/identifier are required for KDP
+                    def _has_dc(localname: str) -> bool:
+                        return bool(opf_xml.xpath(f"//*[local-name()='metadata']//*[local-name()='{localname}']"))
+
+                    if not _has_dc("title"):
+                        epub_issues.append("Missing DC title in metadata")
+                    if not _has_dc("language"):
+                        epub_issues.append("Missing DC language in metadata")
+                    if not _has_dc("identifier"):
+                        epub_issues.append("Missing DC identifier in metadata")
+                except Exception as e:
+                    epub_issues.append(f"Invalid OPF package: {e}")
+
+            # Basic nav/toc expectations (ebooklib usually generates these)
+            has_nav = any(n.endswith(".xhtml") and "nav" in n.lower() for n in names) or ("nav.xhtml" in names)
             if not has_nav:
                 epub_issues.append("Missing navigation document (nav.xhtml)")
+            if not any(n.endswith(".ncx") for n in names):
+                epub_issues.append("Missing NCX table of contents (.ncx)")
 
             epub_valid = len(epub_issues) == 0
         except Exception as e:
@@ -854,6 +905,37 @@ async def execute_kdp_readiness(context: ExecutionContext) -> Dict[str, Any]:
         missing_recommended.append("author_name (set author_name or pen_name in user_constraints)")
     if constraints.get("include_disclaimer", True) and not constraints.get("disclaimer_text"):
         missing_recommended.append("disclaimer_text (optional but recommended)")
+
+    # Detect whether optional matter is configured but missing from export
+    want_also_by = bool(constraints.get("also_by") or constraints.get("also_by_titles"))
+    want_about = bool(constraints.get("about_author") or constraints.get("about_author_text"))
+    want_acks = bool(constraints.get("acknowledgements"))
+    want_news = bool(constraints.get("newsletter_cta") or constraints.get("newsletter_url"))
+
+    if epub_bytes:
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(epub_bytes))
+            names = set(zf.namelist())
+            if "copyright.xhtml" in names:
+                included.append("copyright_xhtml")
+            if "also_by.xhtml" in names:
+                included.append("also_by")
+            if "about_author.xhtml" in names:
+                included.append("about_author")
+            if "acknowledgements.xhtml" in names:
+                included.append("acknowledgements")
+            if "newsletter.xhtml" in names:
+                included.append("newsletter")
+            if want_also_by and "also_by.xhtml" not in names:
+                missing_recommended.append("also_by.xhtml (configured but missing from EPUB)")
+            if want_about and "about_author.xhtml" not in names:
+                missing_recommended.append("about_author.xhtml (configured but missing from EPUB)")
+            if want_acks and "acknowledgements.xhtml" not in names:
+                missing_recommended.append("acknowledgements.xhtml (configured but missing from EPUB)")
+            if want_news and "newsletter.xhtml" not in names:
+                missing_recommended.append("newsletter.xhtml (configured but missing from EPUB)")
+        except Exception:
+            pass
 
     recommendations: List[str] = []
     if epub_issues:
