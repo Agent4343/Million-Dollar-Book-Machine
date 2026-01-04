@@ -478,8 +478,15 @@
                             <span id="progressAgents">0 / 0 agents completed</span>
                         </div>
                         <button class="btn btn-full-pipeline" id="runFullPipelineBtn" onclick="runFullPipeline()">
-                            Run Full Pipeline
+                            Run Full Pipeline (Background)
                         </button>
+                        <div id="jobControls" style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-small" id="resumeJobBtn" onclick="resumeLastJob()" disabled>Resume Job</button>
+                            <button class="btn btn-danger btn-small" id="cancelJobBtn" onclick="cancelCurrentJob()" disabled>Cancel Job</button>
+                        </div>
+                        <div class="output-panel" style="margin-top:0.75rem;max-height:220px;">
+                            <pre id="jobOutput" style="color:#fff;">No job yet.</pre>
+                        </div>
                     </div>
 
                     <div class="grid-3" style="margin-bottom:1rem;">
@@ -830,11 +837,33 @@
         }
 
         let isRunningPipeline = false;
+        let currentJobId = null;
+        let jobPollTimer = null;
+
+        function _setJobButtons({ resumeEnabled = false, cancelEnabled = false } = {}) {
+            document.getElementById('resumeJobBtn').disabled = !resumeEnabled;
+            document.getElementById('cancelJobBtn').disabled = !cancelEnabled;
+        }
+
+        function _saveLastJob(jobId) {
+            try {
+                if (currentProject) {
+                    localStorage.setItem(`md_book_last_job_${currentProject}`, jobId);
+                }
+            } catch {}
+        }
+
+        function _loadLastJob() {
+            try {
+                if (!currentProject) return null;
+                return localStorage.getItem(`md_book_last_job_${currentProject}`);
+            } catch {
+                return null;
+            }
+        }
 
         async function runFullPipeline() {
             if (!currentProject || isRunningPipeline) return;
-
-            // Ensure project exists before starting
             if (!await ensureProjectOnServer(currentProject)) {
                 alert('Project not found on server');
                 return;
@@ -842,70 +871,134 @@
 
             isRunningPipeline = true;
             const btn = document.getElementById('runFullPipelineBtn');
-            const nextBtn = document.getElementById('runNextBtn');
-            const availBtn = document.getElementById('runAvailableBtn');
-
             btn.disabled = true;
-            nextBtn.disabled = true;
-            availBtn.disabled = true;
-            btn.innerHTML = '<span class="running-indicator"></span>Running Pipeline...';
+            btn.innerHTML = '<span class="running-indicator"></span>Starting Job...';
+            _setJobButtons({ resumeEnabled: false, cancelEnabled: false });
 
             try {
-                let hasMore = true;
-                let iterations = 0;
-                const maxIterations = 100; // Safety limit
+                const res = await fetch(`/api/projects/${currentProject}/run-job`, {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({ max_iterations: 400 })
+                });
 
-                while (hasMore && iterations < maxIterations) {
-                    iterations++;
-
-                    // Get available agents
-                    const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
-                    const data = await res.json();
-
-                    if (data.available_agents.length === 0) {
-                        hasMore = false;
-                        break;
-                    }
-
-                    // Execute each available agent
-                    for (const agent of data.available_agents) {
-                        document.getElementById('progressStatus').textContent = `Running: ${agent.name}`;
-
-                        const execRes = await fetch(`/api/projects/${currentProject}/execute/${agent.id}`, {
-                            method: 'POST',
-                            credentials: 'include'
-                        });
-
-                        if (!execRes.ok) {
-                            console.error(`Failed to execute ${agent.id}`);
-                        }
-
-                        // Update progress after each agent
-                        await loadProjectPipeline();
-                        viewAgent(agent.id);
-                    }
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Failed to start job');
                 }
 
-                // Final update
-                await loadProjectPipeline();
+                currentJobId = data.job_id;
+                _saveLastJob(currentJobId);
+                document.getElementById('jobOutput').textContent = `Job started: ${currentJobId}\nStatus: ${data.status}`;
+                _setJobButtons({ cancelEnabled: true });
 
-                if (iterations >= maxIterations) {
-                    alert('Pipeline stopped: maximum iterations reached. Some agents may have failed.');
-                } else {
-                    // Pipeline complete - now automatically write all chapters
-                    await autoWriteAllChapters();
-                }
+                await pollJob(currentJobId);
             } catch (error) {
-                console.error('Pipeline error:', error);
-                alert('An error occurred during pipeline execution. Check the console for details.');
+                console.error('Job start error:', error);
+                alert(error.message || 'Failed to start pipeline job');
             } finally {
                 isRunningPipeline = false;
-                btn.innerHTML = 'Run Full Pipeline';
+                btn.innerHTML = 'Run Full Pipeline (Background)';
                 btn.disabled = false;
-                nextBtn.disabled = false;
-                availBtn.disabled = false;
                 await loadProjectPipeline();
             }
+        }
+
+        async function pollJob(jobId) {
+            if (jobPollTimer) clearInterval(jobPollTimer);
+
+            const tick = async () => {
+                try {
+                    const res = await fetch(`/api/jobs/${jobId}`, {credentials: 'include'});
+                    const job = await res.json();
+                    if (!res.ok) throw new Error(job.detail || 'Failed to fetch job');
+
+                    const lines = [];
+                    lines.push(`Job: ${job.job_id}`);
+                    lines.push(`Status: ${job.status}`);
+                    if (job.resumed_from_job_id) lines.push(`Resumed from: ${job.resumed_from_job_id}`);
+                    if (job.progress) {
+                        if (job.progress.last_agent) lines.push(`Last agent: ${job.progress.last_agent}`);
+                        if (job.progress.last_gate_message) lines.push(`Gate: ${job.progress.last_gate_message}`);
+                        if (job.progress.project_status) lines.push(`Project status: ${job.progress.project_status}`);
+                    }
+                    if (job.error) lines.push(`Error: ${job.error}`);
+                    lines.push('');
+                    lines.push('Recent events:');
+                    (job.events || []).slice(-12).forEach(ev => {
+                        lines.push(`[${ev.ts}] ${ev.kind}: ${ev.message}`);
+                    });
+
+                    document.getElementById('jobOutput').textContent = lines.join('\n');
+
+                    const terminal = ['succeeded','failed','cancelled','interrupted'].includes(job.status);
+                    if (job.status === 'running' || job.status === 'queued') {
+                        _setJobButtons({ cancelEnabled: true, resumeEnabled: false });
+                        document.getElementById('progressStatus').textContent = `Background job running (${job.status})...`;
+                    } else {
+                        _setJobButtons({ cancelEnabled: false, resumeEnabled: terminal && job.status !== 'succeeded' });
+                    }
+
+                    // Refresh pipeline view periodically while job runs
+                    await loadProjectPipeline();
+
+                    if (terminal) {
+                        clearInterval(jobPollTimer);
+                        jobPollTimer = null;
+                        if (job.status === 'succeeded') {
+                            document.getElementById('progressStatus').textContent = 'Pipeline complete! (job succeeded)';
+                        } else {
+                            document.getElementById('progressStatus').textContent = `Job ended: ${job.status}`;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Job poll error:', e);
+                }
+            };
+
+            await tick();
+            jobPollTimer = setInterval(tick, 4000);
+        }
+
+        async function cancelCurrentJob() {
+            if (!currentJobId) {
+                alert('No active job');
+                return;
+            }
+            if (!confirm('Cancel the running job?')) return;
+            const res = await fetch(`/api/jobs/${currentJobId}/cancel`, {method:'POST', credentials:'include'});
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to cancel job');
+                return;
+            }
+            document.getElementById('jobOutput').textContent = 'Cancellation requested.\n' + JSON.stringify(data.job, null, 2);
+            _setJobButtons({ cancelEnabled: false, resumeEnabled: true });
+        }
+
+        async function resumeLastJob() {
+            const last = _loadLastJob();
+            if (!last) {
+                alert('No previous job found for this project');
+                return;
+            }
+            const res = await fetch(`/api/jobs/${last}/resume`, {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                credentials:'include',
+                body: JSON.stringify({ max_iterations: 400 })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || 'Failed to resume job');
+                return;
+            }
+            currentJobId = data.job_id;
+            _saveLastJob(currentJobId);
+            document.getElementById('jobOutput').textContent = `Resumed job: ${currentJobId}\nFrom: ${data.resumed_from}`;
+            _setJobButtons({ cancelEnabled: true, resumeEnabled: false });
+            await pollJob(currentJobId);
         }
 
         // New Project
@@ -1265,19 +1358,20 @@
             const listEl = document.getElementById('chapterList');
             const writeAllBtn = document.getElementById('writeAllChaptersBtn');
 
-            // Check if chapter_blueprint agent has passed
+            // Fetch chapter blueprint output from API (project status doesn't include outputs)
             let blueprintPassed = false;
             chapterBlueprint = null;
-
-            for (const [layerId, layer] of Object.entries(projectData.layers)) {
-                if (layer.agents && layer.agents.chapter_blueprint) {
-                    const agent = layer.agents.chapter_blueprint;
-                    if (agent.status === 'passed' && agent.output) {
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/agent/chapter_blueprint/output`, {credentials:'include'});
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.output && data.gate_passed) {
                         blueprintPassed = true;
-                        chapterBlueprint = agent.output.content;
-                        break;
+                        chapterBlueprint = data.output;
                     }
                 }
+            } catch (e) {
+                console.error('Failed to fetch chapter blueprint output:', e);
             }
 
             if (!blueprintPassed) {

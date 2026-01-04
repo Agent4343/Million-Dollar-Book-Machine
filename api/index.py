@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -232,15 +232,38 @@ async def check_auth(session: Optional[str] = Cookie(None, alias="book_session")
 # =============================================================================
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    """
+    Root route serves the UI for browsers and JSON for API clients.
+    """
+    accept = (request.headers.get("accept") or "").lower()
+    wants_html = "text/html" in accept
+    if wants_html:
+        try:
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "index.html")
+            with open(path, "r", encoding="utf-8") as f:
+                return HTMLResponse(f.read())
+        except Exception:
+            # Fallback to JSON if UI file missing
+            pass
+
     return {
         "service": "Million Dollar Book Machine",
         "version": "1.0.0",
         "description": "AI-powered book development system",
         "total_agents": len(AGENT_REGISTRY),
         "total_layers": len(LAYERS),
-        "llm_enabled": get_llm_client() is not None
+        "llm_enabled": get_llm_client() is not None,
+        "ui": "Open this URL in a browser for the UI.",
     }
+
+
+@app.get("/app")
+async def app_ui():
+    """Explicit UI route (same as / in browsers)."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "index.html")
+    with open(path, "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
 
 @app.get("/healthz")
