@@ -37,6 +37,7 @@ from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
 from core.schemas import AGENT_OUTPUT_MODELS
+from core.storage import get_project_store
 
 # Initialize app
 app = FastAPI(
@@ -47,10 +48,21 @@ app = FastAPI(
     redoc_url=None
 )
 
+def _parse_cors_origins() -> List[str]:
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        # Default for local dev; set explicitly in Railway.
+        return ["http://localhost:3000", "http://localhost:5173"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+_cors_origins = _parse_cors_origins()
+_cors_all = "*" in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if _cors_all else _cors_origins,
+    allow_credentials=False if _cors_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -63,9 +75,15 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
 SESSION_DURATION = 60 * 60 * 24 * 7
 
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").lower()
+if COOKIE_SAMESITE not in ("lax", "strict", "none"):
+    COOKIE_SAMESITE = "lax"
+
 # Lazy initialization for LLM client (Vercel env vars may not be ready at import time)
 _llm_client = None
 _orchestrator = None
+_projects_loaded = False
 
 def get_llm_client():
     """Get or create LLM client with lazy initialization."""
@@ -79,12 +97,24 @@ def get_llm_client():
 
 def get_orchestrator():
     """Get or create orchestrator with lazy initialization."""
-    global _orchestrator
+    global _orchestrator, _projects_loaded
     if _orchestrator is None:
         _orchestrator = Orchestrator(llm_client=get_llm_client())
         # Register all agent executors
         for agent_id, executor in ALL_EXECUTORS.items():
             _orchestrator.register_executor(agent_id, executor)
+    if not _projects_loaded:
+        # Load persisted projects once.
+        store = get_project_store()
+        for pid in store.list_project_ids():
+            data = store.load_raw(pid)
+            if isinstance(data, dict):
+                try:
+                    _orchestrator.import_project_state(data)
+                except Exception:
+                    # Skip corrupted projects rather than breaking startup.
+                    pass
+        _projects_loaded = True
     # Update LLM client in case it wasn't available before
     if _orchestrator.llm_client is None:
         _orchestrator.llm_client = get_llm_client()
@@ -165,8 +195,8 @@ async def login(request: LoginRequest, response: Response):
             value=token,
             max_age=SESSION_DURATION,
             httponly=True,
-            secure=True,
-            samesite="strict"
+            secure=COOKIE_SECURE,
+            samesite=COOKIE_SAMESITE
         )
         return {"success": True, "message": "Login successful"}
     raise HTTPException(status_code=401, detail="Invalid password")
@@ -197,6 +227,12 @@ async def root():
         "total_layers": len(LAYERS),
         "llm_enabled": get_llm_client() is not None
     }
+
+
+@app.get("/healthz")
+async def healthz():
+    """Railway health check."""
+    return {"ok": True}
 
 
 @app.get("/api/system/llm-status")
@@ -294,6 +330,9 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
         constraints.update(request.additional_constraints)
 
     project = get_orchestrator().create_project(request.title, constraints)
+    # Persist
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
 
     return {
         "success": True,
@@ -367,6 +406,9 @@ async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(req
 
     try:
         output = await get_orchestrator().execute_agent(project, agent_id)
+        # Persist after each agent run
+        store = get_project_store()
+        store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
         return {
             "success": True,
             "agent_id": agent_id,
@@ -393,6 +435,8 @@ async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require
         if agent_def and agent_def.layer == layer_id:
             try:
                 output = await get_orchestrator().execute_agent(project, agent_id)
+                store = get_project_store()
+                store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
                 results.append({
                     "agent_id": agent_id,
                     "success": output.gate_result.passed if output.gate_result else False,
@@ -455,6 +499,8 @@ async def save_checkpoint(project_id: str, name: str = "checkpoint", auth: bool 
         raise HTTPException(status_code=404, detail="Project not found")
 
     project.save_checkpoint(name)
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
     return {"success": True, "checkpoint": name, "total_checkpoints": len(project.checkpoints)}
 
 
@@ -465,42 +511,7 @@ async def export_project(project_id: str, auth: bool = Depends(require_auth)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Serialize the entire project state
-    export_data = {
-        "version": "1.0",
-        "project_id": project.project_id,
-        "title": project.title,
-        "status": project.status,
-        "current_layer": project.current_layer,
-        "user_constraints": project.user_constraints,
-        "created_at": project.created_at,
-        "updated_at": project.updated_at,
-        "manuscript": project.manuscript,
-        "layers": {}
-    }
-
-    # Export each layer and agent state
-    for layer_id, layer in project.layers.items():
-        export_data["layers"][str(layer_id)] = {
-            "name": layer.name,
-            "status": layer.status.value,
-            "agents": {}
-        }
-        for agent_id, agent_state in layer.agents.items():
-            agent_export = {
-                "status": agent_state.status.value,
-                "attempts": agent_state.attempts,
-                "output": None
-            }
-            if agent_state.current_output:
-                agent_export["output"] = {
-                    "content": agent_state.current_output.content,
-                    "gate_passed": agent_state.current_output.gate_result.passed if agent_state.current_output.gate_result else None,
-                    "gate_message": agent_state.current_output.gate_result.message if agent_state.current_output.gate_result else None
-                }
-            export_data["layers"][str(layer_id)]["agents"][agent_id] = agent_export
-
-    return export_data
+    return get_orchestrator().export_project_state(project)
 
 
 class ProjectImport(BaseModel):
@@ -519,47 +530,9 @@ class ProjectImport(BaseModel):
 @app.post("/api/projects/import")
 async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)):
     """Import a previously exported project."""
-    from models.state import LayerState, AgentState, AgentStatus, LayerStatus, AgentOutput, GateResult
-
-    # Create base project
-    project = get_orchestrator().create_project(data.title, data.user_constraints)
-
-    # Override with imported data
-    project.project_id = data.project_id
-    project.status = data.status
-    project.current_layer = data.current_layer
-    project.created_at = data.created_at
-    project.updated_at = data.updated_at
-    project.manuscript = data.manuscript
-
-    # Restore layer and agent states
-    for layer_id_str, layer_data in data.layers.items():
-        layer_id = int(layer_id_str)
-        if layer_id in project.layers:
-            project.layers[layer_id].status = LayerStatus(layer_data["status"])
-
-            for agent_id, agent_data in layer_data["agents"].items():
-                if agent_id in project.layers[layer_id].agents:
-                    agent_state = project.layers[layer_id].agents[agent_id]
-                    agent_state.status = AgentStatus(agent_data["status"])
-                    agent_state.attempts = agent_data.get("attempts", 0)
-
-                    if agent_data.get("output"):
-                        output_data = agent_data["output"]
-                        gate_result = None
-                        if output_data.get("gate_passed") is not None:
-                            gate_result = GateResult(
-                                passed=output_data["gate_passed"],
-                                message=output_data.get("gate_message", "")
-                            )
-                        agent_state.current_output = AgentOutput(
-                            agent_id=agent_id,
-                            content=output_data["content"],
-                            gate_result=gate_result
-                        )
-
-    # Re-register in orchestrator with original ID
-    get_orchestrator().projects[data.project_id] = project
+    project = get_orchestrator().import_project_state(data.model_dump())
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
 
     return {
         "success": True,
@@ -645,6 +618,9 @@ async def write_chapter(
 
             # Sort chapters by number
             project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+            # Persist
+            store = get_project_store()
+            store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
 
         return {
             "success": True,
@@ -764,6 +740,9 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
 
                 project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
                 chapters_written.append(chapter_num)
+                # Persist after each chapter write
+                store = get_project_store()
+                store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
             else:
                 chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
 

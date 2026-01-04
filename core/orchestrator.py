@@ -594,3 +594,97 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
             }
 
         return manuscript
+
+    def export_project_state(self, project: BookProject) -> Dict[str, Any]:
+        """Export full project state as JSON (stable persistence format)."""
+        export_data: Dict[str, Any] = {
+            "version": "1.0",
+            "project_id": project.project_id,
+            "title": project.title,
+            "status": project.status,
+            "current_layer": project.current_layer,
+            "user_constraints": project.user_constraints,
+            "created_at": project.created_at,
+            "updated_at": project.updated_at,
+            "manuscript": project.manuscript,
+            "layers": {},
+        }
+
+        for layer_id, layer in project.layers.items():
+            export_data["layers"][str(layer_id)] = {
+                "name": layer.name,
+                "status": layer.status.value,
+                "agents": {},
+            }
+            for agent_id, agent_state in layer.agents.items():
+                agent_export: Dict[str, Any] = {
+                    "status": agent_state.status.value,
+                    "attempts": agent_state.attempts,
+                    "output": None,
+                }
+                if agent_state.current_output:
+                    agent_export["output"] = {
+                        "content": agent_state.current_output.content,
+                        "gate_passed": agent_state.current_output.gate_result.passed if agent_state.current_output.gate_result else None,
+                        "gate_message": agent_state.current_output.gate_result.message if agent_state.current_output.gate_result else None,
+                    }
+                export_data["layers"][str(layer_id)]["agents"][agent_id] = agent_export
+
+        return export_data
+
+    def import_project_state(self, data: Dict[str, Any]) -> BookProject:
+        """Import a previously exported project state."""
+        from models.state import LayerStatus, AgentOutput, GateResult
+
+        title = data.get("title") or "Untitled Project"
+        user_constraints = data.get("user_constraints") or {}
+
+        project = self.create_project(title, user_constraints)
+
+        # Override with imported data
+        project.project_id = data.get("project_id", project.project_id)
+        project.status = data.get("status", project.status)
+        project.current_layer = int(data.get("current_layer", project.current_layer) or 0)
+        project.created_at = data.get("created_at", project.created_at)
+        project.updated_at = data.get("updated_at", project.updated_at)
+        project.manuscript = data.get("manuscript") or {}
+
+        layers = data.get("layers") or {}
+        if isinstance(layers, dict):
+            for layer_id_str, layer_data in layers.items():
+                try:
+                    layer_id = int(layer_id_str)
+                except Exception:
+                    continue
+                if layer_id not in project.layers:
+                    continue
+                if isinstance(layer_data, dict) and layer_data.get("status"):
+                    project.layers[layer_id].status = LayerStatus(layer_data["status"])
+                agents = layer_data.get("agents") if isinstance(layer_data, dict) else None
+                if not isinstance(agents, dict):
+                    continue
+                for agent_id, agent_data in agents.items():
+                    if agent_id not in project.layers[layer_id].agents or not isinstance(agent_data, dict):
+                        continue
+                    agent_state = project.layers[layer_id].agents[agent_id]
+                    if agent_data.get("status"):
+                        agent_state.status = AgentStatus(agent_data["status"])
+                    agent_state.attempts = int(agent_data.get("attempts", 0) or 0)
+
+                    output = agent_data.get("output")
+                    if isinstance(output, dict) and isinstance(output.get("content"), dict):
+                        gate_result = None
+                        if output.get("gate_passed") is not None:
+                            gate_result = GateResult(
+                                passed=bool(output.get("gate_passed")),
+                                message=str(output.get("gate_message") or ""),
+                            )
+                        agent_state.current_output = AgentOutput(
+                            agent_id=agent_id,
+                            content=output["content"],
+                            gate_result=gate_result,
+                        )
+
+        # Register in orchestrator
+        self.projects[project.project_id] = project
+        return project
