@@ -38,6 +38,7 @@ from agents.validation import VALIDATION_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
 from core.schemas import AGENT_OUTPUT_MODELS
 from core.storage import get_project_store
+from core.jobs import JobManager
 
 # Initialize app
 app = FastAPI(
@@ -84,6 +85,8 @@ if COOKIE_SAMESITE not in ("lax", "strict", "none"):
 _llm_client = None
 _orchestrator = None
 _projects_loaded = False
+_job_manager: Optional[JobManager] = None
+_jobs_loaded = False
 
 def get_llm_client():
     """Get or create LLM client with lazy initialization."""
@@ -119,6 +122,17 @@ def get_orchestrator():
     if _orchestrator.llm_client is None:
         _orchestrator.llm_client = get_llm_client()
     return _orchestrator
+
+
+async def get_job_manager() -> JobManager:
+    """Get or create job manager and load persisted jobs once."""
+    global _job_manager, _jobs_loaded
+    if _job_manager is None:
+        _job_manager = JobManager()
+    if not _jobs_loaded:
+        await _job_manager.load_persisted_jobs()
+        _jobs_loaded = True
+    return _job_manager
 
 # Register all agent executors
 ALL_EXECUTORS = {
@@ -233,6 +247,57 @@ async def root():
 async def healthz():
     """Railway health check."""
     return {"ok": True}
+
+
+# =============================================================================
+# Background Jobs
+# =============================================================================
+
+
+class RunJobRequest(BaseModel):
+    max_iterations: int = 200
+
+
+@app.post("/api/projects/{project_id}/run-job")
+async def run_project_background_job(project_id: str, req: RunJobRequest, auth: bool = Depends(require_auth)):
+    """Start running the pipeline in the background."""
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    jm = await get_job_manager()
+    job = await jm.create_run_pipeline_job(project=project, orchestrator=orch, max_iterations=req.max_iterations)
+    return {"success": True, "job_id": job.job_id, "status": job.status.value, "project_id": job.project_id}
+
+
+@app.get("/api/jobs")
+async def list_jobs(project_id: Optional[str] = None, auth: bool = Depends(require_auth)):
+    """List recent jobs (optionally filtered by project_id)."""
+    jm = await get_job_manager()
+    jobs = await jm.list(project_id=project_id)
+    return {"jobs": [j.to_dict() for j in jobs]}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str, auth: bool = Depends(require_auth)):
+    """Get job status and recent events."""
+    jm = await get_job_manager()
+    job = await jm.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.to_dict()
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, auth: bool = Depends(require_auth)):
+    """Request cancellation for a running job."""
+    jm = await get_job_manager()
+    try:
+        job = await jm.cancel(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"success": True, "job": job.to_dict()}
 
 
 @app.get("/api/system/llm-status")
