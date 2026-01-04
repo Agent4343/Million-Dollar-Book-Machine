@@ -216,6 +216,30 @@ def validate_agent_output(
         if issues:
             return False, "KDP readiness checks failed.", {"errors": [{"msg": "kdp_not_ready", "issues": issues}]}, normalized_content
 
+    if agent_id == "final_proof":
+        if not isinstance(normalized_content, dict):
+            return False, "Invalid final_proof output.", {"errors": [{"msg": "not_a_dict"}]}, normalized_content
+        approved = normalized_content.get("approved")
+        critical = normalized_content.get("critical_issues")
+        if approved is not True:
+            # Must have some actionable output if failing
+            per = normalized_content.get("per_chapter_issues")
+            rec = normalized_content.get("recommended_actions")
+            if (not isinstance(per, list) or len(per) == 0) and (not isinstance(rec, list) or len(rec) == 0):
+                return (
+                    False,
+                    "If final_proof is not approved, it must include per_chapter_issues or recommended_actions.",
+                    {"errors": [{"msg": "not_approved_without_actions"}]},
+                    normalized_content,
+                )
+        if isinstance(critical, int) and critical > 0 and approved is True:
+            return (
+                False,
+                "final_proof cannot be approved when critical_issues > 0.",
+                {"errors": [{"msg": "approved_with_critical_issues", "critical_issues": critical}]},
+                normalized_content,
+            )
+
     if agent_id == "human_editor_review":
         approved = normalized_content.get("approved") if isinstance(normalized_content, dict) else None
         required = normalized_content.get("required_changes") if isinstance(normalized_content, dict) else None

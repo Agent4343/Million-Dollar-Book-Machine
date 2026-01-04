@@ -484,7 +484,20 @@ KDP_READINESS = AgentDefinition(
     outputs=["kindle_ready", "epub_report", "docx_report", "front_matter_report", "recommendations"],
     gate_criteria="kindle_ready=true and no critical issues in export reports",
     fail_condition="EPUB/DOCX export validation fails or front matter is missing",
-    dependencies=["publishing_package"]
+    dependencies=["publishing_package", "final_proof"]
+)
+
+FINAL_PROOF = AgentDefinition(
+    agent_id="final_proof",
+    name="Final Proof (Full Manuscript)",
+    layer=20,
+    agent_type=AgentType.EDITING,
+    purpose="Run a full-manuscript proof/copy check and consistency scan before Kindle release",
+    inputs=["edited_chapters", "style_guide", "voice_specification", "chapter_blueprint", "user_constraints"],
+    outputs=["approved", "overall_score", "critical_issues", "major_issues", "minor_issues", "per_chapter_issues", "consistency_findings", "recommended_actions"],
+    gate_criteria="approved=true and critical_issues=0",
+    fail_condition="Critical proof issues remain",
+    dependencies=["production_readiness"]
 )
 
 IP_CLEARANCE = AgentDefinition(
@@ -543,6 +556,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "human_editor_review": HUMAN_EDITOR_REVIEW,
     "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
+    "final_proof": FINAL_PROOF,
     "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
 }

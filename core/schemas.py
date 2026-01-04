@@ -731,6 +731,17 @@ class KDPReadinessOutput(BaseModel):
     front_matter_report: FrontMatterReport
     recommendations: List[str] = Field(default_factory=list)
 
+
+class FinalProofOutput(BaseModel):
+    approved: bool
+    overall_score: int = Field(ge=0, le=100)
+    critical_issues: int = Field(ge=0)
+    major_issues: int = Field(ge=0)
+    minor_issues: int = Field(ge=0)
+    per_chapter_issues: List[Dict[str, Any]] = Field(default_factory=list)
+    consistency_findings: List[str] = Field(default_factory=list)
+    recommended_actions: List[str] = Field(default_factory=list)
+
 AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "market_intelligence": MarketIntelligenceOutput,
     "concept_definition": ConceptDefinitionOutput,
@@ -757,6 +768,7 @@ AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "human_editor_review": HumanEditorReviewOutput,
     "production_readiness": ProductionReadinessOutput,
     "publishing_package": PublishingPackageOutput,
+    "final_proof": FinalProofOutput,
     "kdp_readiness": KDPReadinessOutput,
     "ip_clearance": IPClearanceOutput,
 }

@@ -70,6 +70,20 @@ class TestGates(unittest.TestCase):
         passed, _, _, _ = validate_agent_output(agent_id="kdp_readiness", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
 
+    def test_final_proof_cannot_approve_with_critical_issues(self):
+        bad = {
+            "approved": True,
+            "overall_score": 90,
+            "critical_issues": 1,
+            "major_issues": 0,
+            "minor_issues": 0,
+            "per_chapter_issues": [{"chapter": 1, "title": "One", "issues": [{"severity": "critical", "location": "p1", "description": "x", "suggested_fix": "y"}]}],
+            "consistency_findings": [],
+            "recommended_actions": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="final_proof", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
     def test_chapter_blueprint_requires_contiguous_numbers(self):
         bad = {
             "chapter_outline": [

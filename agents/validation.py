@@ -954,6 +954,156 @@ async def execute_kdp_readiness(context: ExecutionContext) -> Dict[str, Any]:
     }
 
 
+async def execute_final_proof(context: ExecutionContext) -> Dict[str, Any]:
+    """
+    Full-manuscript proof/copy/consistency check.
+
+    Strategy:
+    - If LLM available: per-chapter proof in chunks (bounded), plus a lightweight
+      repetition scan across all chapters in Python.
+    - If no LLM: do repetition scan + basic heuristics only.
+    """
+    import re
+
+    llm = context.llm_client
+    chapters = _best_available_chapters(context)
+    style_guide = context.inputs.get("style_guide") or context.inputs.get("voice_specification", {}).get("style_guide", {})
+
+    per_chapter_issues: List[Dict[str, Any]] = []
+    consistency_findings: List[str] = []
+
+    # Simple repetition scan across entire manuscript (no LLM)
+    phrase_counts: Dict[str, int] = {}
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        text = _chapter_text(ch)
+        # Normalize and extract 3-6 word phrases
+        words = re.findall(r"[A-Za-z']+", text.lower())
+        for n in (3, 4):
+            for i in range(0, max(0, len(words) - n)):
+                phrase = " ".join(words[i : i + n])
+                if len(phrase) < 10:
+                    continue
+                phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
+
+    repeated = sorted([(p, c) for p, c in phrase_counts.items() if c >= 18], key=lambda x: x[1], reverse=True)[:10]
+    if repeated:
+        consistency_findings.append(
+            "Repeated phrasing detected (consider rewriting): "
+            + "; ".join([f"'{p}' x{c}" for p, c in repeated])
+        )
+
+    # LLM-based proof per chapter (chunked)
+    if llm and chapters:
+        max_chapters = _limit_for_job(context, "max_proof_chapters", 50)
+        max_chunks = _limit_for_job(context, "max_proof_chunks_per_chapter", 6)
+        chunk_chars = int((context.inputs.get("user_constraints", {}) or {}).get("proof_chunk_chars") or 6000)
+        if chunk_chars < 2000:
+            chunk_chars = 2000
+
+        for ch in chapters[:max_chapters]:
+            if not isinstance(ch, dict):
+                continue
+            text = _chapter_text(ch)
+            if not text.strip():
+                continue
+            # Chunk by paragraphs to preserve context
+            paras = text.split("\n\n")
+            chunks: List[str] = []
+            buf = ""
+            for p in paras:
+                p = p.strip()
+                if not p:
+                    continue
+                if len(buf) + len(p) + 2 > chunk_chars and buf:
+                    chunks.append(buf)
+                    buf = ""
+                buf = (buf + "\n\n" + p).strip() if buf else p
+                if len(chunks) >= max_chunks:
+                    break
+            if buf and len(chunks) < max_chunks:
+                chunks.append(buf)
+
+            chapter_findings: List[Dict[str, Any]] = []
+            for idx, chunk in enumerate(chunks, start=1):
+                prompt = f"""You are a professional proofreader/copyeditor.
+
+Style guide:
+{style_guide}
+
+Task:
+- Identify spelling/grammar errors, awkward phrasing, continuity slips inside this chunk, and voice/style inconsistencies.
+- Provide fixes that preserve meaning and voice.
+
+Return ONLY valid JSON:
+{{
+  "issues": [
+    {{"severity":"critical|major|minor","location":"...","description":"...","suggested_fix":"..."}}
+  ]
+}}
+
+CHAPTER {_chapter_number(ch)} ({_chapter_title(ch)}) - Chunk {idx}/{len(chunks)}:
+{chunk}
+"""
+                out = await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=1800)
+                for issue in out.get("issues", []) if isinstance(out, dict) else []:
+                    if isinstance(issue, dict):
+                        chapter_findings.append(issue)
+
+            if chapter_findings:
+                per_chapter_issues.append(
+                    {
+                        "chapter": _chapter_number(ch),
+                        "title": _chapter_title(ch),
+                        "issues": chapter_findings[:60],
+                    }
+                )
+
+    # Count severities
+    critical = 0
+    major = 0
+    minor = 0
+    for entry in per_chapter_issues:
+        for issue in entry.get("issues", []) if isinstance(entry, dict) else []:
+            if not isinstance(issue, dict):
+                continue
+            sev = issue.get("severity")
+            if sev == "critical":
+                critical += 1
+            elif sev == "major":
+                major += 1
+            else:
+                minor += 1
+
+    # Scoring heuristic
+    score = 100 - (critical * 10 + major * 3 + minor)
+    if score < 0:
+        score = 0
+    approved = (critical == 0) and (score >= 85)
+
+    recommended_actions: List[str] = []
+    if critical > 0:
+        recommended_actions.append("Fix all critical proof issues (blocking) and re-run final_proof.")
+    if major > 0:
+        recommended_actions.append("Address major copy/clarity issues in the flagged chapters.")
+    if consistency_findings:
+        recommended_actions.append("Resolve repeated phrasing / consistency findings across the manuscript.")
+    if not chapters:
+        recommended_actions.append("Generate or import full chapter text before running final proof.")
+
+    return {
+        "approved": approved,
+        "overall_score": score,
+        "critical_issues": critical,
+        "major_issues": major,
+        "minor_issues": minor,
+        "per_chapter_issues": per_chapter_issues,
+        "consistency_findings": consistency_findings,
+        "recommended_actions": recommended_actions,
+    }
+
+
 # =============================================================================
 # REGISTRATION
 # =============================================================================
@@ -972,6 +1122,7 @@ VALIDATION_EXECUTORS = {
     "final_validation": execute_final_validation,
     "production_readiness": execute_production_readiness,
     "publishing_package": execute_publishing_package,
+    "final_proof": execute_final_proof,
     "kdp_readiness": execute_kdp_readiness,
     "ip_clearance": execute_ip_clearance,
 }

@@ -182,6 +182,11 @@ class Orchestrator:
             # Derived inputs
             if input_name == "title":
                 inputs["title"] = project.title
+            if input_name == "author_name":
+                c = project.user_constraints or {}
+                if isinstance(c, dict):
+                    author = c.get("author_name") or c.get("pen_name") or "Author Name"
+                    inputs["author_name"] = author
             if input_name == "character_names":
                 ca = self._find_agent_state(project, "character_architecture")
                 names: List[str] = []
