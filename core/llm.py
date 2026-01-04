@@ -103,7 +103,14 @@ class ClaudeLLMClient:
             if response_format == "json":
                 # Extract JSON from response (handle markdown code blocks / stray text)
                 json_str = self._extract_json(content)
-                return json.loads(json_str)
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # One more attempt: ask Claude to repair its own JSON.
+                    repaired = await self._repair_json_via_llm(content)
+                    if repaired is not None:
+                        return repaired
+                    raise
 
             return content
 
@@ -193,6 +200,36 @@ class ClaudeLLMClient:
         content += '}' * open_braces
 
         return content
+
+    async def _repair_json_via_llm(self, bad_content: str) -> Optional[dict]:
+        """
+        Ask the model to convert a non-parseable JSON-like response into valid JSON.
+        Returns None if repair fails.
+        """
+        try:
+            prompt = f"""Fix the following content into valid JSON.
+
+Rules:
+- Output ONLY valid JSON (no markdown, no commentary).
+- Do not use ellipses like ... anywhere.
+- If something is missing, infer a reasonable value rather than leaving placeholders.
+
+Content to repair:
+{bad_content}
+"""
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=min(self.max_tokens, 6000),
+                system="You are a JSON repair assistant. Return only valid JSON.",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            fixed = response.content[0].text
+            json_str = self._extract_json(fixed)
+            return json.loads(json_str)
+        except Exception:
+            logger.exception("JSON repair attempt failed")
+            return None
 
     async def generate_structured(
         self,

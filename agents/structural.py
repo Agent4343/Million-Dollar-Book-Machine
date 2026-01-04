@@ -65,33 +65,34 @@ Design the complete plot structure:
 ## Output Format (JSON):
 {{
     "act_structure": {{
-        "act_1": {{"percentage": 25, "purpose": "...", "key_events": ["..."]}},
-        "act_2": {{"percentage": 50, "purpose": "...", "key_events": ["..."]}},
-        "act_3": {{"percentage": 25, "purpose": "...", "key_events": ["..."]}}
+        "act_1": {{"percentage": 25, "purpose": "<string>", "key_events": ["<string>"]}},
+        "act_2": {{"percentage": 50, "purpose": "<string>", "key_events": ["<string>"]}},
+        "act_3": {{"percentage": 25, "purpose": "<string>", "key_events": ["<string>"]}}
     }},
     "major_beats": [
-        {{"name": "Opening Image", "description": "...", "page_target": "1-2"}},
-        ...
+        {{"name": "Opening Image", "description": "<string>", "page_target": "1-2"}}
     ],
     "reversals": [
-        {{"name": "Midpoint", "what_changes": "...", "impact": "..."}}
+        {{"name": "Midpoint", "what_changes": "<string>", "impact": "<string>"}}
     ],
     "point_of_no_return": {{
-        "moment": "...",
-        "why_irreversible": "...",
-        "protagonist_commitment": "..."
+        "moment": "<string>",
+        "why_irreversible": "<string>",
+        "protagonist_commitment": "<string>"
     }},
     "climax_design": {{
-        "setup": "...",
-        "confrontation": "...",
-        "resolution": "..."
+        "setup": "<string>",
+        "confrontation": "<string>",
+        "resolution": "<string>"
     }},
     "resolution": {{
-        "external_resolution": "...",
-        "internal_resolution": "...",
-        "final_image": "..."
+        "external_resolution": "<string>",
+        "internal_resolution": "<string>",
+        "final_image": "<string>"
     }}
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 PACING_DESIGN_PROMPT = """You are a pacing specialist. Design the tension and rhythm of the story.
@@ -129,12 +130,12 @@ Design the pacing:
 ## Output Format (JSON):
 {{
     "tension_curve": [
-        {{"point": "Opening", "level": 3, "description": "..."}},
-        {{"point": "Catalyst", "level": 5, "description": "..."}},
-        {{"point": "Midpoint", "level": 7, "description": "..."}},
-        {{"point": "All Is Lost", "level": 4, "description": "..."}},
-        {{"point": "Climax", "level": 10, "description": "..."}},
-        {{"point": "Resolution", "level": 2, "description": "..."}}
+        {{"point": "Opening", "level": 3, "description": "<string>"}},
+        {{"point": "Catalyst", "level": 5, "description": "<string>"}},
+        {{"point": "Midpoint", "level": 7, "description": "<string>"}},
+        {{"point": "All Is Lost", "level": 4, "description": "<string>"}},
+        {{"point": "Climax", "level": 10, "description": "<string>"}},
+        {{"point": "Resolution", "level": 2, "description": "<string>"}}
     ],
     "scene_density_map": {{
         "act_1": {{"action_reflection_ratio": "40:60", "dialogue_description": "50:50"}},
@@ -143,12 +144,14 @@ Design the pacing:
         "act_3": {{"action_reflection_ratio": "80:20", "dialogue_description": "40:60"}}
     }},
     "breather_points": [
-        {{"after": "...", "type": "...", "purpose": "..."}}
+        {{"after": "<string>", "type": "<string>", "purpose": "<string>"}}
     ],
     "acceleration_zones": [
-        {{"section": "...", "technique": "...", "effect": "..."}}
+        {{"section": "<string>", "technique": "<string>", "effect": "<string>"}}
     ]
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 CHAPTER_BLUEPRINT_PROMPT = """You are an outline architect. Create the detailed chapter and scene blueprint.
@@ -196,31 +199,31 @@ For each scene include:
     "chapter_outline": [
         {{
             "number": 1,
-            "title": "...",
+            "title": "<string>",
             "act": 1,
-            "chapter_goal": "...",
-            "pov": "...",
-            "opening_hook": "...",
-            "closing_hook": "...",
+            "chapter_goal": "<string>",
+            "pov": "<string>",
+            "opening_hook": "<string>",
+            "closing_hook": "<string>",
             "word_target": 3000,
             "scenes": [
                 {{
                     "scene_number": 1,
-                    "scene_question": "...",
-                    "characters": ["..."],
-                    "location": "...",
-                    "conflict_type": "...",
-                    "outcome": "...",
+                    "scene_question": "<string>",
+                    "characters": ["<string>"],
+                    "location": "<string>",
+                    "conflict_type": "<string>",
+                    "outcome": "<string>",
                     "word_target": 1500
                 }}
             ]
         }}
     ],
-    "chapter_goals": {{"1": "...", "2": "..."}},
-    "scene_list": ["Ch1-S1: ...", "Ch1-S2: ..."],
-    "scene_questions": {{"Ch1-S1": "...", "Ch1-S2": "..."}},
-    "hooks": {{"chapter_hooks": ["..."], "scene_hooks": ["..."]}},
-    "pov_assignments": {{"1": "Protagonist", "2": "Protagonist"}}
+    "chapter_goals": {{"1": "<string>", "2": "<string>"}},
+    "scene_list": ["Ch1-S1: <string>", "Ch1-S2: <string>"],
+    "scene_questions": {{"Ch1-S1": "<string>", "Ch1-S2": "<string>"}},
+    "hooks": {{"chapter_hooks": ["<string>"], "scene_hooks": ["<string>"]}},
+    "pov_assignments": {{"1": "<string>", "2": "<string>"}}
 }}
 """
 
