@@ -39,6 +39,7 @@ from agents.chapter_writer import execute_chapter_writer
 from core.schemas import AGENT_OUTPUT_MODELS
 from core.storage import get_project_store
 from core.jobs import JobManager
+from core.storage import get_job_store
 
 # Initialize app
 app = FastAPI(
@@ -300,19 +301,26 @@ async def run_project_background_job(project_id: str, req: RunJobRequest, auth: 
 @app.get("/api/jobs")
 async def list_jobs(project_id: Optional[str] = None, auth: bool = Depends(require_auth)):
     """List recent jobs (optionally filtered by project_id)."""
-    jm = await get_job_manager()
-    jobs = await jm.list(project_id=project_id)
-    return {"jobs": [j.to_dict() for j in jobs]}
+    store = get_job_store()
+    jobs = []
+    for jid in store.list_ids():
+        raw = store.load_raw(jid)
+        if not isinstance(raw, dict):
+            continue
+        if project_id and raw.get("project_id") != project_id:
+            continue
+        jobs.append(raw)
+    jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
+    return {"jobs": jobs[:200]}
 
 
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str, auth: bool = Depends(require_auth)):
     """Get job status and recent events."""
-    jm = await get_job_manager()
-    job = await jm.get(job_id)
-    if not job:
+    raw = get_job_store().load_raw(job_id)
+    if not isinstance(raw, dict):
         raise HTTPException(status_code=404, detail="Job not found")
-    return job.to_dict()
+    return raw
 
 
 @app.post("/api/jobs/{job_id}/cancel")
@@ -321,9 +329,16 @@ async def cancel_job(job_id: str, auth: bool = Depends(require_auth)):
     jm = await get_job_manager()
     try:
         job = await jm.cancel(job_id)
+        return {"success": True, "job": job.to_dict()}
     except KeyError:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return {"success": True, "job": job.to_dict()}
+        # Fallback: mark cancel on disk for jobs created on other instance
+        store = get_job_store()
+        raw = store.load_raw(job_id)
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=404, detail="Job not found")
+        raw["cancel_requested"] = True
+        store.save_raw(job_id, raw)
+        return {"success": True, "job": raw}
 
 
 class ResumeJobRequest(BaseModel):
