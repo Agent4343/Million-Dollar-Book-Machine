@@ -12,6 +12,7 @@ operation, swap the persistence + locking for Redis-based queueing.
 from __future__ import annotations
 
 import asyncio
+import os
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -45,6 +46,7 @@ class JobRecord:
     progress: Dict[str, Any] = field(default_factory=dict)
     events: List[Dict[str, Any]] = field(default_factory=list)
     cancel_requested: bool = False
+    resumed_from_job_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -59,6 +61,7 @@ class JobRecord:
             "progress": self.progress,
             "events": self.events[-200:],  # cap persisted chatter
             "cancel_requested": self.cancel_requested,
+            "resumed_from_job_id": self.resumed_from_job_id,
         }
 
     @classmethod
@@ -75,6 +78,7 @@ class JobRecord:
             progress=data.get("progress") or {},
             events=data.get("events") or [],
             cancel_requested=bool(data.get("cancel_requested", False)),
+            resumed_from_job_id=data.get("resumed_from_job_id"),
         )
 
 
@@ -83,6 +87,10 @@ class JobManager:
         self._lock = asyncio.Lock()
         self._tasks: Dict[str, asyncio.Task] = {}
         self._jobs: Dict[str, JobRecord] = {}
+        max_concurrent = int(os.environ.get("MAX_CONCURRENT_JOBS", "1") or "1")
+        if max_concurrent < 1:
+            max_concurrent = 1
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def load_persisted_jobs(self) -> None:
         """Load persisted jobs and mark running ones as interrupted."""
@@ -111,6 +119,11 @@ class JobManager:
         Start a background job that runs the project through available agents,
         persisting project state and job state after each step.
         """
+        # Concurrency guard: only one active job per project.
+        active = await self.find_active_job_for_project(project.project_id)
+        if active is not None:
+            raise RuntimeError(f"Project already has an active job: {active.job_id}")
+
         job = JobRecord(job_id=str(uuid.uuid4()), project_id=project.project_id)
 
         store = get_job_store()
@@ -123,6 +136,37 @@ class JobManager:
             )
             self._tasks[job.job_id] = task
 
+        return job
+
+    async def resume_job(self, *, job_id: str, orchestrator: Any, max_iterations: int = 200) -> JobRecord:
+        """
+        Resume an interrupted/failed/cancelled job by starting a new job for the same project.
+        The project state is already persisted; this simply continues running available agents.
+        """
+        prior = await self.get(job_id)
+        if prior is None:
+            raise KeyError(job_id)
+        if prior.status not in (JobStatus.interrupted, JobStatus.failed, JobStatus.cancelled):
+            raise RuntimeError(f"Job {job_id} is not resumable (status={prior.status.value}).")
+
+        # Load project from orchestrator
+        project = orchestrator.get_project(prior.project_id)
+        if project is None:
+            raise RuntimeError("Project not found in orchestrator.")
+
+        active = await self.find_active_job_for_project(project.project_id)
+        if active is not None:
+            raise RuntimeError(f"Project already has an active job: {active.job_id}")
+
+        job = JobRecord(job_id=str(uuid.uuid4()), project_id=project.project_id, resumed_from_job_id=prior.job_id)
+        store = get_job_store()
+        store.save_raw(job.job_id, job.to_dict())
+        async with self._lock:
+            self._jobs[job.job_id] = job
+            task = asyncio.create_task(
+                self._run_pipeline(job_id=job.job_id, orchestrator=orchestrator, max_iterations=max_iterations)
+            )
+            self._tasks[job.job_id] = task
         return job
 
     async def cancel(self, job_id: str) -> JobRecord:
@@ -147,6 +191,14 @@ class JobManager:
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs[:200]
 
+    async def find_active_job_for_project(self, project_id: str) -> Optional[JobRecord]:
+        """Return a queued/running job for a project if one exists."""
+        async with self._lock:
+            for job in self._jobs.values():
+                if job.project_id == project_id and job.status in (JobStatus.queued, JobStatus.running):
+                    return job
+        return None
+
     def _append_event(self, job: JobRecord, kind: str, message: str, **extra: Any) -> None:
         job.events.append(
             {
@@ -162,6 +214,8 @@ class JobManager:
         pstore = get_project_store()
         iterations = 0
 
+        # Global concurrency cap (per instance)
+        await self._semaphore.acquire()
         async with self._lock:
             job = self._jobs[job_id]
             job.status = JobStatus.running
@@ -262,4 +316,5 @@ class JobManager:
         finally:
             async with self._lock:
                 self._tasks.pop(job_id, None)
+            self._semaphore.release()
 

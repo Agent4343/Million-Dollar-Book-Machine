@@ -267,7 +267,10 @@ async def run_project_background_job(project_id: str, req: RunJobRequest, auth: 
         raise HTTPException(status_code=404, detail="Project not found")
 
     jm = await get_job_manager()
-    job = await jm.create_run_pipeline_job(project=project, orchestrator=orch, max_iterations=req.max_iterations)
+    try:
+        job = await jm.create_run_pipeline_job(project=project, orchestrator=orch, max_iterations=req.max_iterations)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return {"success": True, "job_id": job.job_id, "status": job.status.value, "project_id": job.project_id}
 
 
@@ -298,6 +301,24 @@ async def cancel_job(job_id: str, auth: bool = Depends(require_auth)):
     except KeyError:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"success": True, "job": job.to_dict()}
+
+
+class ResumeJobRequest(BaseModel):
+    max_iterations: int = 200
+
+
+@app.post("/api/jobs/{job_id}/resume")
+async def resume_job(job_id: str, req: ResumeJobRequest, auth: bool = Depends(require_auth)):
+    """Resume an interrupted/failed/cancelled job by starting a new job for the same project."""
+    orch = get_orchestrator()
+    jm = await get_job_manager()
+    try:
+        job = await jm.resume_job(job_id=job_id, orchestrator=orch, max_iterations=req.max_iterations)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"success": True, "job_id": job.job_id, "resumed_from": job.resumed_from_job_id, "status": job.status.value}
 
 
 @app.get("/api/system/llm-status")
