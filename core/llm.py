@@ -5,6 +5,7 @@ Provides a consistent interface for the Anthropic Claude API
 that integrates with the book development orchestrator.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -82,13 +83,15 @@ class ClaudeLLMClient:
         tokens = max_tokens or self.max_tokens
 
         try:
-            # Use synchronous client (Anthropic SDK handles it)
-            response = self.client.messages.create(
+            # Anthropic SDK client is synchronous; run in a thread so we don't
+            # block the event loop (critical for background jobs + API polling).
+            response = await asyncio.to_thread(
+                self.client.messages.create,
                 model=self.model,
                 max_tokens=tokens,
                 system=system_prompt,
                 messages=messages,
-                temperature=temperature
+                temperature=temperature,
             )
 
             content = response.content[0].text
@@ -217,7 +220,8 @@ Rules:
 Content to repair:
 {bad_content}
 """
-            response = self.client.messages.create(
+            response = await asyncio.to_thread(
+                self.client.messages.create,
                 model=self.model,
                 max_tokens=min(self.max_tokens, 6000),
                 system="You are a JSON repair assistant. Return only valid JSON.",
