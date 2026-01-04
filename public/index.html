@@ -701,6 +701,8 @@
         async function selectProject(projectId) {
             currentProject = projectId;
             await loadProjectPipeline();
+            // Auto-attach to latest job (if any) for this project
+            await attachToLatestJob();
             showTab('pipeline');
         }
 
@@ -912,7 +914,23 @@
                 try {
                     const res = await fetch(`/api/jobs/${jobId}`, {credentials: 'include'});
                     const job = await res.json();
-                    if (!res.ok) throw new Error(job.detail || 'Failed to fetch job');
+                    if (!res.ok) {
+                        // Job not found usually means the server restarted without a persisted job store,
+                        // or the UI is holding an old job id from localStorage.
+                        if (res.status === 404) {
+                            document.getElementById('jobOutput').textContent =
+                                `Job not found on server: ${jobId}\n\n` +
+                                `This can happen after a redeploy if jobs aren't persisted.\n` +
+                                `Tip: add a Railway volume mounted at /data and set JOB_STORAGE_DIR=/data/jobs.\n\n` +
+                                `Click "Run Full Pipeline (Background)" to start a new job.`;
+                            currentJobId = null;
+                            _setJobButtons({ cancelEnabled: false, resumeEnabled: false });
+                            clearInterval(jobPollTimer);
+                            jobPollTimer = null;
+                            return;
+                        }
+                        throw new Error(job.detail || 'Failed to fetch job');
+                    }
 
                     const lines = [];
                     lines.push(`Job: ${job.job_id}`);
@@ -999,6 +1017,30 @@
             document.getElementById('jobOutput').textContent = `Resumed job: ${currentJobId}\nFrom: ${data.resumed_from}`;
             _setJobButtons({ cancelEnabled: true, resumeEnabled: false });
             await pollJob(currentJobId);
+        }
+
+        async function attachToLatestJob() {
+            if (!currentProject) return;
+            try {
+                const res = await fetch(`/api/jobs?project_id=${encodeURIComponent(currentProject)}`, {credentials:'include'});
+                if (!res.ok) return;
+                const data = await res.json();
+                const jobs = data.jobs || [];
+                if (!Array.isArray(jobs) || jobs.length === 0) {
+                    document.getElementById('jobOutput').textContent = 'No job yet.';
+                    currentJobId = null;
+                    _setJobButtons({ cancelEnabled: false, resumeEnabled: false });
+                    return;
+                }
+                const latest = jobs[0];
+                if (latest && latest.job_id) {
+                    currentJobId = latest.job_id;
+                    _saveLastJob(currentJobId);
+                    await pollJob(currentJobId);
+                }
+            } catch (e) {
+                console.error('Failed to attach to latest job:', e);
+            }
         }
 
         // New Project
