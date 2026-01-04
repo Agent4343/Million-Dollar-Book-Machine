@@ -232,8 +232,8 @@ class JobManager:
         pstore = get_project_store()
         iterations = 0
 
-        # Global concurrency cap (per instance)
-        await self._semaphore.acquire()
+        # Mark running immediately so the UI doesn't appear "stuck queued"
+        # if we're waiting for a concurrency slot.
         async with self._lock:
             job = self._jobs[job_id]
             job.status = JobStatus.running
@@ -241,6 +241,23 @@ class JobManager:
             job.updated_at = datetime.utcnow().isoformat()
             self._append_event(job, "start", "Job started")
             store.save_raw(job.job_id, job.to_dict())
+
+        # Global concurrency cap (per instance) with a short timeout to avoid
+        # "queued forever" if something goes wrong with semaphore release.
+        acquired = False
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=10.0)
+            acquired = True
+        except Exception:
+            async with self._lock:
+                job = self._jobs[job_id]
+                job.status = JobStatus.failed
+                job.error = "Could not acquire job slot (MAX_CONCURRENT_JOBS limit). Try again or increase MAX_CONCURRENT_JOBS."
+                job.finished_at = datetime.utcnow().isoformat()
+                job.updated_at = datetime.utcnow().isoformat()
+                self._append_event(job, "error", job.error)
+                store.save_raw(job.job_id, job.to_dict())
+            return
 
         try:
             while iterations < max_iterations:
@@ -342,5 +359,6 @@ class JobManager:
         finally:
             async with self._lock:
                 self._tasks.pop(job_id, None)
-            self._semaphore.release()
+            if acquired:
+                self._semaphore.release()
 
