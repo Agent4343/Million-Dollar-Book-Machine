@@ -712,6 +712,25 @@ class IPClearanceOutput(BaseModel):
     clearance_status: ClearanceStatus
 
 
+class ExportSubReport(BaseModel):
+    generated: bool
+    valid: bool
+    issues: List[str] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FrontMatterReport(BaseModel):
+    included_pages: List[str] = Field(default_factory=list)
+    missing_recommended: List[str] = Field(default_factory=list)
+
+
+class KDPReadinessOutput(BaseModel):
+    kindle_ready: bool
+    epub_report: ExportSubReport
+    docx_report: ExportSubReport
+    front_matter_report: FrontMatterReport
+    recommendations: List[str] = Field(default_factory=list)
+
 AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "market_intelligence": MarketIntelligenceOutput,
     "concept_definition": ConceptDefinitionOutput,
@@ -738,6 +757,7 @@ AGENT_OUTPUT_MODELS: Dict[str, type[BaseModel]] = {
     "human_editor_review": HumanEditorReviewOutput,
     "production_readiness": ProductionReadinessOutput,
     "publishing_package": PublishingPackageOutput,
+    "kdp_readiness": KDPReadinessOutput,
     "ip_clearance": IPClearanceOutput,
 }
 

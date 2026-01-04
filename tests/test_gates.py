@@ -59,6 +59,17 @@ class TestGates(unittest.TestCase):
         passed, _, _, _ = validate_agent_output(agent_id="human_editor_review", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
 
+    def test_kdp_readiness_requires_kindle_ready(self):
+        bad = {
+            "kindle_ready": False,
+            "epub_report": {"generated": True, "valid": True, "issues": [], "details": {}},
+            "docx_report": {"generated": True, "valid": True, "issues": [], "details": {}},
+            "front_matter_report": {"included_pages": ["title_page"], "missing_recommended": []},
+            "recommendations": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="kdp_readiness", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
     def test_chapter_blueprint_requires_contiguous_numbers(self):
         bad = {
             "chapter_outline": [

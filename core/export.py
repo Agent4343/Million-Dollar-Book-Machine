@@ -13,7 +13,30 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 
-def generate_docx(project, include_outline: bool = False) -> bytes:
+def _get_best_chapters(project, chapters_override: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    if isinstance(chapters_override, list):
+        return chapters_override
+    chapters = project.manuscript.get("chapters", [])
+    if isinstance(chapters, list):
+        return chapters
+    return []
+
+
+def _front_matter_defaults(project) -> Dict[str, Any]:
+    c = project.user_constraints or {}
+    year = c.get("copyright_year") or datetime.utcnow().year
+    return {
+        "author_name": c.get("author_name") or c.get("pen_name") or "Author Name",
+        "publisher_name": c.get("publisher_name") or "",
+        "copyright_year": year,
+        "include_disclaimer": bool(c.get("include_disclaimer", True)),
+        "disclaimer_text": c.get("disclaimer_text") or "This is a work of fiction. Names, characters, businesses, places, events, and incidents are either the products of the author’s imagination or used in a fictitious manner.",
+        "isbn": c.get("isbn") or "",
+        "rights_statement": c.get("rights_statement") or "All rights reserved.",
+    }
+
+
+def generate_docx(project, include_outline: bool = False, chapters_override: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
     Generate a Word document from the project manuscript.
 
@@ -60,6 +83,8 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     for _ in range(3):
         doc.add_paragraph()
 
+    fm = _front_matter_defaults(project)
+
     # Subtitle/description if available
     if project.user_constraints.get('description'):
         subtitle = doc.add_paragraph()
@@ -81,6 +106,25 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     # Page break after title
     doc.add_page_break()
 
+    # === Copyright / Disclaimer Page (KDP recommended) ===
+    copyright_heading = doc.add_heading("Copyright", level=1)
+    copyright_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+    cpara = doc.add_paragraph()
+    cpara.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cpara.add_run(f"© {fm['copyright_year']} {fm['author_name']}\n{fm['rights_statement']}")
+    if fm.get("isbn"):
+        doc.add_paragraph().add_run(f"ISBN: {fm['isbn']}")
+    if fm.get("publisher_name"):
+        doc.add_paragraph().add_run(f"Publisher: {fm['publisher_name']}")
+    if fm.get("include_disclaimer"):
+        doc.add_paragraph()
+        disc = doc.add_paragraph()
+        disc.add_run("Disclaimer: ").bold = True
+        doc.add_paragraph(fm.get("disclaimer_text", ""))
+
+    doc.add_page_break()
+
     # Get all agent outputs for use throughout document
     outputs = {}
     for layer in project.layers.values():
@@ -91,7 +135,7 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     # === Table of Contents ===
     toc_heading = doc.add_heading('Table of Contents', level=1)
 
-    chapters = project.manuscript.get('chapters', [])
+    chapters = _get_best_chapters(project, chapters_override=chapters_override)
 
     # If no written chapters, use chapter blueprint for TOC
     if not chapters and 'chapter_blueprint' in outputs:
@@ -253,7 +297,7 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     return buffer.getvalue()
 
 
-def generate_epub(project) -> bytes:
+def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
     Generate an EPUB file from the project manuscript.
     Compatible with Kindle and other eReaders.
@@ -285,8 +329,9 @@ def generate_epub(project) -> bytes:
     book.add_metadata('DC', 'subject', genre)
 
     # Create chapters
-    chapters = project.manuscript.get('chapters', [])
+    chapters = _get_best_chapters(project, chapters_override=chapters_override)
     epub_chapters = []
+    fm = _front_matter_defaults(project)
 
     # Title page
     title_page = epub.EpubHtml(title='Title Page', file_name='title.xhtml', lang='en')
@@ -303,6 +348,28 @@ def generate_epub(project) -> bytes:
     '''
     book.add_item(title_page)
     epub_chapters.append(title_page)
+
+    # Copyright page (KDP recommended)
+    copyright_page = epub.EpubHtml(title='Copyright', file_name='copyright.xhtml', lang='en')
+    disclaimer_html = ""
+    if fm.get("include_disclaimer"):
+        disclaimer_html = f"<p><strong>Disclaimer:</strong> {fm.get('disclaimer_text','')}</p>"
+    publisher_html = f"<p>Publisher: {fm.get('publisher_name')}</p>" if fm.get("publisher_name") else ""
+    isbn_html = f"<p>ISBN: {fm.get('isbn')}</p>" if fm.get("isbn") else ""
+    copyright_page.content = f"""
+    <html>
+    <head><title>Copyright</title></head>
+    <body>
+        <h1>Copyright</h1>
+        <p>© {fm['copyright_year']} {fm['author_name']}. {fm['rights_statement']}</p>
+        {publisher_html}
+        {isbn_html}
+        {disclaimer_html}
+    </body>
+    </html>
+    """
+    book.add_item(copyright_page)
+    epub_chapters.append(copyright_page)
 
     if chapters:
         for chapter in sorted(chapters, key=lambda x: x.get('number', 0)):

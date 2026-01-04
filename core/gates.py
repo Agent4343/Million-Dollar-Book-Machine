@@ -199,6 +199,23 @@ def validate_agent_output(
                 normalized_content,
             )
 
+    if agent_id == "kdp_readiness":
+        if not isinstance(normalized_content, dict):
+            return False, "Invalid kdp_readiness output.", {"errors": [{"msg": "not_a_dict"}]}, normalized_content
+        kindle_ready = normalized_content.get("kindle_ready")
+        epub = normalized_content.get("epub_report") or {}
+        docx = normalized_content.get("docx_report") or {}
+        issues = []
+        if kindle_ready is not True:
+            issues.append("kindle_ready must be true to pass.")
+        if isinstance(epub, dict) and epub.get("valid") is not True:
+            issues.append("EPUB report valid must be true.")
+        if isinstance(docx, dict) and docx.get("valid") is not True:
+            # DOCX isn't required for KDP, but we treat it as a strong signal; allow non-fatal if epub valid.
+            pass
+        if issues:
+            return False, "KDP readiness checks failed.", {"errors": [{"msg": "kdp_not_ready", "issues": issues}]}, normalized_content
+
     if agent_id == "human_editor_review":
         approved = normalized_content.get("approved") if isinstance(normalized_content, dict) else None
         required = normalized_content.get("required_changes") if isinstance(normalized_content, dict) else None

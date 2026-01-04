@@ -474,6 +474,19 @@ PUBLISHING_PACKAGE = AgentDefinition(
     dependencies=["final_validation", "production_readiness"]
 )
 
+KDP_READINESS = AgentDefinition(
+    agent_id="kdp_readiness",
+    name="Kindle / KDP Readiness",
+    layer=20,
+    agent_type=AgentType.VALIDATION,
+    purpose="Validate EPUB/DOCX exports and ensure front/back matter readiness for Kindle publishing",
+    inputs=["edited_chapters", "publishing_package", "user_constraints", "title", "author_name"],
+    outputs=["kindle_ready", "epub_report", "docx_report", "front_matter_report", "recommendations"],
+    gate_criteria="kindle_ready=true and no critical issues in export reports",
+    fail_condition="EPUB/DOCX export validation fails or front matter is missing",
+    dependencies=["publishing_package"]
+)
+
 IP_CLEARANCE = AgentDefinition(
     agent_id="ip_clearance",
     name="IP, Title & Brand Clearance",
@@ -484,7 +497,7 @@ IP_CLEARANCE = AgentDefinition(
     outputs=["title_conflict_check", "series_naming_check", "character_naming_check", "clearance_status"],
     gate_criteria="All naming cleared",
     fail_condition="Rename required",
-    dependencies=["publishing_package"]
+    dependencies=["kdp_readiness"]
 )
 
 
@@ -530,6 +543,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "human_editor_review": HUMAN_EDITOR_REVIEW,
     "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
+    "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
 }
 

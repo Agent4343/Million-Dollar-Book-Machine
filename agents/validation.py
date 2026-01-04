@@ -776,6 +776,101 @@ Return ONLY valid JSON:
         }
     }
 
+async def execute_kdp_readiness(context: ExecutionContext) -> Dict[str, Any]:
+    """Validate Kindle/KDP readiness (exports + front matter basics)."""
+    from core.export import generate_epub, generate_docx
+    import io
+    import zipfile
+    from lxml import etree
+
+    chapters = _best_available_chapters(context)
+    constraints = context.inputs.get("user_constraints", {}) or {}
+
+    epub_issues: List[str] = []
+    docx_issues: List[str] = []
+
+    epub_bytes: Optional[bytes] = None
+    docx_bytes: Optional[bytes] = None
+
+    # Try generate exports
+    try:
+        epub_bytes = generate_epub(context.project, chapters_override=chapters)
+    except Exception as e:
+        epub_issues.append(f"Failed to generate EPUB: {e}")
+
+    try:
+        docx_bytes = generate_docx(context.project, chapters_override=chapters)
+    except Exception as e:
+        docx_issues.append(f"Failed to generate DOCX: {e}")
+
+    # Validate EPUB structure for common KDP issues (basic)
+    epub_valid = False
+    if epub_bytes:
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(epub_bytes))
+            names = set(zf.namelist())
+            if "META-INF/container.xml" not in names:
+                epub_issues.append("Missing META-INF/container.xml")
+            xhtml = [n for n in names if n.endswith(".xhtml") or n.endswith(".html")]
+            if not xhtml:
+                epub_issues.append("No XHTML content files found in EPUB")
+
+            # Parse XHTML files to ensure well-formed XML/HTML
+            parser = etree.XMLParser(recover=False)
+            for n in sorted(xhtml)[:30]:  # cap
+                data = zf.read(n)
+                try:
+                    etree.fromstring(data, parser=parser)
+                except Exception as e:
+                    epub_issues.append(f"Invalid XHTML ({n}): {e}")
+
+            # Basic nav/toc expectations
+            has_nav = any("nav" in n.lower() and n.endswith(".xhtml") for n in names) or ("nav.xhtml" in names)
+            if not has_nav:
+                epub_issues.append("Missing navigation document (nav.xhtml)")
+
+            epub_valid = len(epub_issues) == 0
+        except Exception as e:
+            epub_issues.append(f"Failed to inspect EPUB zip: {e}")
+
+    # Validate DOCX structure (basic)
+    docx_valid = False
+    if docx_bytes:
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(docx_bytes))
+            names = set(zf.namelist())
+            if "[Content_Types].xml" not in names:
+                docx_issues.append("Missing [Content_Types].xml")
+            if "word/document.xml" not in names:
+                docx_issues.append("Missing word/document.xml")
+            docx_valid = len(docx_issues) == 0
+        except Exception as e:
+            docx_issues.append(f"Failed to inspect DOCX zip: {e}")
+
+    # Front matter expectations (recommendations)
+    included = ["title_page", "copyright_page"]
+    missing_recommended = []
+    if not constraints.get("author_name") and not constraints.get("pen_name"):
+        missing_recommended.append("author_name (set author_name or pen_name in user_constraints)")
+    if constraints.get("include_disclaimer", True) and not constraints.get("disclaimer_text"):
+        missing_recommended.append("disclaimer_text (optional but recommended)")
+
+    recommendations: List[str] = []
+    if epub_issues:
+        recommendations.append("Fix EPUB export issues before uploading to KDP.")
+    if missing_recommended:
+        recommendations.append("Fill in recommended publishing metadata (author name, disclaimer text, etc.).")
+
+    kindle_ready = (epub_valid is True) and (len(epub_issues) == 0) and (len(missing_recommended) == 0)
+
+    return {
+        "kindle_ready": kindle_ready,
+        "epub_report": {"generated": epub_bytes is not None, "valid": epub_valid, "issues": epub_issues, "details": {"size_bytes": len(epub_bytes) if epub_bytes else 0}},
+        "docx_report": {"generated": docx_bytes is not None, "valid": docx_valid, "issues": docx_issues, "details": {"size_bytes": len(docx_bytes) if docx_bytes else 0}},
+        "front_matter_report": {"included_pages": included, "missing_recommended": missing_recommended},
+        "recommendations": recommendations,
+    }
+
 
 # =============================================================================
 # REGISTRATION
@@ -795,5 +890,6 @@ VALIDATION_EXECUTORS = {
     "final_validation": execute_final_validation,
     "production_readiness": execute_production_readiness,
     "publishing_package": execute_publishing_package,
+    "kdp_readiness": execute_kdp_readiness,
     "ip_clearance": execute_ip_clearance,
 }
