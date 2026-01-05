@@ -179,5 +179,6 @@ LAYERS = {
     17: "Line & Copy Edit",
     18: "Beta Reader Simulation",
     19: "Final Quality Validation",
-    20: "Publishing Package"
+    20: "Publishing Package",
+    21: "Marketing & Commercial Optimization"
 }

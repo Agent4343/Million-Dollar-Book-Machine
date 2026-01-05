@@ -513,6 +513,63 @@ KDP_READINESS = AgentDefinition(
 
 
 # =============================================================================
+# LAYER 21: MARKETING & COMMERCIAL OPTIMIZATION
+# =============================================================================
+
+BLURB_GENERATOR = AgentDefinition(
+    agent_id="blurb_generator",
+    name="Amazon Blurb Generator",
+    layer=21,
+    agent_type=AgentType.GENERATION,
+    purpose="Create Amazon-optimized book descriptions that sell",
+    inputs=["concept_definition", "character_architecture", "story_question"],
+    outputs=["short_blurb", "full_blurb", "a_plus_content", "tagline", "comparison_pitch"],
+    gate_criteria="Blurb follows Amazon best practices and genre conventions",
+    fail_condition="Generic or non-compelling copy",
+    dependencies=["kdp_readiness"]
+)
+
+KEYWORD_OPTIMIZER = AgentDefinition(
+    agent_id="keyword_optimizer",
+    name="KDP Keyword Optimizer",
+    layer=21,
+    agent_type=AgentType.RESEARCH,
+    purpose="Generate optimized keywords and categories for Kindle discoverability",
+    inputs=["user_constraints", "thematic_architecture", "plot_structure"],
+    outputs=["primary_keywords", "backup_keywords", "bisac_categories", "amazon_categories"],
+    gate_criteria="Keywords follow KDP rules and target high-value search terms",
+    fail_condition="Keywords too competitive or irrelevant",
+    dependencies=["blurb_generator"]
+)
+
+SERIES_BIBLE = AgentDefinition(
+    agent_id="series_bible",
+    name="Series Bible Generator",
+    layer=21,
+    agent_type=AgentType.CREATIVE,
+    purpose="Create series continuity bible for multi-book planning",
+    inputs=["story_bible", "draft_generation", "character_architecture"],
+    outputs=["series_potential", "unresolved_threads", "character_futures", "series_hooks", "spinoff_potential"],
+    gate_criteria="Clear roadmap for series expansion if viable",
+    fail_condition="No series potential identified",
+    dependencies=["keyword_optimizer"]
+)
+
+COMP_ANALYSIS = AgentDefinition(
+    agent_id="comp_analysis",
+    name="Comparable Title Analysis",
+    layer=21,
+    agent_type=AgentType.RESEARCH,
+    purpose="Analyze market positioning against comparable titles",
+    inputs=["user_constraints", "blurb_generator"],
+    outputs=["positioning_recommendations", "price_positioning", "launch_strategy"],
+    gate_criteria="Clear market positioning established",
+    fail_condition="No differentiation from competitors",
+    dependencies=["series_bible"]
+)
+
+
+# =============================================================================
 # AGENT REGISTRY
 # =============================================================================
 
@@ -558,6 +615,11 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "final_proof": FINAL_PROOF,
     "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
+    # Layer 21: Marketing & Commercial
+    "blurb_generator": BLURB_GENERATOR,
+    "keyword_optimizer": KEYWORD_OPTIMIZER,
+    "series_bible": SERIES_BIBLE,
+    "comp_analysis": COMP_ANALYSIS,
 }
 
 
