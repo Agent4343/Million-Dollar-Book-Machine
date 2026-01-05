@@ -247,8 +247,8 @@ def _format_voice_spec(voice_spec: Dict[str, Any]) -> str:
 **Sentence Style**: {syntax.get('avg_sentence_length', '15-20 words')}, {syntax.get('complexity', 'varied')}
 **Dialogue**: {dialogue.get('tag_approach', 'minimal tags')}, {dialogue.get('subtext_level', 'moderate')}
 
-**Do**: {', '.join(style_guide.get('dos', ['Show don\'t tell'])[:5])}
-**Don't**: {', '.join(style_guide.get('donts', ['Avoid info dumps'])[:5])}
+**Do**: {', '.join(style_guide.get('dos', ['Show not tell'])[:5])}
+**Avoid**: {', '.join(style_guide.get('donts', ['Info dumps'])[:5])}
 """
 
 
