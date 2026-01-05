@@ -685,6 +685,8 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
     # Find which chapters are already written
     existing_chapters = {ch.get("number") for ch in project.manuscript.get("chapters", [])}
     chapters_to_write = [ch for ch in chapter_outline if ch.get("number") not in existing_chapters]
+    # Sort by chapter number to ensure chapters are written in order
+    chapters_to_write.sort(key=lambda ch: ch.get("number", 0))
 
     if not chapters_to_write:
         return {
@@ -746,9 +748,9 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         except Exception as e:
             chapters_failed.append({"number": chapter_num, "error": str(e)})
 
-    # Calculate remaining chapters
+    # Calculate remaining chapters (sorted to ensure consistent ordering)
     all_written = existing_chapters.union(set(chapters_written))
-    remaining = [ch.get("number") for ch in chapter_outline if ch.get("number") not in all_written]
+    remaining = sorted([ch.get("number") for ch in chapter_outline if ch.get("number") not in all_written])
 
     return {
         "success": True,
