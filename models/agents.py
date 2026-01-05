@@ -164,6 +164,22 @@ RELATIONSHIP_DYNAMICS = AgentDefinition(
     dependencies=["character_architecture"]
 )
 
+STORY_BIBLE = AgentDefinition(
+    agent_id="story_bible",
+    name="Story Bible",
+    layer=7,
+    agent_type=AgentType.CREATIVE,
+    purpose="Lock in all canonical facts (names, locations, timeline) to ensure consistency across chapters",
+    inputs=["character_architecture", "world_rules", "relationship_dynamics"],
+    outputs=[
+        "character_registry", "location_registry", "timeline",
+        "relationship_map", "terminology", "backstory_facts", "consistency_rules"
+    ],
+    gate_criteria="All canonical facts locked in with no ambiguity",
+    fail_condition="Missing critical facts or contradictory details",
+    dependencies=["relationship_dynamics"]
+)
+
 
 # =============================================================================
 # LAYER 3: STRUCTURAL ENGINE
@@ -512,6 +528,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "world_rules": WORLD_RULES,
     "character_architecture": CHARACTER_ARCHITECTURE,
     "relationship_dynamics": RELATIONSHIP_DYNAMICS,
+    "story_bible": STORY_BIBLE,
     # Layer 8-10: Structural Engine
     "plot_structure": PLOT_STRUCTURE,
     "pacing_design": PACING_DESIGN,

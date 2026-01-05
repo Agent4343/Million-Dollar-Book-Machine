@@ -36,6 +36,7 @@ from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
+from agents.story_bible import STORY_BIBLE_EXECUTORS
 
 # Initialize app
 app = FastAPI(
@@ -95,6 +96,7 @@ ALL_EXECUTORS = {
     **STORY_SYSTEM_EXECUTORS,
     **STRUCTURAL_EXECUTORS,
     **VALIDATION_EXECUTORS,
+    **STORY_BIBLE_EXECUTORS,
 }
 
 

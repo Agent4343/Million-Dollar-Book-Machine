@@ -1,0 +1,35 @@
+{
+    "_description": "Corrections for 'Shadows of Forbidden Desire' manuscript",
+    "_usage": "python scripts/cleanup_manuscript.py manuscript.md --config scripts/shadows_corrections.json",
+
+    "character_name_corrections": {
+        "Vincent Torrino": "Vincent Blackwood",
+        "Vincent Moretti": "Vincent Blackwood",
+        "Vincenzo Blackwood": "Vincent Blackwood"
+    },
+
+    "location_corrections": {
+        "Chicago": "New York",
+        "Chicago's": "New York's"
+    },
+
+    "relationship_corrections": {
+        "his mother Elena": "his sister Elena",
+        "her mother Elena": "his sister Elena"
+    },
+
+    "timeline_corrections": {
+        "twenty-three years ago": "fifteen years ago",
+        "23 years ago": "fifteen years ago",
+        "three years ago his father": "fifteen years ago his father",
+        "3 years ago his father": "fifteen years ago his father"
+    },
+
+    "_notes": {
+        "canonical_villain": "Vincent Blackwood",
+        "canonical_city": "New York",
+        "canonical_elena_relationship": "sister",
+        "canonical_father_death": "fifteen years ago",
+        "canonical_protagonist": "Marcus Romano"
+    }
+}

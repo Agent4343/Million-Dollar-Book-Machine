@@ -8,8 +8,17 @@ from the book development pipeline.
 from typing import Dict, Any, Optional
 from core.orchestrator import ExecutionContext
 
+# Import story bible formatter for consistency
+try:
+    from agents.story_bible import format_story_bible_for_chapter
+except ImportError:
+    def format_story_bible_for_chapter(story_bible):
+        return "No story bible available."
+
 
 CHAPTER_WRITING_PROMPT = """You are an expert novelist writing Chapter {chapter_number}: "{chapter_title}".
+
+{story_bible_reference}
 
 ## VOICE & STYLE RULES
 {voice_specification}
@@ -142,10 +151,15 @@ async def execute_chapter_writer(
     # Adjust word target for quick mode
     word_target = 500 if quick_mode else chapter_data.get("word_target", 3000)
 
+    # Get story bible for consistency (critical for preventing name/location/timeline errors)
+    story_bible = context.inputs.get("story_bible", {})
+    story_bible_reference = format_story_bible_for_chapter(story_bible)
+
     # Build the prompt
     prompt = CHAPTER_WRITING_PROMPT.format(
         chapter_number=chapter_number,
         chapter_title=chapter_data.get("title", f"Chapter {chapter_number}"),
+        story_bible_reference=story_bible_reference,
         voice_specification=_format_voice_spec(context.inputs.get("voice_specification", {})),
         chapter_goal=chapter_data.get("chapter_goal", "Advance the story"),
         pov=chapter_data.get("pov", "Protagonist"),
