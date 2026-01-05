@@ -441,6 +441,60 @@ IP_CLEARANCE = AgentDefinition(
     dependencies=["publishing_package"]
 )
 
+# Additional Layer 19 agents
+HUMAN_EDITOR_REVIEW = AgentDefinition(
+    agent_id="human_editor_review",
+    name="Human Editor Review Simulation",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Simulate professional editor feedback",
+    inputs=["draft_generation", "voice_specification"],
+    outputs=["editor_notes", "revision_suggestions", "quality_score"],
+    gate_criteria="Editor approval simulated",
+    fail_condition="Major revisions needed",
+    dependencies=["final_validation"]
+)
+
+PRODUCTION_READINESS = AgentDefinition(
+    agent_id="production_readiness",
+    name="Production Readiness Check",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Verify manuscript is production-ready",
+    inputs=["draft_generation", "line_edit"],
+    outputs=["formatting_check", "consistency_check", "readiness_status"],
+    gate_criteria="Production ready",
+    fail_condition="Formatting issues found",
+    dependencies=["human_editor_review"]
+)
+
+# Additional Layer 20 agents
+FINAL_PROOF = AgentDefinition(
+    agent_id="final_proof",
+    name="Final Proofread",
+    layer=20,
+    agent_type=AgentType.VALIDATION,
+    purpose="Final proofread before publication",
+    inputs=["draft_generation", "line_edit"],
+    outputs=["typo_check", "grammar_check", "proof_status"],
+    gate_criteria="Proof complete",
+    fail_condition="Errors found",
+    dependencies=["publishing_package"]
+)
+
+KDP_READINESS = AgentDefinition(
+    agent_id="kdp_readiness",
+    name="KDP/Publishing Platform Readiness",
+    layer=20,
+    agent_type=AgentType.VALIDATION,
+    purpose="Verify readiness for Kindle Direct Publishing",
+    inputs=["publishing_package", "final_proof"],
+    outputs=["kdp_requirements", "metadata_check", "platform_status"],
+    gate_criteria="KDP ready",
+    fail_condition="Platform requirements not met",
+    dependencies=["final_proof"]
+)
+
 
 # =============================================================================
 # AGENT REGISTRY
@@ -481,7 +535,11 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "beta_simulation": BETA_SIMULATION,
     # Layer 19-20: Final
     "final_validation": FINAL_VALIDATION,
+    "human_editor_review": HUMAN_EDITOR_REVIEW,
+    "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
+    "final_proof": FINAL_PROOF,
+    "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
 }
 

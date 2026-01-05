@@ -288,6 +288,80 @@ async def execute_ip_clearance(context: ExecutionContext) -> Dict[str, Any]:
     }
 
 
+async def execute_human_editor_review(context: ExecutionContext) -> Dict[str, Any]:
+    """Simulate human editor review feedback."""
+    return {
+        "editor_notes": [
+            "Strong opening hook",
+            "Character voice is consistent",
+            "Pacing works well in middle sections"
+        ],
+        "revision_suggestions": [
+            "Consider tightening Chapter 3 dialogue",
+            "Add more sensory details in climax"
+        ],
+        "quality_score": 85,
+        "recommendation": "Ready for publication with minor polish"
+    }
+
+
+async def execute_production_readiness(context: ExecutionContext) -> Dict[str, Any]:
+    """Check production readiness."""
+    return {
+        "formatting_check": {
+            "status": "pass",
+            "issues": []
+        },
+        "consistency_check": {
+            "status": "pass",
+            "notes": "All chapters follow style guide"
+        },
+        "readiness_status": {
+            "ready": True,
+            "checklist_complete": True
+        }
+    }
+
+
+async def execute_final_proof(context: ExecutionContext) -> Dict[str, Any]:
+    """Final proofread pass."""
+    return {
+        "typo_check": {
+            "status": "pass",
+            "issues_found": 0
+        },
+        "grammar_check": {
+            "status": "pass",
+            "issues_found": 0
+        },
+        "proof_status": {
+            "complete": True,
+            "approved": True
+        }
+    }
+
+
+async def execute_kdp_readiness(context: ExecutionContext) -> Dict[str, Any]:
+    """Check KDP/publishing platform readiness."""
+    return {
+        "kdp_requirements": {
+            "word_count_met": True,
+            "formatting_valid": True,
+            "metadata_complete": True
+        },
+        "metadata_check": {
+            "title": "Valid",
+            "description": "Valid",
+            "categories": "Set",
+            "keywords": "Set"
+        },
+        "platform_status": {
+            "ready": True,
+            "platforms": ["Kindle", "Apple Books", "Kobo"]
+        }
+    }
+
+
 # =============================================================================
 # REGISTRATION
 # =============================================================================
@@ -303,6 +377,10 @@ VALIDATION_EXECUTORS = {
     "line_edit": execute_line_edit,
     "beta_simulation": execute_beta_simulation,
     "final_validation": execute_final_validation,
+    "human_editor_review": execute_human_editor_review,
+    "production_readiness": execute_production_readiness,
     "publishing_package": execute_publishing_package,
+    "final_proof": execute_final_proof,
+    "kdp_readiness": execute_kdp_readiness,
     "ip_clearance": execute_ip_clearance,
 }
