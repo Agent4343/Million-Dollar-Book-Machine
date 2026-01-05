@@ -543,68 +543,79 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
 
 
 async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
-    """Execute draft generation agent - generates all chapters."""
-    llm = context.llm_client
+    """
+    Execute draft generation agent - collects chapters from manuscript.
+
+    This agent collates chapters that were written via the batch chapter writer
+    endpoint. It does NOT regenerate chapters - use /write-chapters-batch for that.
+    """
     chapter_blueprint = context.inputs.get("chapter_blueprint", {})
-
-    chapters = []
-    chapter_metadata = []
-
     outline = chapter_blueprint.get("chapter_outline", [])
 
-    for chapter in outline:
+    # Get chapters already written to manuscript
+    manuscript_chapters = context.project.manuscript.get("chapters", [])
+
+    if not manuscript_chapters:
+        # No chapters written yet - return info about what's needed
+        return {
+            "chapters": [],
+            "chapter_metadata": [],
+            "word_counts": {},
+            "scene_tags": {},
+            "status": "pending",
+            "message": f"No chapters written yet. Use the batch chapter writer to generate {len(outline)} chapters.",
+            "chapters_needed": [ch.get("number") for ch in outline]
+        }
+
+    # Build chapter list from manuscript (already sorted by number)
+    chapters = []
+    chapter_metadata = []
+    written_numbers = {ch.get("number") for ch in manuscript_chapters}
+
+    for chapter in sorted(manuscript_chapters, key=lambda x: x.get("number", 0)):
         chapter_num = chapter.get("number", 0)
         chapter_title = chapter.get("title", f"Chapter {chapter_num}")
 
-        if llm:
-            # Generate each chapter with LLM
-            previous_summary = ""
-            if chapters:
-                previous_summary = f"Previous chapter ended with: {chapters[-1].get('summary', '')}"
+        chapters.append({
+            "number": chapter_num,
+            "title": chapter_title,
+            "text": chapter.get("text", ""),
+            "summary": chapter.get("summary", ""),
+            "word_count": chapter.get("word_count", len(chapter.get("text", "").split()))
+        })
 
-            prompt = DRAFT_GENERATION_PROMPT.format(
-                chapter_number=chapter_num,
-                chapter_title=chapter_title,
-                voice_specification=context.inputs.get("voice_specification", {}),
-                chapter_blueprint=chapter,
-                character_architecture=context.inputs.get("character_architecture", {}),
-                world_rules=context.inputs.get("world_rules", {}),
-                previous_summary=previous_summary
-            )
-
-            chapter_text = await llm.generate(prompt)
-            summary = await llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}")
-
-            chapters.append({
-                "number": chapter_num,
-                "title": chapter_title,
-                "text": chapter_text,
-                "summary": summary,
-                "word_count": len(chapter_text.split())
-            })
-        else:
-            # Placeholder
-            chapters.append({
-                "number": chapter_num,
-                "title": chapter_title,
-                "text": f"[Chapter {chapter_num} content would be generated here by LLM]",
-                "summary": f"Chapter {chapter_num} summary placeholder",
-                "word_count": 0
-            })
-
+        # Find matching blueprint for metadata
+        blueprint_chapter = next((c for c in outline if c.get("number") == chapter_num), {})
         chapter_metadata.append({
             "number": chapter_num,
             "title": chapter_title,
-            "scenes": len(chapter.get("scenes", [])),
-            "pov": chapter.get("pov", "Unknown")
+            "scenes": len(blueprint_chapter.get("scenes", [])),
+            "pov": blueprint_chapter.get("pov", chapter.get("pov", "Unknown"))
         })
 
-    return {
+    # Check if all chapters are written
+    expected_numbers = {ch.get("number") for ch in outline}
+    missing = sorted(expected_numbers - written_numbers)
+
+    result = {
         "chapters": chapters,
         "chapter_metadata": chapter_metadata,
         "word_counts": {str(c["number"]): c["word_count"] for c in chapters},
-        "scene_tags": {}
+        "scene_tags": {},
+        "total_word_count": sum(c["word_count"] for c in chapters),
+        "chapters_written": len(chapters),
+        "chapters_expected": len(outline)
     }
+
+    if missing:
+        result["status"] = "partial"
+        result["message"] = f"{len(chapters)}/{len(outline)} chapters written. Missing: {missing}"
+        result["chapters_missing"] = missing
+    else:
+        result["status"] = "complete"
+        result["message"] = f"All {len(chapters)} chapters collected successfully."
+
+    return result
 
 
 # =============================================================================
