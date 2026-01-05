@@ -632,9 +632,9 @@ async def write_chapter(
 
 class BatchWriteRequest(BaseModel):
     """Request model for batch chapter writing."""
-    timeout_seconds: int = 8  # Stop before Vercel's 10s limit
-    max_chapters: int = 1     # How many chapters to attempt
-    quick_mode: bool = True   # Use quick mode by default for Vercel (shorter chapters)
+    timeout_seconds: int = 180  # Railway allows longer requests (3 minutes default)
+    max_chapters: int = 3       # Write multiple chapters per batch
+    quick_mode: bool = False    # Full-length chapters by default on Railway
 
 
 @app.post("/api/projects/{project_id}/write-chapters-batch")
