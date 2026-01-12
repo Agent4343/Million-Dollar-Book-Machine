@@ -164,6 +164,22 @@ RELATIONSHIP_DYNAMICS = AgentDefinition(
     dependencies=["character_architecture"]
 )
 
+STORY_BIBLE = AgentDefinition(
+    agent_id="story_bible",
+    name="Story Bible",
+    layer=7,
+    agent_type=AgentType.CREATIVE,
+    purpose="Lock in all canonical facts (names, locations, timeline) to ensure consistency across chapters",
+    inputs=["character_architecture", "world_rules", "relationship_dynamics"],
+    outputs=[
+        "character_registry", "location_registry", "timeline",
+        "relationship_map", "terminology", "backstory_facts", "consistency_rules"
+    ],
+    gate_criteria="All canonical facts locked in with no ambiguity",
+    fail_condition="Missing critical facts or contradictory details",
+    dependencies=["relationship_dynamics"]
+)
+
 
 # =============================================================================
 # LAYER 3: STRUCTURAL ENGINE
@@ -441,6 +457,117 @@ IP_CLEARANCE = AgentDefinition(
     dependencies=["publishing_package"]
 )
 
+# Additional Layer 19 agents
+HUMAN_EDITOR_REVIEW = AgentDefinition(
+    agent_id="human_editor_review",
+    name="Human Editor Review Simulation",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Simulate professional editor feedback",
+    inputs=["draft_generation", "voice_specification"],
+    outputs=["editor_notes", "revision_suggestions", "quality_score"],
+    gate_criteria="Editor approval simulated",
+    fail_condition="Major revisions needed",
+    dependencies=["final_validation"]
+)
+
+PRODUCTION_READINESS = AgentDefinition(
+    agent_id="production_readiness",
+    name="Production Readiness Check",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Verify manuscript is production-ready",
+    inputs=["draft_generation", "line_edit"],
+    outputs=["formatting_check", "consistency_check", "readiness_status"],
+    gate_criteria="Production ready",
+    fail_condition="Formatting issues found",
+    dependencies=["human_editor_review"]
+)
+
+# Additional Layer 20 agents
+FINAL_PROOF = AgentDefinition(
+    agent_id="final_proof",
+    name="Final Proofread",
+    layer=20,
+    agent_type=AgentType.VALIDATION,
+    purpose="Final proofread before publication",
+    inputs=["draft_generation", "line_edit"],
+    outputs=["typo_check", "grammar_check", "proof_status"],
+    gate_criteria="Proof complete",
+    fail_condition="Errors found",
+    dependencies=["publishing_package"]
+)
+
+KDP_READINESS = AgentDefinition(
+    agent_id="kdp_readiness",
+    name="KDP/Publishing Platform Readiness",
+    layer=20,
+    agent_type=AgentType.VALIDATION,
+    purpose="Verify readiness for Kindle Direct Publishing",
+    inputs=["publishing_package", "final_proof"],
+    outputs=["kdp_requirements", "metadata_check", "platform_status"],
+    gate_criteria="KDP ready",
+    fail_condition="Platform requirements not met",
+    dependencies=["final_proof"]
+)
+
+
+# =============================================================================
+# LAYER 21: MARKETING & COMMERCIAL OPTIMIZATION
+# =============================================================================
+
+BLURB_GENERATOR = AgentDefinition(
+    agent_id="blurb_generator",
+    name="Amazon Blurb Generator",
+    layer=21,
+    agent_type=AgentType.GENERATION,
+    purpose="Create Amazon-optimized book descriptions that sell",
+    inputs=["concept_definition", "character_architecture", "story_question"],
+    outputs=["short_blurb", "full_blurb", "a_plus_content", "tagline", "comparison_pitch"],
+    gate_criteria="Blurb follows Amazon best practices and genre conventions",
+    fail_condition="Generic or non-compelling copy",
+    dependencies=["kdp_readiness"]
+)
+
+KEYWORD_OPTIMIZER = AgentDefinition(
+    agent_id="keyword_optimizer",
+    name="KDP Keyword Optimizer",
+    layer=21,
+    agent_type=AgentType.RESEARCH,
+    purpose="Generate optimized keywords and categories for Kindle discoverability",
+    inputs=["user_constraints", "thematic_architecture", "plot_structure"],
+    outputs=["primary_keywords", "backup_keywords", "bisac_categories", "amazon_categories"],
+    gate_criteria="Keywords follow KDP rules and target high-value search terms",
+    fail_condition="Keywords too competitive or irrelevant",
+    dependencies=["blurb_generator"]
+)
+
+SERIES_BIBLE = AgentDefinition(
+    agent_id="series_bible",
+    name="Series Bible Generator",
+    layer=21,
+    agent_type=AgentType.CREATIVE,
+    purpose="Create series continuity bible for multi-book planning",
+    inputs=["story_bible", "draft_generation", "character_architecture"],
+    outputs=["series_potential", "unresolved_threads", "character_futures", "series_hooks", "spinoff_potential"],
+    gate_criteria="Clear roadmap for series expansion if viable",
+    fail_condition="No series potential identified",
+    dependencies=["keyword_optimizer"]
+)
+
+COMP_ANALYSIS = AgentDefinition(
+    agent_id="comp_analysis",
+    name="Comparable Title Analysis",
+    layer=21,
+    agent_type=AgentType.RESEARCH,
+    purpose="Analyze market positioning against comparable titles",
+    inputs=["user_constraints", "blurb_generator"],
+    outputs=["positioning_recommendations", "price_positioning", "launch_strategy"],
+    gate_criteria="Clear market positioning established",
+    fail_condition="No differentiation from competitors",
+    dependencies=["series_bible"]
+)
+
 
 # =============================================================================
 # AGENT REGISTRY
@@ -458,6 +585,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "world_rules": WORLD_RULES,
     "character_architecture": CHARACTER_ARCHITECTURE,
     "relationship_dynamics": RELATIONSHIP_DYNAMICS,
+    "story_bible": STORY_BIBLE,
     # Layer 8-10: Structural Engine
     "plot_structure": PLOT_STRUCTURE,
     "pacing_design": PACING_DESIGN,
@@ -481,8 +609,17 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "beta_simulation": BETA_SIMULATION,
     # Layer 19-20: Final
     "final_validation": FINAL_VALIDATION,
+    "human_editor_review": HUMAN_EDITOR_REVIEW,
+    "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
+    "final_proof": FINAL_PROOF,
+    "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
+    # Layer 21: Marketing & Commercial
+    "blurb_generator": BLURB_GENERATOR,
+    "keyword_optimizer": KEYWORD_OPTIMIZER,
+    "series_bible": SERIES_BIBLE,
+    "comp_analysis": COMP_ANALYSIS,
 }
 
 

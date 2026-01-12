@@ -36,6 +36,8 @@ from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
+from agents.story_bible import STORY_BIBLE_EXECUTORS
+from agents.marketing import MARKETING_EXECUTORS
 
 # Initialize app
 app = FastAPI(
@@ -95,6 +97,8 @@ ALL_EXECUTORS = {
     **STORY_SYSTEM_EXECUTORS,
     **STRUCTURAL_EXECUTORS,
     **VALIDATION_EXECUTORS,
+    **STORY_BIBLE_EXECUTORS,
+    **MARKETING_EXECUTORS,
 }
 
 
@@ -116,7 +120,7 @@ def verify_session_token(token: str) -> bool:
             return False
         expected = create_session_token(timestamp)
         return hmac.compare_digest(token, expected)
-    except:
+    except (ValueError, TypeError):
         return False
 
 
@@ -632,9 +636,9 @@ async def write_chapter(
 
 class BatchWriteRequest(BaseModel):
     """Request model for batch chapter writing."""
-    timeout_seconds: int = 8  # Stop before Vercel's 10s limit
-    max_chapters: int = 1     # How many chapters to attempt
-    quick_mode: bool = True   # Use quick mode by default for Vercel (shorter chapters)
+    timeout_seconds: int = 180  # Railway allows longer requests (3 minutes default)
+    max_chapters: int = 3       # Write multiple chapters per batch
+    quick_mode: bool = False    # Full-length chapters by default on Railway
 
 
 @app.post("/api/projects/{project_id}/write-chapters-batch")
@@ -685,6 +689,8 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
     # Find which chapters are already written
     existing_chapters = {ch.get("number") for ch in project.manuscript.get("chapters", [])}
     chapters_to_write = [ch for ch in chapter_outline if ch.get("number") not in existing_chapters]
+    # Sort by chapter number to ensure chapters are written in order
+    chapters_to_write.sort(key=lambda ch: ch.get("number", 0))
 
     if not chapters_to_write:
         return {
@@ -746,9 +752,9 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         except Exception as e:
             chapters_failed.append({"number": chapter_num, "error": str(e)})
 
-    # Calculate remaining chapters
+    # Calculate remaining chapters (sorted to ensure consistent ordering)
     all_written = existing_chapters.union(set(chapters_written))
-    remaining = [ch.get("number") for ch in chapter_outline if ch.get("number") not in all_written]
+    remaining = sorted([ch.get("number") for ch in chapter_outline if ch.get("number") not in all_written])
 
     return {
         "success": True,
