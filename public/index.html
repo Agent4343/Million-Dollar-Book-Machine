@@ -1337,7 +1337,9 @@
             try {
                 const res = await fetch(`/api/projects/${currentProject}/write-chapter/${chapterNumber}`, {
                     method: 'POST',
-                    credentials: 'include'
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quick_mode: false })
                 });
 
                 if (!res.ok) {
