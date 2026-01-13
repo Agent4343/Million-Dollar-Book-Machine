@@ -339,6 +339,37 @@ async def get_available_agents(project_id: str, auth: bool = Depends(require_aut
     return {"available_agents": agents}
 
 
+@app.get("/api/projects/{project_id}/debug")
+async def debug_project(project_id: str, auth: bool = Depends(require_auth)):
+    """Debug endpoint to see project state."""
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    layers_debug = {}
+    for layer_id, layer in project.layers.items():
+        agents_debug = {}
+        for agent_id, agent_state in layer.agents.items():
+            agents_debug[agent_id] = {
+                "status": agent_state.status.value,
+                "dependencies": agent_state.dependencies,
+                "deps_met": all(
+                    get_orchestrator()._find_agent_state(project, dep_id) and
+                    get_orchestrator()._find_agent_state(project, dep_id).status == AgentStatus.PASSED
+                    for dep_id in agent_state.dependencies
+                ) if agent_state.dependencies else True
+            }
+        layers_debug[layer_id] = {
+            "status": layer.status.value,
+            "agents": agents_debug
+        }
+
+    return {
+        "project_id": project.project_id,
+        "layers": layers_debug
+    }
+
+
 @app.post("/api/projects/{project_id}/execute/{agent_id}")
 async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
     """Execute a specific agent."""
