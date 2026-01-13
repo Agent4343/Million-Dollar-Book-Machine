@@ -574,8 +574,11 @@
                 const saved = getLocalStorageProjects();
                 const project = saved[projectId];
 
+                console.log('Project not on server, checking localStorage...');
+                console.log('Available projects in localStorage:', Object.keys(saved));
+
                 if (project) {
-                    console.log('Auto-restoring project from localStorage...');
+                    console.log('Found project in localStorage, restoring...');
                     try {
                         const importRes = await fetch('/api/projects/import', {
                             method: 'POST',
@@ -587,10 +590,15 @@
                         if (importRes.ok) {
                             console.log('Project restored successfully');
                             return true;
+                        } else {
+                            const errData = await importRes.json().catch(() => ({}));
+                            console.error('Import failed:', importRes.status, errData);
                         }
                     } catch (error) {
                         console.error('Failed to restore project:', error);
                     }
+                } else {
+                    console.log('Project NOT found in localStorage');
                 }
             }
 
