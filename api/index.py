@@ -30,6 +30,7 @@ from models.state import BookProject, LAYERS, AgentStatus, LayerStatus
 from models.agents import AGENT_REGISTRY, get_agent_execution_order
 from core.orchestrator import Orchestrator
 from core.llm import create_llm_client
+from core import database as db
 
 # Import agent executors
 from agents.strategic import STRATEGIC_EXECUTORS
@@ -206,7 +207,8 @@ async def api_info():
         "description": "AI-powered book development system",
         "total_agents": len(AGENT_REGISTRY),
         "total_layers": len(LAYERS),
-        "llm_enabled": get_llm_client() is not None
+        "llm_enabled": get_llm_client() is not None,
+        "database_enabled": db.is_database_available()
     }
 
 
@@ -266,6 +268,106 @@ async def list_layers(auth: bool = Depends(require_auth)):
 # Project Management
 # =============================================================================
 
+def save_project_to_db(project):
+    """Save project to database for persistence."""
+    try:
+        # Get full export data
+        export_data = _get_export_data(project)
+        db.save_project(project.project_id, project.title, export_data)
+    except Exception as e:
+        print(f"Warning: Failed to save to database: {e}")
+
+
+def _get_export_data(project):
+    """Get full export data for a project."""
+    export_data = {
+        "version": "1.0",
+        "project_id": project.project_id,
+        "title": project.title,
+        "status": project.status,
+        "current_layer": project.current_layer,
+        "user_constraints": project.user_constraints,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+        "manuscript": project.manuscript,
+        "layers": {}
+    }
+
+    for layer_id, layer in project.layers.items():
+        export_data["layers"][str(layer_id)] = {
+            "name": layer.name,
+            "status": layer.status.value,
+            "agents": {}
+        }
+        for agent_id, agent_state in layer.agents.items():
+            agent_export = {
+                "status": agent_state.status.value,
+                "attempts": agent_state.attempts,
+                "output": None
+            }
+            if agent_state.current_output:
+                agent_export["output"] = {
+                    "content": agent_state.current_output.content,
+                    "gate_passed": agent_state.current_output.gate_result.passed if agent_state.current_output.gate_result else None,
+                    "gate_message": agent_state.current_output.gate_result.message if agent_state.current_output.gate_result else None
+                }
+            export_data["layers"][str(layer_id)]["agents"][agent_id] = agent_export
+
+    return export_data
+
+
+def load_project_from_db(project_id: str):
+    """Load project from database and restore to memory."""
+    data = db.load_project(project_id)
+    if not data:
+        return None
+
+    try:
+        # Import the project
+        from models.state import LayerState, AgentState, AgentOutput, GateResult
+
+        project = get_orchestrator().create_project(data["title"], data["user_constraints"])
+        project.project_id = data["project_id"]
+        project.status = data["status"]
+        project.current_layer = data["current_layer"]
+        project.created_at = data["created_at"]
+        project.updated_at = data["updated_at"]
+        project.manuscript = data.get("manuscript", {})
+
+        # Restore layer and agent states
+        for layer_id_str, layer_data in data.get("layers", {}).items():
+            layer_id = int(layer_id_str)
+            if layer_id in project.layers:
+                project.layers[layer_id].status = LayerStatus(layer_data["status"])
+
+                for agent_id, agent_data in layer_data.get("agents", {}).items():
+                    if agent_id in project.layers[layer_id].agents:
+                        agent_state = project.layers[layer_id].agents[agent_id]
+                        agent_state.status = AgentStatus(agent_data["status"])
+                        agent_state.attempts = agent_data.get("attempts", 0)
+
+                        if agent_data.get("output"):
+                            output_data = agent_data["output"]
+                            gate_result = None
+                            if output_data.get("gate_passed") is not None:
+                                gate_result = GateResult(
+                                    passed=output_data["gate_passed"],
+                                    message=output_data.get("gate_message", "")
+                                )
+                            agent_state.current_output = AgentOutput(
+                                agent_id=agent_id,
+                                content=output_data["content"],
+                                gate_result=gate_result
+                            )
+
+        # Register with correct ID
+        get_orchestrator().projects[data["project_id"]] = project
+        return project
+    except Exception as e:
+        print(f"Error loading project from database: {e}")
+        return None
+
+
 @app.post("/api/projects")
 async def create_project(request: ProjectCreate, auth: bool = Depends(require_auth)):
     """Create a new book development project."""
@@ -283,34 +385,58 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
 
     project = get_orchestrator().create_project(request.title, constraints)
 
+    # Save to database
+    save_project_to_db(project)
+
     return {
         "success": True,
         "project_id": project.project_id,
         "title": project.title,
-        "message": f"Project created with {len(AGENT_REGISTRY)} agents ready"
+        "message": f"Project created with {len(AGENT_REGISTRY)} agents ready",
+        "database_enabled": db.is_database_available()
     }
 
 
 @app.get("/api/projects")
 async def list_projects(auth: bool = Depends(require_auth)):
     """List all projects."""
-    projects = []
+    # Get projects from memory
+    memory_projects = {}
     for pid, project in get_orchestrator().projects.items():
-        projects.append({
+        memory_projects[pid] = {
             "project_id": project.project_id,
             "title": project.title,
             "status": project.status,
             "current_layer": project.current_layer,
             "created_at": project.created_at,
             "updated_at": project.updated_at
-        })
-    return {"projects": projects}
+        }
+
+    # Get projects from database (may include ones not in memory)
+    db_projects = db.list_projects()
+    for db_proj in db_projects:
+        if db_proj["project_id"] not in memory_projects:
+            # Load basic info from database
+            memory_projects[db_proj["project_id"]] = {
+                "project_id": db_proj["project_id"],
+                "title": db_proj["title"],
+                "status": "saved",  # Indicate it's in database but not loaded
+                "current_layer": 0,
+                "created_at": db_proj["created_at"],
+                "updated_at": db_proj["updated_at"]
+            }
+
+    return {"projects": list(memory_projects.values())}
 
 
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: str, auth: bool = Depends(require_auth)):
     """Get project details."""
     project = get_orchestrator().get_project(project_id)
+
+    # If not in memory, try loading from database
+    if not project:
+        project = load_project_from_db(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return get_orchestrator().get_project_status(project)
@@ -320,6 +446,10 @@ async def get_project(project_id: str, auth: bool = Depends(require_auth)):
 async def get_available_agents(project_id: str, auth: bool = Depends(require_auth)):
     """Get agents ready to execute."""
     project = get_orchestrator().get_project(project_id)
+
+    # Try loading from database if not in memory
+    if not project:
+        project = load_project_from_db(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -374,6 +504,10 @@ async def debug_project(project_id: str, auth: bool = Depends(require_auth)):
 async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
     """Execute a specific agent."""
     project = get_orchestrator().get_project(project_id)
+
+    # Try loading from database if not in memory
+    if not project:
+        project = load_project_from_db(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -386,6 +520,10 @@ async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(req
 
     try:
         output = await get_orchestrator().execute_agent(project, agent_id)
+
+        # Save to database after execution
+        save_project_to_db(project)
+
         return {
             "success": True,
             "agent_id": agent_id,
