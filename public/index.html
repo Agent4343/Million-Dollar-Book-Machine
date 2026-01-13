@@ -1277,10 +1277,16 @@
             // Check if chapter_blueprint agent has passed
             let blueprintPassed = false;
             chapterBlueprint = null;
+            let blueprintStatus = 'not found';
 
             for (const [layerId, layer] of Object.entries(projectData.layers)) {
                 if (layer.agents && layer.agents.chapter_blueprint) {
                     const agent = layer.agents.chapter_blueprint;
+                    blueprintStatus = agent.status;
+                    console.log(`Chapter blueprint found in layer ${layerId}: status=${agent.status}, hasOutput=${!!agent.output}`);
+                    if (agent.output) {
+                        console.log('Blueprint output keys:', Object.keys(agent.output.content || {}));
+                    }
                     if (agent.status === 'passed' && agent.output) {
                         blueprintPassed = true;
                         chapterBlueprint = agent.output.content;
@@ -1290,7 +1296,11 @@
             }
 
             if (!blueprintPassed) {
-                statusEl.innerHTML = '<span style="color:#f39c12;">Complete Layer 10 (Chapter Blueprint) first</span>';
+                const currentLayer = projectData.current_layer || 0;
+                const layersCompleted = Object.entries(projectData.layers)
+                    .filter(([id, l]) => l.status === 'completed').length;
+                console.log(`Chapter blueprint not ready. Current layer: ${currentLayer}, Completed layers: ${layersCompleted}, Blueprint status: ${blueprintStatus}`);
+                statusEl.innerHTML = `<span style="color:#f39c12;">Complete Layer 10 (Chapter Blueprint) first - Currently on layer ${currentLayer} (${layersCompleted} layers completed)</span>`;
                 listEl.innerHTML = '';
                 writeAllBtn.disabled = true;
                 return;
@@ -1402,7 +1412,9 @@
             await updateChapterWriter();
 
             if (!chapterBlueprint || !chapterBlueprint.chapter_outline) {
-                console.log('No chapter blueprint available yet');
+                const currentLayer = projectData?.current_layer || 0;
+                console.log(`No chapter blueprint available yet - project is on layer ${currentLayer} (need layer 10)`);
+                alert(`Chapter blueprint not ready. Run the full pipeline first.\n\nCurrent layer: ${currentLayer}\nRequired: Layer 10 (Chapter Blueprint)`);
                 return;
             }
 
