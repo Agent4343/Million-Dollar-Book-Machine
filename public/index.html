@@ -858,7 +858,7 @@
                 while (hasMore && iterations < maxIterations) {
                     iterations++;
 
-                    // Get available agents
+                    // Get available agents (refresh EVERY iteration)
                     const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
                     const data = await res.json();
 
@@ -867,23 +867,24 @@
                         break;
                     }
 
-                    // Execute each available agent
-                    for (const agent of data.available_agents) {
-                        document.getElementById('progressStatus').textContent = `Running: ${agent.name}`;
+                    // Execute only the FIRST available agent, then refresh the list
+                    const agent = data.available_agents[0];
+                    document.getElementById('progressStatus').textContent = `Running: ${agent.name}`;
 
-                        const execRes = await fetch(`/api/projects/${currentProject}/execute/${agent.id}`, {
-                            method: 'POST',
-                            credentials: 'include'
-                        });
+                    const execRes = await fetch(`/api/projects/${currentProject}/execute/${agent.id}`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
 
-                        if (!execRes.ok) {
-                            console.error(`Failed to execute ${agent.id}`);
-                        }
-
-                        // Update progress after each agent
-                        await loadProjectPipeline();
-                        viewAgent(agent.id);
+                    if (!execRes.ok) {
+                        const errData = await execRes.json().catch(() => ({}));
+                        console.error(`Failed to execute ${agent.id}:`, errData.detail || 'Unknown error');
+                        // Continue to next iteration - maybe other agents are available
                     }
+
+                    // Update progress after each agent
+                    await loadProjectPipeline();
+                    viewAgent(agent.id);
                 }
 
                 // Final update
