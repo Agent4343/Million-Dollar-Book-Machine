@@ -359,14 +359,21 @@ class Orchestrator:
         """Get comprehensive status of a project."""
         layers_status = {}
         for layer_id, layer in project.layers.items():
-            agents_status = {
-                aid: {
+            agents_status = {}
+            for aid, a in layer.agents.items():
+                agent_data = {
                     "status": a.status.value,
                     "attempts": a.attempts,
-                    "has_output": a.current_output is not None
+                    "output": None
                 }
-                for aid, a in layer.agents.items()
-            }
+                # Include actual output content when available
+                if a.current_output:
+                    agent_data["output"] = {
+                        "content": a.current_output.content,
+                        "gate_passed": a.current_output.gate_result.passed if a.current_output.gate_result else None,
+                        "gate_message": a.current_output.gate_result.message if a.current_output.gate_result else None
+                    }
+                agents_status[aid] = agent_data
             layers_status[layer_id] = {
                 "name": layer.name,
                 "status": layer.status.value,
