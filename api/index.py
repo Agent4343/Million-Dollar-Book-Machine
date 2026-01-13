@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -183,11 +184,22 @@ async def check_auth(session: Optional[str] = Cookie(None, alias="book_session")
 
 
 # =============================================================================
-# System Info
+# Static Files & Frontend
 # =============================================================================
 
+# Get the path to public directory
+PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
+
+
 @app.get("/")
-async def root():
+async def serve_frontend():
+    """Serve the main frontend application."""
+    return FileResponse(os.path.join(PUBLIC_DIR, "index.html"))
+
+
+@app.get("/api")
+async def api_info():
+    """API information endpoint."""
     return {
         "service": "Million Dollar Book Machine",
         "version": "1.0.0",
