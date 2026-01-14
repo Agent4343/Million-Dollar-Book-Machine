@@ -355,6 +355,52 @@
             gap: 0.5rem;
             flex-wrap: wrap;
         }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal {
+            background: #1a1a3e;
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 700px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .modal h2 {
+            color: #00d4ff;
+            margin-bottom: 1rem;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            justify-content: flex-end;
+        }
+        .chapter-item.has-regen {
+            border: 1px solid #f39c12;
+        }
+        .btn-regen {
+            background: linear-gradient(90deg, #f39c12, #e67e22);
+            color: #fff;
+        }
+        .chapter-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -586,10 +632,66 @@ Include:
                                 <div class="output-panel" style="max-height:300px;">
                                     <pre id="chapterText" style="white-space:pre-wrap;color:#fff;"></pre>
                                 </div>
+                                <div class="chapter-actions" id="chapterActions">
+                                    <button class="btn btn-regen btn-small" onclick="showRegenerateModal()">Regenerate with Feedback</button>
+                                    <button class="btn btn-secondary btn-small" onclick="showEditModal()">Edit Manually</button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Regenerate Chapter Modal -->
+    <div id="regenerateModal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2>Regenerate Chapter <span id="regenChapterNum"></span></h2>
+            <p style="color:#888;margin-bottom:1rem;">Provide feedback to improve the chapter. The AI will use your notes and the previous draft to create a better version.</p>
+
+            <label>Feedback / Improvement Notes</label>
+            <textarea id="regenFeedback" rows="4" placeholder="Example: Make the dialogue more natural. Add more sensory details. The pacing feels too slow in the middle..."></textarea>
+
+            <label>Specific Issues to Fix (one per line)</label>
+            <textarea id="regenErrors" rows="3" placeholder="Example:
+Character name inconsistency in paragraph 3
+Missing transition between scenes
+Dialogue doesn't match character voice"></textarea>
+
+            <div style="margin-top:1rem;">
+                <label style="display:flex;align-items:center;gap:0.5rem;">
+                    <input type="checkbox" id="regenQuickMode">
+                    Quick mode (shorter ~500 word version)
+                </label>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeRegenerateModal()">Cancel</button>
+                <button class="btn btn-regen" onclick="regenerateChapter()">Regenerate Chapter</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Chapter Modal -->
+    <div id="editModal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2>Edit Chapter <span id="editChapterNum"></span></h2>
+            <p style="color:#888;margin-bottom:1rem;">Directly edit the chapter text. Your changes will be saved immediately.</p>
+
+            <label>Chapter Title</label>
+            <input type="text" id="editChapterTitle" placeholder="Chapter title">
+
+            <label>Chapter Text</label>
+            <textarea id="editChapterText" rows="15" style="font-family:monospace;font-size:0.9rem;"></textarea>
+
+            <p style="font-size:0.85rem;color:#888;margin-top:0.5rem;">
+                Word count: <span id="editWordCount">0</span>
+            </p>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveChapterEdit()">Save Changes</button>
             </div>
         </div>
     </div>
@@ -1701,16 +1803,204 @@ Include:
                 if (!res.ok) throw new Error('Chapter not found');
 
                 const chapter = await res.json();
+                currentViewingChapter = chapterNumber;
 
                 document.getElementById('chapterPreview').classList.remove('hidden');
                 document.getElementById('chapterText').textContent =
                     `Chapter ${chapter.number}: ${chapter.title}\n` +
-                    `Words: ${chapter.word_count}\n\n` +
-                    (chapter.text || 'No text');
+                    `Words: ${chapter.word_count}\n` +
+                    (chapter.regeneration_count ? `Regenerations: ${chapter.regeneration_count}\n` : '') +
+                    `\n` + (chapter.text || 'No text');
             } catch (error) {
                 console.error('View chapter error:', error);
             }
         }
+
+        // =================================================================
+        // Chapter Regeneration and Editing
+        // =================================================================
+
+        let currentViewingChapter = null;
+
+        function showRegenerateModal() {
+            if (!currentViewingChapter) {
+                alert('Please select a chapter first');
+                return;
+            }
+
+            document.getElementById('regenChapterNum').textContent = currentViewingChapter;
+            document.getElementById('regenFeedback').value = '';
+            document.getElementById('regenErrors').value = '';
+            document.getElementById('regenQuickMode').checked = false;
+            document.getElementById('regenerateModal').classList.remove('hidden');
+        }
+
+        function closeRegenerateModal() {
+            document.getElementById('regenerateModal').classList.add('hidden');
+        }
+
+        async function regenerateChapter() {
+            if (!currentProject || !currentViewingChapter) return;
+
+            const feedback = document.getElementById('regenFeedback').value.trim();
+            const errorsText = document.getElementById('regenErrors').value.trim();
+            const quickMode = document.getElementById('regenQuickMode').checked;
+
+            const errors = errorsText ? errorsText.split('\n').filter(e => e.trim()) : [];
+
+            if (!feedback && errors.length === 0) {
+                if (!confirm('No feedback provided. Regenerate anyway?')) {
+                    return;
+                }
+            }
+
+            closeRegenerateModal();
+
+            // Show progress
+            document.getElementById('chapterWriteProgress').textContent = `Regenerating Chapter ${currentViewingChapter}...`;
+            document.getElementById('chapterText').textContent = 'Regenerating chapter with your feedback...';
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/regenerate-chapter/${currentViewingChapter}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        feedback: feedback || null,
+                        errors: errors.length > 0 ? errors : null,
+                        quick_mode: quickMode
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Regeneration failed');
+                }
+
+                const data = await res.json();
+
+                if (data.success && data.chapter) {
+                    document.getElementById('chapterText').textContent =
+                        `Chapter ${data.chapter.chapter_number}: ${data.chapter.title}\n` +
+                        `Words: ${data.chapter.word_count}\n` +
+                        `Regeneration #${data.regeneration_count}\n\n` +
+                        (data.chapter.text || 'No text');
+
+                    document.getElementById('chapterWriteProgress').textContent =
+                        `Chapter ${currentViewingChapter} regenerated (version ${data.regeneration_count})`;
+
+                    // Update chapter list
+                    await updateChapterWriter();
+                }
+            } catch (error) {
+                console.error('Regeneration error:', error);
+                alert('Failed to regenerate chapter: ' + error.message);
+                document.getElementById('chapterWriteProgress').textContent = 'Regeneration failed';
+            }
+        }
+
+        function showEditModal() {
+            if (!currentViewingChapter || !currentProject) {
+                alert('Please select a chapter first');
+                return;
+            }
+
+            const chapter = writtenChapters[currentViewingChapter];
+            if (!chapter) {
+                alert('Chapter not found');
+                return;
+            }
+
+            document.getElementById('editChapterNum').textContent = currentViewingChapter;
+            document.getElementById('editChapterTitle').value = chapter.title || `Chapter ${currentViewingChapter}`;
+            document.getElementById('editChapterText').value = chapter.text || '';
+            updateEditWordCount();
+            document.getElementById('editModal').classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').classList.add('hidden');
+        }
+
+        function updateEditWordCount() {
+            const text = document.getElementById('editChapterText').value;
+            const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+            document.getElementById('editWordCount').textContent = wordCount.toLocaleString();
+        }
+
+        // Update word count as user types
+        document.getElementById('editChapterText')?.addEventListener('input', updateEditWordCount);
+
+        async function saveChapterEdit() {
+            if (!currentProject || !currentViewingChapter) return;
+
+            const text = document.getElementById('editChapterText').value;
+            const title = document.getElementById('editChapterTitle').value;
+
+            if (!text.trim()) {
+                alert('Chapter text cannot be empty');
+                return;
+            }
+
+            closeEditModal();
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/chapters/${currentViewingChapter}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        text: text,
+                        title: title || null
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Save failed');
+                }
+
+                const data = await res.json();
+
+                // Update local cache
+                if (writtenChapters[currentViewingChapter]) {
+                    writtenChapters[currentViewingChapter].text = text;
+                    writtenChapters[currentViewingChapter].title = title;
+                    writtenChapters[currentViewingChapter].word_count = data.word_count;
+                }
+
+                // Update preview
+                document.getElementById('chapterText').textContent =
+                    `Chapter ${currentViewingChapter}: ${title}\n` +
+                    `Words: ${data.word_count}\n` +
+                    `(Manually edited)\n\n` + text;
+
+                document.getElementById('chapterWriteProgress').textContent =
+                    `Chapter ${currentViewingChapter} saved (${data.word_count} words)`;
+
+                await updateChapterWriter();
+            } catch (error) {
+                console.error('Save error:', error);
+                alert('Failed to save chapter: ' + error.message);
+            }
+        }
+
+        // Handle clicking on chapter items to view/select them
+        const originalUpdateChapterWriter = updateChapterWriter;
+        updateChapterWriter = async function() {
+            await originalUpdateChapterWriter();
+
+            // Add click handlers to view chapters
+            document.querySelectorAll('.chapter-item.written').forEach(el => {
+                el.onclick = function() {
+                    const chNum = parseInt(this.textContent.match(/\d+/)?.[0]);
+                    if (chNum) {
+                        currentViewingChapter = chNum;
+                        viewWrittenChapter(chNum);
+                    }
+                };
+            });
+        };
 
         checkAuth();
     </script>

@@ -1113,6 +1113,359 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
     raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
 
 
+class ChapterRegenerateRequest(BaseModel):
+    """Request model for chapter regeneration."""
+    feedback: Optional[str] = None  # User feedback/notes for improvement
+    errors: Optional[List[str]] = None  # Specific errors to fix
+    quick_mode: bool = False
+
+
+@app.post("/api/projects/{project_id}/regenerate-chapter/{chapter_number}")
+async def regenerate_chapter(
+    project_id: str,
+    chapter_number: int,
+    request: ChapterRegenerateRequest,
+    auth: bool = Depends(require_auth)
+):
+    """
+    Regenerate a chapter with feedback/error correction.
+
+    Includes the previous draft and feedback in the context
+    so the LLM can learn from and improve upon it.
+    """
+    from core.orchestrator import ExecutionContext
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get chapter blueprint
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise HTTPException(
+            status_code=400,
+            detail="Chapter blueprint not yet generated. Run pipeline through layer 10 first."
+        )
+
+    # Get the existing chapter (if any) to include as context
+    existing_chapter = None
+    chapters = project.manuscript.get("chapters", [])
+    for ch in chapters:
+        if ch.get("number") == chapter_number:
+            existing_chapter = ch
+            break
+
+    # Build execution context with all inputs
+    inputs = {
+        "chapter_blueprint": chapter_blueprint,
+        "user_constraints": project.user_constraints,
+    }
+
+    # Gather all previous agent outputs
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    # Add regeneration-specific context
+    if existing_chapter:
+        inputs["previous_draft"] = existing_chapter.get("text", "")
+
+    if request.feedback:
+        inputs["user_feedback"] = request.feedback
+
+    if request.errors:
+        inputs["validation_errors"] = request.errors
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    try:
+        # Use a modified prompt that includes feedback context
+        result = await execute_chapter_writer_with_feedback(
+            context,
+            chapter_number,
+            quick_mode=request.quick_mode,
+            previous_draft=existing_chapter.get("text") if existing_chapter else None,
+            feedback=request.feedback,
+            errors=request.errors
+        )
+
+        # Store regenerated chapter in manuscript
+        if result.get("text") and not result.get("error"):
+            if "chapters" not in project.manuscript:
+                project.manuscript["chapters"] = []
+
+            # Update or add chapter
+            chapter_exists = False
+            for i, ch in enumerate(project.manuscript["chapters"]):
+                if ch.get("number") == chapter_number:
+                    # Keep track of versions
+                    result["regeneration_count"] = ch.get("regeneration_count", 0) + 1
+                    result["previous_version"] = ch.get("text", "")[:1000]  # Keep summary of previous
+                    project.manuscript["chapters"][i] = result
+                    chapter_exists = True
+                    break
+
+            if not chapter_exists:
+                result["regeneration_count"] = 1
+                project.manuscript["chapters"].append(result)
+
+            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+
+            # Save to database
+            save_project_to_db(project)
+
+        return {
+            "success": True,
+            "chapter": result,
+            "regeneration_count": result.get("regeneration_count", 1)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChapterUpdateRequest(BaseModel):
+    """Request model for direct chapter editing."""
+    text: str
+    title: Optional[str] = None
+
+
+@app.put("/api/projects/{project_id}/chapters/{chapter_number}")
+async def update_chapter(
+    project_id: str,
+    chapter_number: int,
+    request: ChapterUpdateRequest,
+    auth: bool = Depends(require_auth)
+):
+    """
+    Directly update/edit a chapter's text.
+
+    Allows manual editing of chapter content.
+    """
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    chapters = project.manuscript.get("chapters", [])
+    chapter_found = False
+
+    for i, ch in enumerate(chapters):
+        if ch.get("number") == chapter_number:
+            # Update the chapter
+            project.manuscript["chapters"][i]["text"] = request.text
+            project.manuscript["chapters"][i]["word_count"] = len(request.text.split())
+            project.manuscript["chapters"][i]["manually_edited"] = True
+            if request.title:
+                project.manuscript["chapters"][i]["title"] = request.title
+            chapter_found = True
+            break
+
+    if not chapter_found:
+        # Create new chapter entry
+        if "chapters" not in project.manuscript:
+            project.manuscript["chapters"] = []
+
+        new_chapter = {
+            "chapter_number": chapter_number,
+            "number": chapter_number,
+            "title": request.title or f"Chapter {chapter_number}",
+            "text": request.text,
+            "word_count": len(request.text.split()),
+            "manually_edited": True
+        }
+        project.manuscript["chapters"].append(new_chapter)
+        project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+
+    # Save to database
+    save_project_to_db(project)
+
+    return {
+        "success": True,
+        "chapter_number": chapter_number,
+        "word_count": len(request.text.split()),
+        "message": "Chapter updated successfully"
+    }
+
+
+async def execute_chapter_writer_with_feedback(
+    context,
+    chapter_number: int,
+    quick_mode: bool = False,
+    previous_draft: str = None,
+    feedback: str = None,
+    errors: List[str] = None
+):
+    """
+    Enhanced chapter writer that incorporates feedback from previous attempts.
+    """
+    llm = context.llm_client
+
+    # Get chapter blueprint
+    chapter_blueprint = context.inputs.get("chapter_blueprint", {})
+    chapter_outline = chapter_blueprint.get("chapter_outline", [])
+
+    # Find the specific chapter
+    chapter_data = None
+    for ch in chapter_outline:
+        if ch.get("number") == chapter_number:
+            chapter_data = ch
+            break
+
+    if not chapter_data:
+        return {
+            "error": f"Chapter {chapter_number} not found in blueprint",
+            "chapter_number": chapter_number,
+            "text": None
+        }
+
+    # Get Story Bible
+    user_constraints = context.inputs.get("user_constraints", {})
+    story_bible = user_constraints.get("story_bible", "")
+
+    # Build story bible section
+    if story_bible:
+        story_bible_section = f"""## STORY BIBLE - CANONICAL REFERENCE (LOCKED FACTS)
+⚠️ CRITICAL: All facts below are LOCKED. Never contradict this document.
+
+{story_bible}
+
+--- END STORY BIBLE ---
+"""
+    else:
+        story_bible_section = ""
+
+    # Build feedback section
+    feedback_section = ""
+    if previous_draft or feedback or errors:
+        feedback_section = "\n## REGENERATION CONTEXT\n"
+        feedback_section += "This is a REGENERATION request. Learn from the previous attempt and improve.\n\n"
+
+        if errors:
+            feedback_section += "### ERRORS TO FIX\n"
+            for error in errors:
+                feedback_section += f"- {error}\n"
+            feedback_section += "\n"
+
+        if feedback:
+            feedback_section += f"### USER FEEDBACK\n{feedback}\n\n"
+
+        if previous_draft:
+            # Include summary of previous draft
+            preview = previous_draft[:1500] + "..." if len(previous_draft) > 1500 else previous_draft
+            feedback_section += f"### PREVIOUS DRAFT (for reference - improve upon this)\n{preview}\n\n"
+
+        feedback_section += "**IMPORTANT**: Address ALL issues mentioned above in your new version.\n"
+
+    # Format scenes
+    scenes_text = ""
+    for scene in chapter_data.get("scenes", []):
+        scenes_text += f"""
+### Scene {scene.get('scene_number', '?')}
+- **Question**: {scene.get('scene_question', 'N/A')}
+- **Characters**: {', '.join(scene.get('characters', []))}
+- **Location**: {scene.get('location', 'N/A')}
+- **Conflict Type**: {scene.get('conflict_type', 'N/A')}
+- **Outcome**: {scene.get('outcome', 'N/A')}
+"""
+
+    # Get character info
+    character_arch = context.inputs.get("character_architecture", {})
+    protagonist = character_arch.get("protagonist_profile", {})
+
+    character_reference = f"""
+**Protagonist**: {protagonist.get('name', 'Protagonist')}
+- Traits: {', '.join(protagonist.get('traits', []))}
+"""
+
+    # Adjust word target
+    word_target = 500 if quick_mode else chapter_data.get("word_target", 3000)
+
+    # Build the enhanced prompt
+    prompt = f"""You are an expert novelist writing Chapter {chapter_number}: "{chapter_data.get('title', f'Chapter {chapter_number}')}".
+
+{story_bible_section}
+
+{feedback_section}
+
+## THIS CHAPTER'S BLUEPRINT
+- **Goal**: {chapter_data.get('chapter_goal', 'Advance the story')}
+- **POV**: {chapter_data.get('pov', 'Protagonist')}
+- **Opening Hook**: {chapter_data.get('opening_hook', '')}
+- **Closing Hook**: {chapter_data.get('closing_hook', '')}
+- **Word Target**: {word_target} words
+
+## SCENES TO WRITE
+{scenes_text}
+
+## CHARACTER REFERENCE
+{character_reference}
+
+## INSTRUCTIONS
+Write the complete chapter following these guidelines:
+
+1. **Opening**: Begin with the specified opening hook
+2. **Scenes**: Execute each scene's goal while maintaining tension
+3. **Voice**: Maintain consistent narrative voice throughout
+4. **Pacing**: Vary sentence length based on scene tension
+5. **Dialogue**: Make each character's voice distinct
+6. **Closing**: End with the specified closing hook
+
+{"**IMPORTANT: Write a CONDENSED version (~500 words) focusing on key moments.**" if quick_mode else ""}
+
+Write publication-quality prose. Show, don't tell.
+
+---
+
+BEGIN CHAPTER {chapter_number}:
+"""
+
+    if llm:
+        max_tokens = 1500 if quick_mode else 12000
+        chapter_text = await llm.generate(
+            prompt,
+            max_tokens=max_tokens,
+            temperature=0.8
+        )
+
+        word_count = len(chapter_text.split())
+
+        return {
+            "chapter_number": chapter_number,
+            "title": chapter_data.get("title", f"Chapter {chapter_number}"),
+            "text": chapter_text,
+            "summary": f"{'Regenerated' if previous_draft else 'Generated'} Chapter {chapter_number}",
+            "word_count": word_count,
+            "target_word_count": word_target,
+            "pov": chapter_data.get("pov", "Unknown"),
+            "scenes_written": len(chapter_data.get("scenes", [])),
+            "quick_mode": quick_mode,
+            "was_regenerated": previous_draft is not None
+        }
+    else:
+        return {
+            "chapter_number": chapter_number,
+            "title": chapter_data.get("title", f"Chapter {chapter_number}"),
+            "text": f"[Chapter {chapter_number} would be regenerated here with LLM]",
+            "word_count": 0,
+            "was_regenerated": previous_draft is not None
+        }
+
+
 # =============================================================================
 # Export Endpoints
 # =============================================================================
