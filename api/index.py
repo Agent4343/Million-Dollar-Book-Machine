@@ -31,6 +31,7 @@ from models.agents import AGENT_REGISTRY, get_agent_execution_order
 from core.orchestrator import Orchestrator
 from core.llm import create_llm_client
 from core import database as db
+from core.pipeline_orchestrator import PipelineOrchestrator, create_pipeline_orchestrator
 
 # Import agent executors
 from agents.strategic import STRATEGIC_EXECUTORS
@@ -98,6 +99,16 @@ ALL_EXECUTORS = {
     **STRUCTURAL_EXECUTORS,
     **VALIDATION_EXECUTORS,
 }
+
+# Pipeline orchestrator for Story Bible integration
+_pipeline_orchestrator = None
+
+def get_pipeline_orchestrator():
+    """Get or create pipeline orchestrator."""
+    global _pipeline_orchestrator
+    if _pipeline_orchestrator is None:
+        _pipeline_orchestrator = create_pipeline_orchestrator(get_orchestrator())
+    return _pipeline_orchestrator
 
 
 def create_session_token(timestamp: int) -> str:
@@ -442,6 +453,73 @@ async def get_story_bible(project_id: str, auth: bool = Depends(require_auth)):
     return {
         "story_bible": story_bible,
         "has_story_bible": bool(story_bible)
+    }
+
+
+@app.get("/api/projects/{project_id}/continuity-audit")
+async def run_continuity_audit(project_id: str, auth: bool = Depends(require_auth)):
+    """Run continuity audit across all chapters."""
+    project = get_orchestrator().get_project(project_id)
+
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    pipeline = get_pipeline_orchestrator()
+    audit_result = pipeline.run_continuity_audit(project)
+
+    return audit_result
+
+
+@app.get("/api/projects/{project_id}/report")
+async def get_project_report(project_id: str, auth: bool = Depends(require_auth)):
+    """Get comprehensive project report."""
+    project = get_orchestrator().get_project(project_id)
+
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    pipeline = get_pipeline_orchestrator()
+    report = pipeline.generate_project_report(project)
+
+    return report
+
+
+@app.post("/api/projects/{project_id}/validate-chapter/{chapter_number}")
+async def validate_chapter(project_id: str, chapter_number: int, auth: bool = Depends(require_auth)):
+    """Validate a specific chapter against the Story Bible."""
+    project = get_orchestrator().get_project(project_id)
+
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get chapter text
+    chapters = project.manuscript.get("chapters", [])
+    chapter_text = None
+    for ch in chapters:
+        if ch.get("number") == chapter_number:
+            chapter_text = ch.get("text", "")
+            break
+
+    if not chapter_text:
+        raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
+
+    # Validate against Story Bible
+    pipeline = get_pipeline_orchestrator()
+    story_bible = pipeline.get_story_bible(project)
+    validation = story_bible.validate_chapter(chapter_text, chapter_number)
+
+    return {
+        "chapter_number": chapter_number,
+        "passed": validation.passed,
+        "errors": validation.errors,
+        "warnings": validation.warnings,
+        "checked_rules": validation.checked_rules
     }
 
 
