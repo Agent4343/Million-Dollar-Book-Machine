@@ -1746,6 +1746,10 @@ Dialogue doesn't match character voice"></textarea>
             }
         }
 
+        // Background job tracking
+        let currentJobId = null;
+        let jobPollInterval = null;
+
         async function writeAllChapters() {
             if (!currentProject || isWritingAllChapters) return;
 
@@ -1762,7 +1766,15 @@ Dialogue doesn't match character voice"></textarea>
                 return;
             }
 
-            if (!confirm(`This will write ${unwritten.length} chapters. This may take several minutes. Continue?`)) {
+            // Ask user for mode
+            const useBackground = confirm(
+                `Write ${unwritten.length} chapters.\n\n` +
+                `Click OK for BACKGROUND mode (recommended - handles timeouts)\n` +
+                `Click Cancel for SYNC mode (faster but may timeout)`
+            );
+
+            if (useBackground) {
+                await writeChaptersBackground();
                 return;
             }
 
@@ -1983,6 +1995,150 @@ Dialogue doesn't match character voice"></textarea>
                 console.error('Save error:', error);
                 alert('Failed to save chapter: ' + error.message);
             }
+        }
+
+        // =================================================================
+        // Background Job Processing
+        // =================================================================
+
+        async function writeChaptersBackground() {
+            if (!currentProject) return;
+
+            const btn = document.getElementById('writeAllChaptersBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Starting job...';
+            document.getElementById('chapterWriteProgress').textContent = 'Creating background job...';
+
+            try {
+                // Create the background job
+                const res = await fetch(`/api/projects/${currentProject}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        job_type: 'write_all_chapters',
+                        input_data: {
+                            quick_mode: true,  // Use quick mode to reduce timeouts
+                            start_chapter: 1,
+                            end_chapter: chapterBlueprint?.chapter_outline?.length || 20
+                        }
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to create job');
+                }
+
+                const data = await res.json();
+                currentJobId = data.job_id;
+
+                document.getElementById('chapterWriteProgress').textContent =
+                    `Job started! Polling for progress... (Job ID: ${currentJobId.slice(0, 8)}...)`;
+
+                // Start polling for job status
+                startJobPolling(currentJobId);
+
+            } catch (error) {
+                console.error('Background job error:', error);
+                alert('Failed to start background job: ' + error.message);
+                btn.disabled = false;
+                btn.innerHTML = 'Write All Chapters';
+                document.getElementById('chapterWriteProgress').textContent = 'Job creation failed';
+            }
+        }
+
+        function startJobPolling(jobId) {
+            // Clear any existing polling
+            if (jobPollInterval) {
+                clearInterval(jobPollInterval);
+            }
+
+            // Poll every 3 seconds
+            jobPollInterval = setInterval(async () => {
+                await checkJobStatus(jobId);
+            }, 3000);
+
+            // Also check immediately
+            checkJobStatus(jobId);
+        }
+
+        async function checkJobStatus(jobId) {
+            try {
+                const res = await fetch(`/api/jobs/${jobId}`, {credentials: 'include'});
+                if (!res.ok) {
+                    throw new Error('Failed to get job status');
+                }
+
+                const job = await res.json();
+
+                // Update UI with progress
+                const progressEl = document.getElementById('chapterWriteProgress');
+                const btn = document.getElementById('writeAllChaptersBtn');
+
+                if (job.status === 'running') {
+                    progressEl.textContent = `${job.progress_message || 'Processing...'} (${job.progress}%)`;
+                    btn.innerHTML = `<span class="running-indicator"></span>${job.progress}%`;
+                } else if (job.status === 'completed') {
+                    // Job completed!
+                    clearInterval(jobPollInterval);
+                    jobPollInterval = null;
+                    currentJobId = null;
+
+                    const result = job.result || {};
+                    progressEl.textContent =
+                        `Completed! Wrote ${result.chapters_written || 0} chapters ` +
+                        `(${(result.total_words || 0).toLocaleString()} words)`;
+
+                    btn.disabled = false;
+                    btn.innerHTML = 'Write All Chapters';
+
+                    // Refresh chapter list
+                    await updateChapterWriter();
+
+                    if (result.errors && result.errors.length > 0) {
+                        alert(`Job completed with ${result.errors.length} error(s). Check the log.`);
+                    }
+                } else if (job.status === 'failed') {
+                    // Job failed
+                    clearInterval(jobPollInterval);
+                    jobPollInterval = null;
+                    currentJobId = null;
+
+                    progressEl.textContent = `Job failed: ${job.error?.slice(0, 100) || 'Unknown error'}`;
+                    btn.disabled = false;
+                    btn.innerHTML = 'Write All Chapters';
+
+                    alert('Background job failed. Check the progress message for details.');
+                } else if (job.status === 'cancelled') {
+                    clearInterval(jobPollInterval);
+                    jobPollInterval = null;
+                    currentJobId = null;
+
+                    progressEl.textContent = 'Job was cancelled';
+                    btn.disabled = false;
+                    btn.innerHTML = 'Write All Chapters';
+                }
+
+            } catch (error) {
+                console.error('Job status check error:', error);
+                // Don't stop polling on network errors - might be temporary
+            }
+        }
+
+        function cancelCurrentJob() {
+            if (!currentJobId) return;
+
+            if (!confirm('Cancel the current job?')) return;
+
+            fetch(`/api/jobs/${currentJobId}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            }).then(() => {
+                document.getElementById('chapterWriteProgress').textContent = 'Job cancellation requested...';
+            }).catch(err => {
+                console.error('Cancel error:', err);
+            });
         }
 
         // Handle clicking on chapter items to view/select them

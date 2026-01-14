@@ -32,6 +32,7 @@ from core.orchestrator import Orchestrator
 from core.llm import create_llm_client
 from core import database as db
 from core.pipeline_orchestrator import PipelineOrchestrator, create_pipeline_orchestrator
+from core.job_queue import get_job_queue, JobQueue, JobType, JobStatus, Job
 
 # Import agent executors
 from agents.strategic import STRATEGIC_EXECUTORS
@@ -1111,6 +1112,503 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
             return ch
 
     raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
+
+
+# =============================================================================
+# Background Job Queue Endpoints
+# =============================================================================
+
+class CreateJobRequest(BaseModel):
+    """Request model for creating a background job."""
+    job_type: str  # write_chapter, write_all_chapters, run_validation
+    input_data: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/projects/{project_id}/jobs")
+async def create_background_job(
+    project_id: str,
+    request: CreateJobRequest,
+    auth: bool = Depends(require_auth)
+):
+    """
+    Create a background job for long-running tasks.
+
+    Returns immediately with a job_id that can be polled for status.
+    Solves Railway timeout issues for chapter generation.
+    """
+    import asyncio
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Map string to JobType
+    try:
+        job_type = JobType(request.job_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid job_type. Must be one of: {[t.value for t in JobType]}"
+        )
+
+    # Create the job
+    job_queue = get_job_queue()
+    job = job_queue.create_job(
+        job_type=job_type,
+        project_id=project_id,
+        input_data=request.input_data or {}
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create job - database may be unavailable"
+        )
+
+    # Start the job in background (fire and forget)
+    asyncio.create_task(
+        execute_background_job(job.job_id, project_id, job_type, request.input_data or {})
+    )
+
+    return {
+        "job_id": job.job_id,
+        "status": job.status.value,
+        "message": f"Job created - poll /api/jobs/{job.job_id} for status"
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str, auth: bool = Depends(require_auth)):
+    """
+    Get the status of a background job.
+
+    Poll this endpoint to check job progress and get results.
+    """
+    job_queue = get_job_queue()
+    job = job_queue.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return job.to_dict()
+
+
+@app.delete("/api/jobs/{job_id}")
+async def cancel_job(job_id: str, auth: bool = Depends(require_auth)):
+    """Cancel a pending or running job."""
+    job_queue = get_job_queue()
+    job = job_queue.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status not in [JobStatus.PENDING, JobStatus.RUNNING]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel job with status {job.status.value}"
+        )
+
+    job_queue.cancel_job(job_id)
+    return {"message": "Job cancelled", "job_id": job_id}
+
+
+@app.get("/api/projects/{project_id}/jobs")
+async def list_project_jobs(
+    project_id: str,
+    status: Optional[str] = None,
+    auth: bool = Depends(require_auth)
+):
+    """List all jobs for a project."""
+    job_queue = get_job_queue()
+
+    filter_status = None
+    if status:
+        try:
+            filter_status = JobStatus(status)
+        except ValueError:
+            pass
+
+    jobs = job_queue.get_project_jobs(project_id, status=filter_status)
+    return {"jobs": [j.to_dict() for j in jobs]}
+
+
+async def execute_background_job(
+    job_id: str,
+    project_id: str,
+    job_type: JobType,
+    input_data: Dict[str, Any]
+):
+    """
+    Execute a background job.
+
+    This runs asynchronously and updates job status in the database.
+    """
+    job_queue = get_job_queue()
+
+    # Mark job as running
+    job_queue.start_job(job_id)
+
+    try:
+        if job_type == JobType.WRITE_ALL_CHAPTERS:
+            result = await execute_write_all_chapters_job(job_id, project_id, input_data)
+        elif job_type == JobType.WRITE_CHAPTER:
+            result = await execute_write_chapter_job(job_id, project_id, input_data)
+        elif job_type == JobType.REGENERATE_CHAPTER:
+            result = await execute_regenerate_chapter_job(job_id, project_id, input_data)
+        elif job_type == JobType.RUN_VALIDATION:
+            result = await execute_validation_job(job_id, project_id, input_data)
+        else:
+            raise ValueError(f"Unknown job type: {job_type}")
+
+        # Mark job as completed
+        job_queue.complete_job(job_id, result)
+
+    except asyncio.CancelledError:
+        job_queue.fail_job(job_id, "Job was cancelled")
+    except Exception as e:
+        import traceback
+        error_msg = f"{str(e)}\n{traceback.format_exc()}"
+        job_queue.fail_job(job_id, error_msg)
+
+
+async def execute_write_all_chapters_job(
+    job_id: str,
+    project_id: str,
+    input_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Write all chapters as a background job."""
+    from core.orchestrator import ExecutionContext
+
+    job_queue = get_job_queue()
+
+    # Load project
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise ValueError("Project not found")
+
+    # Get chapter blueprint
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise ValueError("Chapter blueprint not yet generated")
+
+    chapter_outline = chapter_blueprint.get("chapter_outline", [])
+    total_chapters = len(chapter_outline)
+
+    if total_chapters == 0:
+        raise ValueError("No chapters in blueprint")
+
+    # Get options from input_data
+    quick_mode = input_data.get("quick_mode", False)
+    start_chapter = input_data.get("start_chapter", 1)
+    end_chapter = input_data.get("end_chapter", total_chapters)
+
+    # Build inputs for chapter writer
+    inputs = {"chapter_blueprint": chapter_blueprint, "user_constraints": project.user_constraints}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    # Write chapters
+    written_chapters = []
+    errors = []
+
+    for i, chapter_data in enumerate(chapter_outline):
+        chapter_num = chapter_data.get("number", i + 1)
+
+        # Skip chapters outside range
+        if chapter_num < start_chapter or chapter_num > end_chapter:
+            continue
+
+        # Update progress
+        progress = int((len(written_chapters) / (end_chapter - start_chapter + 1)) * 100)
+        job_queue.update_job_progress(
+            job_id,
+            progress,
+            f"Writing Chapter {chapter_num} of {end_chapter}..."
+        )
+
+        try:
+            result = await execute_chapter_writer(context, chapter_num, quick_mode=quick_mode)
+
+            if result.get("text") and not result.get("error"):
+                result["number"] = chapter_num
+                written_chapters.append(result)
+
+                # Store in manuscript
+                if "chapters" not in project.manuscript:
+                    project.manuscript["chapters"] = []
+
+                # Update or add chapter
+                chapter_exists = False
+                for idx, ch in enumerate(project.manuscript["chapters"]):
+                    if ch.get("number") == chapter_num:
+                        project.manuscript["chapters"][idx] = result
+                        chapter_exists = True
+                        break
+
+                if not chapter_exists:
+                    project.manuscript["chapters"].append(result)
+                    project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+
+                # Save progress periodically
+                save_project_to_db(project)
+            else:
+                errors.append({
+                    "chapter": chapter_num,
+                    "error": result.get("error", "Unknown error")
+                })
+        except Exception as e:
+            errors.append({
+                "chapter": chapter_num,
+                "error": str(e)
+            })
+
+    # Final save
+    save_project_to_db(project)
+
+    return {
+        "chapters_written": len(written_chapters),
+        "total_chapters": total_chapters,
+        "total_words": sum(ch.get("word_count", 0) for ch in written_chapters),
+        "errors": errors,
+        "chapters": [{"number": ch["number"], "title": ch.get("title"), "word_count": ch.get("word_count")} for ch in written_chapters]
+    }
+
+
+async def execute_write_chapter_job(
+    job_id: str,
+    project_id: str,
+    input_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Write a single chapter as a background job."""
+    from core.orchestrator import ExecutionContext
+
+    job_queue = get_job_queue()
+    chapter_number = input_data.get("chapter_number", 1)
+    quick_mode = input_data.get("quick_mode", False)
+
+    job_queue.update_job_progress(job_id, 10, f"Loading project for Chapter {chapter_number}...")
+
+    # Load project
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise ValueError("Project not found")
+
+    # Get chapter blueprint
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise ValueError("Chapter blueprint not yet generated")
+
+    job_queue.update_job_progress(job_id, 30, f"Generating Chapter {chapter_number}...")
+
+    # Build inputs
+    inputs = {"chapter_blueprint": chapter_blueprint, "user_constraints": project.user_constraints}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    job_queue.update_job_progress(job_id, 50, f"Writing Chapter {chapter_number}...")
+
+    result = await execute_chapter_writer(context, chapter_number, quick_mode=quick_mode)
+
+    if result.get("text") and not result.get("error"):
+        result["number"] = chapter_number
+
+        # Store in manuscript
+        if "chapters" not in project.manuscript:
+            project.manuscript["chapters"] = []
+
+        chapter_exists = False
+        for idx, ch in enumerate(project.manuscript["chapters"]):
+            if ch.get("number") == chapter_number:
+                project.manuscript["chapters"][idx] = result
+                chapter_exists = True
+                break
+
+        if not chapter_exists:
+            project.manuscript["chapters"].append(result)
+            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+
+        job_queue.update_job_progress(job_id, 90, "Saving chapter...")
+        save_project_to_db(project)
+
+    return result
+
+
+async def execute_regenerate_chapter_job(
+    job_id: str,
+    project_id: str,
+    input_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Regenerate a chapter with feedback as a background job."""
+    from core.orchestrator import ExecutionContext
+
+    job_queue = get_job_queue()
+    chapter_number = input_data.get("chapter_number", 1)
+    feedback = input_data.get("feedback")
+    errors = input_data.get("errors", [])
+    quick_mode = input_data.get("quick_mode", False)
+
+    job_queue.update_job_progress(job_id, 10, f"Loading project for Chapter {chapter_number} regeneration...")
+
+    # Load project
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise ValueError("Project not found")
+
+    # Get existing chapter
+    existing_chapter = None
+    for ch in project.manuscript.get("chapters", []):
+        if ch.get("number") == chapter_number:
+            existing_chapter = ch
+            break
+
+    job_queue.update_job_progress(job_id, 30, f"Regenerating Chapter {chapter_number} with feedback...")
+
+    # Get chapter blueprint
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise ValueError("Chapter blueprint not yet generated")
+
+    # Build inputs
+    inputs = {"chapter_blueprint": chapter_blueprint, "user_constraints": project.user_constraints}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    job_queue.update_job_progress(job_id, 50, f"Writing improved Chapter {chapter_number}...")
+
+    result = await execute_chapter_writer_with_feedback(
+        context,
+        chapter_number,
+        quick_mode=quick_mode,
+        previous_draft=existing_chapter.get("text") if existing_chapter else None,
+        feedback=feedback,
+        errors=errors
+    )
+
+    if result.get("text") and not result.get("error"):
+        result["number"] = chapter_number
+
+        if "chapters" not in project.manuscript:
+            project.manuscript["chapters"] = []
+
+        chapter_exists = False
+        for idx, ch in enumerate(project.manuscript["chapters"]):
+            if ch.get("number") == chapter_number:
+                result["regeneration_count"] = ch.get("regeneration_count", 0) + 1
+                project.manuscript["chapters"][idx] = result
+                chapter_exists = True
+                break
+
+        if not chapter_exists:
+            result["regeneration_count"] = 1
+            project.manuscript["chapters"].append(result)
+            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+
+        job_queue.update_job_progress(job_id, 90, "Saving regenerated chapter...")
+        save_project_to_db(project)
+
+    return result
+
+
+async def execute_validation_job(
+    job_id: str,
+    project_id: str,
+    input_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Run validation agents as a background job."""
+    from core.orchestrator import ExecutionContext
+
+    job_queue = get_job_queue()
+    validation_type = input_data.get("validation_type", "continuity_audit")
+
+    job_queue.update_job_progress(job_id, 10, f"Loading project for {validation_type}...")
+
+    # Load project
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise ValueError("Project not found")
+
+    # Build inputs
+    inputs = {"user_constraints": project.user_constraints}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    job_queue.update_job_progress(job_id, 30, f"Running {validation_type}...")
+
+    # Get the executor
+    executor = VALIDATION_EXECUTORS.get(validation_type)
+    if not executor:
+        raise ValueError(f"Unknown validation type: {validation_type}")
+
+    job_queue.update_job_progress(job_id, 50, f"Analyzing manuscript...")
+
+    result = await executor(context)
+
+    job_queue.update_job_progress(job_id, 90, "Validation complete")
+
+    return result
 
 
 class ChapterRegenerateRequest(BaseModel):
