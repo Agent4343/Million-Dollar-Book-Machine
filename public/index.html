@@ -453,6 +453,22 @@
                         <input type="text" id="projectComps" placeholder="e.g., The Alchemist, Atomic Habits">
                         <label>Themes (comma separated)</label>
                         <input type="text" id="projectThemes" placeholder="e.g., redemption, identity, love">
+                        <div style="margin-top: 1rem; border-top: 1px solid #333; padding-top: 1rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem;">
+                                Story Bible (Optional - for chapter consistency)
+                                <span style="font-size: 0.75rem; color: #888; font-weight: normal;">
+                                    Paste your character bible, plot timeline, and locked facts here
+                                </span>
+                            </label>
+                            <textarea id="projectStoryBible" rows="8" placeholder="Paste your Story Bible here... This will be injected into every chapter generation to ensure consistency.
+
+Example content:
+- Character details (names, traits, backstory)
+- Plot timeline and key events
+- World rules and settings
+- Voice/style guidelines
+- Facts that must never change"></textarea>
+                        </div>
                         <button type="submit" class="btn btn-primary">Create Project</button>
                     </form>
                 </div>
@@ -518,6 +534,31 @@
                                     <button class="btn btn-secondary btn-small" onclick="exportManuscript()">Manuscript (MD)</button>
                                 </div>
                                 <p id="exportStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></p>
+                            </div>
+
+                            <!-- Story Bible Section -->
+                            <div class="story-bible-section" style="border:1px solid #333;border-radius:8px;padding:0.75rem;margin-bottom:1rem;background:#1a1a1a;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+                                    <h3 style="margin:0;font-size:1rem;">Story Bible</h3>
+                                    <button class="btn btn-small" onclick="toggleStoryBible()" id="toggleStoryBibleBtn" style="font-size:0.75rem;">Show/Edit</button>
+                                </div>
+                                <p id="storyBibleStatus" style="font-size:0.8rem;color:#888;margin:0;">Canonical reference for chapter consistency</p>
+                                <div id="storyBibleEditor" class="hidden" style="margin-top:0.5rem;">
+                                    <textarea id="storyBibleText" rows="12" style="width:100%;font-size:0.85rem;background:#0d0d0d;color:#fff;border:1px solid #444;border-radius:4px;padding:0.5rem;" placeholder="Paste your Story Bible here...
+
+This document will be injected into EVERY chapter generation to ensure consistency.
+
+Include:
+- Character details (names, traits, relationships)
+- Plot timeline and key events
+- World rules and settings
+- Voice/style guidelines
+- Locked facts that must never change"></textarea>
+                                    <div style="margin-top:0.5rem;display:flex;gap:0.5rem;">
+                                        <button class="btn btn-primary btn-small" onclick="saveStoryBible()">Save Story Bible</button>
+                                        <span id="storyBibleSaveStatus" style="font-size:0.8rem;color:#888;"></span>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Chapter Writer Section -->
@@ -921,6 +962,8 @@
         document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            const storyBible = document.getElementById('projectStoryBible').value.trim();
+
             const body = {
                 title: document.getElementById('projectTitle').value,
                 genre: document.getElementById('projectGenre').value,
@@ -928,7 +971,8 @@
                 target_word_count: parseInt(document.getElementById('projectWordCount').value),
                 target_audience: document.getElementById('projectAudience').value,
                 comparable_titles: document.getElementById('projectComps').value.split(',').map(s => s.trim()).filter(s => s),
-                themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s)
+                themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s),
+                story_bible: storyBible || null  // Include story bible for chapter generation
             };
 
             const res = await fetch('/api/projects', {
@@ -1257,6 +1301,72 @@
                 console.error('Export EPUB error:', error);
                 statusEl.textContent = 'Error: ' + error.message;
                 alert('Failed to export EPUB: ' + error.message);
+            }
+        }
+
+        // =================================================================
+        // Story Bible Functions
+        // =================================================================
+
+        function toggleStoryBible() {
+            const editor = document.getElementById('storyBibleEditor');
+            editor.classList.toggle('hidden');
+            if (!editor.classList.contains('hidden')) {
+                loadStoryBible();
+            }
+        }
+
+        async function loadStoryBible() {
+            if (!currentProject) return;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible`, {credentials: 'include'});
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('storyBibleText').value = data.story_bible || '';
+                    document.getElementById('storyBibleStatus').textContent = data.has_story_bible
+                        ? `Story bible loaded (${data.story_bible.length} characters)`
+                        : 'No story bible set - add one for consistent chapter generation';
+                }
+            } catch (error) {
+                console.error('Failed to load story bible:', error);
+            }
+        }
+
+        async function saveStoryBible() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            const storyBible = document.getElementById('storyBibleText').value;
+            const statusEl = document.getElementById('storyBibleSaveStatus');
+
+            statusEl.textContent = 'Saving...';
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({ story_bible: storyBible })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    statusEl.textContent = `Saved! (${data.story_bible_length} characters)`;
+                    statusEl.style.color = '#2ecc71';
+                    document.getElementById('storyBibleStatus').textContent = `Story bible saved (${data.story_bible_length} characters)`;
+                    setTimeout(() => {
+                        statusEl.textContent = '';
+                        statusEl.style.color = '#888';
+                    }, 3000);
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (error) {
+                statusEl.textContent = 'Error saving story bible';
+                statusEl.style.color = '#e74c3c';
             }
         }
 

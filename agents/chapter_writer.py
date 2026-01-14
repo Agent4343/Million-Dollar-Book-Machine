@@ -11,6 +11,8 @@ from core.orchestrator import ExecutionContext
 
 CHAPTER_WRITING_PROMPT = """You are an expert novelist writing Chapter {chapter_number}: "{chapter_title}".
 
+{story_bible_section}
+
 ## VOICE & STYLE RULES
 {voice_specification}
 
@@ -92,6 +94,22 @@ async def execute_chapter_writer(
             "text": None
         }
 
+    # Get Story Bible from user constraints (CRITICAL for consistency)
+    user_constraints = context.inputs.get("user_constraints", {})
+    story_bible = user_constraints.get("story_bible", "")
+
+    # Format story bible section
+    if story_bible:
+        story_bible_section = f"""## STORY BIBLE - CANONICAL REFERENCE (LOCKED FACTS)
+⚠️ CRITICAL: All facts below are LOCKED. Never contradict this document.
+
+{story_bible}
+
+--- END STORY BIBLE ---
+"""
+    else:
+        story_bible_section = ""
+
     # Format scenes for the prompt
     scenes_text = ""
     for scene in chapter_data.get("scenes", []):
@@ -146,6 +164,7 @@ async def execute_chapter_writer(
     prompt = CHAPTER_WRITING_PROMPT.format(
         chapter_number=chapter_number,
         chapter_title=chapter_data.get("title", f"Chapter {chapter_number}"),
+        story_bible_section=story_bible_section,
         voice_specification=_format_voice_spec(context.inputs.get("voice_specification", {})),
         chapter_goal=chapter_data.get("chapter_goal", "Advance the story"),
         pov=chapter_data.get("pov", "Protagonist"),

@@ -145,6 +145,7 @@ class ProjectCreate(BaseModel):
     themes: Optional[List[str]] = None
     target_audience: Optional[str] = None
     tone: Optional[str] = None
+    story_bible: Optional[str] = None  # Canonical reference document for consistency
     additional_constraints: Optional[Dict[str, Any]] = None
 
 
@@ -379,6 +380,7 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
         "themes": request.themes or [],
         "target_audience": request.target_audience,
         "tone": request.tone,
+        "story_bible": request.story_bible,  # Canonical reference for chapter generation
     }
     if request.additional_constraints:
         constraints.update(request.additional_constraints)
@@ -394,6 +396,52 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
         "title": project.title,
         "message": f"Project created with {len(AGENT_REGISTRY)} agents ready",
         "database_enabled": db.is_database_available()
+    }
+
+
+class StoryBibleUpdate(BaseModel):
+    story_bible: str
+
+
+@app.put("/api/projects/{project_id}/story-bible")
+async def update_story_bible(project_id: str, request: StoryBibleUpdate, auth: bool = Depends(require_auth)):
+    """Update the story bible for a project."""
+    project = get_orchestrator().get_project(project_id)
+
+    # Try loading from database if not in memory
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Update the story bible in user_constraints
+    project.user_constraints["story_bible"] = request.story_bible
+
+    # Save to database
+    save_project_to_db(project)
+
+    return {
+        "success": True,
+        "message": "Story bible updated",
+        "story_bible_length": len(request.story_bible)
+    }
+
+
+@app.get("/api/projects/{project_id}/story-bible")
+async def get_story_bible(project_id: str, auth: bool = Depends(require_auth)):
+    """Get the story bible for a project."""
+    project = get_orchestrator().get_project(project_id)
+
+    if not project:
+        project = load_project_from_db(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    story_bible = project.user_constraints.get("story_bible", "")
+
+    return {
+        "story_bible": story_bible,
+        "has_story_bible": bool(story_bible)
     }
 
 
@@ -767,7 +815,10 @@ async def write_chapter(
         )
 
     # Build execution context with all inputs
-    inputs = {"chapter_blueprint": chapter_blueprint}
+    inputs = {
+        "chapter_blueprint": chapter_blueprint,
+        "user_constraints": project.user_constraints,  # Include story_bible and other constraints
+    }
 
     # Gather all previous agent outputs as inputs
     for layer in project.layers.values():
@@ -877,7 +928,10 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         }
 
     # Build inputs for chapter writing
-    inputs = {"chapter_blueprint": chapter_blueprint}
+    inputs = {
+        "chapter_blueprint": chapter_blueprint,
+        "user_constraints": project.user_constraints,  # Include story_bible and other constraints
+    }
     for layer in project.layers.values():
         for agent_id, agent_state in layer.agents.items():
             if agent_state.current_output:
