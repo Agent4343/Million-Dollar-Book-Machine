@@ -1749,6 +1749,24 @@ Dialogue doesn't match character voice"></textarea>
         // Background job tracking
         let currentJobId = null;
         let jobPollInterval = null;
+        let backgroundJobsAvailable = null; // null = not checked, true/false = checked
+
+        // Check system capabilities (including background job support)
+        async function checkCapabilities() {
+            try {
+                const res = await fetch('/api/system/capabilities', {credentials: 'include'});
+                if (res.ok) {
+                    const caps = await res.json();
+                    backgroundJobsAvailable = caps.background_jobs;
+                    console.log('System capabilities:', caps);
+                    return caps;
+                }
+            } catch (error) {
+                console.warn('Could not check capabilities:', error);
+            }
+            backgroundJobsAvailable = false;
+            return { background_jobs: false };
+        }
 
         async function writeAllChapters() {
             if (!currentProject || isWritingAllChapters) return;
@@ -1766,12 +1784,23 @@ Dialogue doesn't match character voice"></textarea>
                 return;
             }
 
-            // Ask user for mode
-            const useBackground = confirm(
-                `Write ${unwritten.length} chapters.\n\n` +
-                `Click OK for BACKGROUND mode (recommended - handles timeouts)\n` +
-                `Click Cancel for SYNC mode (faster but may timeout)`
-            );
+            // Check capabilities if not already checked
+            if (backgroundJobsAvailable === null) {
+                await checkCapabilities();
+            }
+
+            let useBackground = false;
+            if (backgroundJobsAvailable) {
+                // Ask user for mode only if background is available
+                useBackground = confirm(
+                    `Write ${unwritten.length} chapters.\n\n` +
+                    `Click OK for BACKGROUND mode (recommended - handles timeouts)\n` +
+                    `Click Cancel for SYNC mode (faster but may timeout)`
+                );
+            } else {
+                // Background not available - inform user and use sync mode
+                console.log('Background jobs not available, using sync mode');
+            }
 
             if (useBackground) {
                 await writeChaptersBackground();
@@ -1788,6 +1817,52 @@ Dialogue doesn't match character voice"></textarea>
                     const ch = unwritten[i];
                     document.getElementById('chapterWriteProgress').textContent =
                         `Writing chapter ${ch.number} (${i + 1}/${unwritten.length})...`;
+
+                    await writeChapter(ch.number);
+
+                    // Small delay between chapters
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                document.getElementById('chapterWriteProgress').textContent = 'All chapters complete!';
+                alert('All chapters have been written!');
+            } catch (error) {
+                console.error('Write all chapters error:', error);
+                alert('Error during chapter writing: ' + error.message);
+            } finally {
+                isWritingAllChapters = false;
+                btn.disabled = false;
+                btn.innerHTML = 'Write All Chapters';
+            }
+        }
+
+        // Extracted sync writing logic so it can be called from fallback
+        async function writeAllChaptersSync() {
+            if (!currentProject || isWritingAllChapters) return;
+
+            if (!chapterBlueprint || !chapterBlueprint.chapter_outline) {
+                alert('Chapter blueprint not available');
+                return;
+            }
+
+            const chapters = chapterBlueprint.chapter_outline;
+            const unwritten = chapters.filter(ch => !writtenChapters[ch.number]);
+
+            if (unwritten.length === 0) {
+                alert('All chapters have already been written!');
+                return;
+            }
+
+            isWritingAllChapters = true;
+            const btn = document.getElementById('writeAllChaptersBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Writing (sync)...';
+
+            try {
+                for (let i = 0; i < unwritten.length; i++) {
+                    const ch = unwritten[i];
+                    document.getElementById('chapterWriteProgress').textContent =
+                        `Writing chapter ${ch.number} (${i + 1}/${unwritten.length}) - sync mode...`;
 
                     await writeChapter(ch.number);
 
@@ -2027,7 +2102,20 @@ Dialogue doesn't match character voice"></textarea>
 
                 if (!res.ok) {
                     const err = await res.json();
-                    throw new Error(err.detail || 'Failed to create job');
+                    // Check if this is a 503 (service unavailable) - fall back to sync mode
+                    if (res.status === 503 && err.detail?.fallback_to_sync) {
+                        console.log('Background jobs unavailable, falling back to sync mode');
+                        backgroundJobsAvailable = false;
+                        btn.disabled = false;
+                        btn.innerHTML = 'Write All Chapters';
+                        document.getElementById('chapterWriteProgress').textContent =
+                            'Background jobs unavailable - switching to sync mode...';
+                        // Fall back to sync mode by calling the sync write function
+                        await writeAllChaptersSync();
+                        return;
+                    }
+                    const errorMsg = typeof err.detail === 'object' ? err.detail.message || err.detail.error : err.detail;
+                    throw new Error(errorMsg || 'Failed to create job');
                 }
 
                 const data = await res.json();
@@ -2041,6 +2129,14 @@ Dialogue doesn't match character voice"></textarea>
 
             } catch (error) {
                 console.error('Background job error:', error);
+                // If error message suggests fallback, try sync mode
+                if (error.message && error.message.includes('unavailable')) {
+                    backgroundJobsAvailable = false;
+                    btn.disabled = false;
+                    btn.innerHTML = 'Write All Chapters';
+                    await writeAllChaptersSync();
+                    return;
+                }
                 alert('Failed to start background job: ' + error.message);
                 btn.disabled = false;
                 btn.innerHTML = 'Write All Chapters';

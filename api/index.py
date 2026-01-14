@@ -245,6 +245,25 @@ async def llm_status(auth: bool = Depends(require_auth)):
     }
 
 
+@app.get("/api/system/capabilities")
+async def system_capabilities(auth: bool = Depends(require_auth)):
+    """
+    Check system capabilities including background job support.
+
+    Frontend should call this to determine available features.
+    """
+    # Check if job queue has database connection
+    job_queue = get_job_queue()
+    has_job_queue = job_queue._get_connection() is not None
+
+    return {
+        "background_jobs": has_job_queue,
+        "llm_enabled": get_llm_client() is not None,
+        "database_enabled": db.is_database_available(),
+        "message": "Background jobs available" if has_job_queue else "Background jobs unavailable - DATABASE_URL not configured. Use sync mode."
+    }
+
+
 @app.get("/api/system/agents")
 async def list_agents(auth: bool = Depends(require_auth)):
     """List all available agents."""
@@ -1162,9 +1181,15 @@ async def create_background_job(
     )
 
     if not job:
+        # Return a 503 with helpful info for frontend to fall back to sync mode
         raise HTTPException(
-            status_code=500,
-            detail="Failed to create job - database may be unavailable"
+            status_code=503,
+            detail={
+                "error": "Background jobs unavailable",
+                "reason": "DATABASE_URL not configured - PostgreSQL required for job queue",
+                "fallback_to_sync": True,
+                "message": "Please use synchronous mode instead. The frontend should automatically retry in sync mode."
+            }
         )
 
     # Start the job in background (fire and forget)
