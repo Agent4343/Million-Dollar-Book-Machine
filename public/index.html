@@ -390,6 +390,7 @@
                 <div class="tab active" onclick="showTab('projects')">Projects</div>
                 <div class="tab" onclick="showTab('newProject')">New Project</div>
                 <div class="tab" onclick="showTab('pipeline')">Pipeline</div>
+                <div class="tab" onclick="showTab('storyBible')">Story Bible</div>
             </div>
 
             <!-- Projects Tab -->
@@ -550,6 +551,53 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Story Bible Tab -->
+            <div id="storyBibleTab" class="hidden">
+                <div id="noProjectForBible" class="card">
+                    <p style="text-align:center;color:#888;">Select a project from the Projects tab to view/edit its Story Bible</p>
+                </div>
+                <div id="storyBibleView" class="hidden">
+                    <div class="card">
+                        <h2>Story Bible - <span id="bibleProjTitle"></span></h2>
+                        <p style="color:#888;margin-bottom:1rem;">The Story Bible contains all canonical facts about your story. Edit these to ensure consistency across chapters.</p>
+
+                        <div class="grid-2">
+                            <div>
+                                <h3>Characters</h3>
+                                <textarea id="bibleCharacters" rows="8" placeholder="List your characters with their key traits, backgrounds, and roles..."></textarea>
+                            </div>
+                            <div>
+                                <h3>Locations</h3>
+                                <textarea id="bibleLocations" rows="8" placeholder="List your locations with descriptions and important details..."></textarea>
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div>
+                                <h3>Timeline</h3>
+                                <textarea id="bibleTimeline" rows="6" placeholder="Key dates and events in chronological order..."></textarea>
+                            </div>
+                            <div>
+                                <h3>World Rules</h3>
+                                <textarea id="bibleRules" rows="6" placeholder="Rules of your story world (magic systems, social rules, etc.)..."></textarea>
+                            </div>
+                        </div>
+
+                        <h3>Relationships</h3>
+                        <textarea id="bibleRelationships" rows="4" placeholder="Key relationships between characters..."></textarea>
+
+                        <h3>Important Facts / Consistency Notes</h3>
+                        <textarea id="bibleFacts" rows="4" placeholder="Other important facts that must remain consistent..."></textarea>
+
+                        <div style="margin-top:1rem;display:flex;gap:1rem;">
+                            <button class="btn btn-primary" onclick="saveStoryBible()">Save Story Bible</button>
+                            <button class="btn btn-secondary" onclick="loadStoryBible()">Reload from Server</button>
+                            <span id="bibleSaveStatus" style="color:#888;align-self:center;"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -667,7 +715,102 @@
             document.getElementById('projectsTab').classList.add('hidden');
             document.getElementById('newProjectTab').classList.add('hidden');
             document.getElementById('pipelineTab').classList.add('hidden');
+            document.getElementById('storyBibleTab').classList.add('hidden');
             document.getElementById(tab + 'Tab').classList.remove('hidden');
+
+            // Load Story Bible when tab is shown
+            if (tab === 'storyBible' && currentProject) {
+                loadStoryBible();
+            }
+        }
+
+        // Story Bible Functions
+        async function loadStoryBible() {
+            if (!currentProject) {
+                document.getElementById('noProjectForBible').classList.remove('hidden');
+                document.getElementById('storyBibleView').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('noProjectForBible').classList.add('hidden');
+            document.getElementById('storyBibleView').classList.remove('hidden');
+            document.getElementById('bibleProjTitle').textContent = projectData?.title || 'Unknown';
+            document.getElementById('bibleSaveStatus').textContent = 'Loading...';
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible`, {credentials: 'include'});
+                const data = await res.json();
+
+                if (data.status === 'available' && data.story_bible) {
+                    const bible = data.story_bible;
+                    // Populate text areas from story bible data
+                    document.getElementById('bibleCharacters').value = formatBibleSection(bible.character_registry);
+                    document.getElementById('bibleLocations').value = formatBibleSection(bible.location_registry);
+                    document.getElementById('bibleTimeline').value = formatBibleSection(bible.timeline);
+                    document.getElementById('bibleRules').value = formatBibleSection(bible.consistency_rules);
+                    document.getElementById('bibleRelationships').value = formatBibleSection(bible.relationship_map);
+                    document.getElementById('bibleFacts').value = formatBibleSection(bible.backstory_facts || bible.terminology);
+                    document.getElementById('bibleSaveStatus').textContent = 'Loaded';
+                } else {
+                    document.getElementById('bibleSaveStatus').textContent = data.message || 'No Story Bible yet - run the story_bible agent first or enter manually';
+                }
+            } catch (error) {
+                console.error('Error loading story bible:', error);
+                document.getElementById('bibleSaveStatus').textContent = 'Error loading';
+            }
+        }
+
+        function formatBibleSection(data) {
+            if (!data) return '';
+            if (typeof data === 'string') return data;
+            if (Array.isArray(data)) {
+                return data.map(item => {
+                    if (typeof item === 'string') return item;
+                    return JSON.stringify(item, null, 2);
+                }).join('\n\n');
+            }
+            return JSON.stringify(data, null, 2);
+        }
+
+        async function saveStoryBible() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            document.getElementById('bibleSaveStatus').textContent = 'Saving...';
+
+            const storyBible = {
+                character_registry: document.getElementById('bibleCharacters').value,
+                location_registry: document.getElementById('bibleLocations').value,
+                timeline: document.getElementById('bibleTimeline').value,
+                consistency_rules: document.getElementById('bibleRules').value,
+                relationship_map: document.getElementById('bibleRelationships').value,
+                backstory_facts: document.getElementById('bibleFacts').value,
+                terminology: {}
+            };
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({story_bible: storyBible})
+                });
+
+                if (res.ok) {
+                    document.getElementById('bibleSaveStatus').textContent = 'Saved successfully!';
+                    setTimeout(() => {
+                        document.getElementById('bibleSaveStatus').textContent = '';
+                    }, 3000);
+                } else {
+                    const error = await res.json();
+                    document.getElementById('bibleSaveStatus').textContent = 'Error: ' + (error.detail || 'Failed to save');
+                }
+            } catch (error) {
+                console.error('Error saving story bible:', error);
+                document.getElementById('bibleSaveStatus').textContent = 'Error saving';
+            }
         }
 
         // Projects
