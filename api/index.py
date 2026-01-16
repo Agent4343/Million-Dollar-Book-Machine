@@ -514,8 +514,7 @@ async def save_story_bible(project_id: str, request: StoryBibleUpdate, auth: boo
             # Create or update the agent output
             gate_result = GateResult(
                 passed=True,
-                criteria_met=["Manual update"],
-                issues=[]
+                message="Manual update via Story Bible editor"
             )
 
             agent_state.current_output = AgentOutput(
