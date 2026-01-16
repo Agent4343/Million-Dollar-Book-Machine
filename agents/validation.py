@@ -29,8 +29,10 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
     - Location mismatches
     - Timeline contradictions
     - Relationship errors
+    - Duplicate chapters
     """
     import re
+    from difflib import SequenceMatcher
 
     chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
     story_bible = context.inputs.get("story_bible", {})
@@ -42,8 +44,40 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
         "name_issues": [],
         "location_issues": [],
         "timeline_issues": [],
-        "relationship_issues": []
+        "relationship_issues": [],
+        "duplicate_issues": []
     }
+
+    # Check for duplicate chapter titles
+    chapter_titles = {}
+    for ch in chapters:
+        title = ch.get("title", "").strip().lower()
+        ch_num = ch.get("number", "?")
+        if title:
+            if title in chapter_titles:
+                issues["duplicate_issues"].append({
+                    "type": "duplicate_title",
+                    "title": ch.get("title", ""),
+                    "chapters": [chapter_titles[title], ch_num],
+                    "severity": "critical"
+                })
+            else:
+                chapter_titles[title] = ch_num
+
+    # Check for similar content between chapters (content duplication)
+    for i, ch1 in enumerate(chapters):
+        text1 = ch1.get("text", "")[:1000]  # First 1000 chars
+        for j, ch2 in enumerate(chapters[i+1:], i+1):
+            text2 = ch2.get("text", "")[:1000]
+            if text1 and text2:
+                similarity = SequenceMatcher(None, text1, text2).ratio()
+                if similarity > 0.7:  # 70% similar content = likely duplicate
+                    issues["duplicate_issues"].append({
+                        "type": "similar_content",
+                        "chapters": [ch1.get("number", i), ch2.get("number", j)],
+                        "similarity": f"{similarity:.0%}",
+                        "severity": "critical"
+                    })
 
     # Combine all chapter text for analysis
     full_text = "\n\n".join([
@@ -175,6 +209,38 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
                 "severity": "warning"
             })
 
+    # Check for protagonist name variations across chapters
+    protagonist = characters.get("protagonist_profile", {})
+    protagonist_name = protagonist.get("name", "")
+    if protagonist_name:
+        first_name = protagonist_name.split()[0] if protagonist_name else ""
+        # Check each chapter for different names that might be the protagonist
+        for ch in chapters:
+            text = ch.get("text", "")
+            ch_num = ch.get("number", "?")
+            # Look for first-person references or common alternative names
+            if first_name and text:
+                # Check if this chapter uses a different name pattern for the main character
+                import re
+                # Find all capitalized names that appear frequently
+                name_pattern = r'\b([A-Z][a-z]+)\s+(said|thought|felt|looked|turned|walked|smiled)\b'
+                speaking_names = re.findall(name_pattern, text)
+                name_counts = {}
+                for name, _ in speaking_names:
+                    name_counts[name] = name_counts.get(name, 0) + 1
+
+                # If a different name appears more than the protagonist name, flag it
+                for name, count in name_counts.items():
+                    if count >= 3 and name != first_name and name not in protagonist_name:
+                        issues["name_issues"].append({
+                            "type": "possible_protagonist_name_change",
+                            "chapter": ch_num,
+                            "expected": protagonist_name,
+                            "found": name,
+                            "occurrences": count,
+                            "severity": "critical"
+                        })
+
     # Use LLM for deeper analysis if available
     if llm and story_bible:
         try:
@@ -183,11 +249,15 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
 STORY BIBLE:
 {_format_story_bible_summary(story_bible)}
 
+EXPECTED PROTAGONIST NAME: {protagonist_name}
+
 MANUSCRIPT EXCERPT (first 5000 chars):
 {full_text[:5000]}
 
+CRITICAL: Check if the protagonist's name stays consistent throughout. The protagonist should ALWAYS be called "{protagonist_name}".
+
 Find any inconsistencies in:
-1. Character names (different spellings/names for same character)
+1. Character names (different spellings/names for same character) - THIS IS MOST IMPORTANT
 2. Locations (wrong city/place names)
 3. Timeline (contradictory time references)
 4. Relationships (wrong family/relationship references)
@@ -197,6 +267,8 @@ Return JSON with:
     "issues_found": [
         {{"type": "name|location|timeline|relationship", "description": "...", "severity": "critical|warning"}}
     ],
+    "protagonist_name_consistent": true/false,
+    "protagonist_variants_found": ["list any variations of protagonist name"],
     "overall_consistency_score": 1-100
 }}"""
 
@@ -237,6 +309,11 @@ Return JSON with:
             "status": "failed" if issues["relationship_issues"] else "passed",
             "issues": issues["relationship_issues"],
             "notes": f"Found {len(issues['relationship_issues'])} relationship issues"
+        },
+        "duplicate_check": {
+            "status": "failed" if issues["duplicate_issues"] else "passed",
+            "issues": issues["duplicate_issues"],
+            "notes": f"Found {len(issues['duplicate_issues'])} duplicate chapters" if issues["duplicate_issues"] else "No duplicate chapters"
         },
         "continuity_report": {
             "total_issues": total_issues,

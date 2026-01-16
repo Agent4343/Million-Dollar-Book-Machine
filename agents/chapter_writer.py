@@ -18,6 +18,15 @@ except ImportError:
 
 CHAPTER_WRITING_PROMPT = """You are an expert novelist writing Chapter {chapter_number}: "{chapter_title}".
 
+## ⚠️ CRITICAL: CHARACTER & SETTING CONSISTENCY ⚠️
+You MUST use EXACTLY these names throughout the chapter. NO variations, NO alternatives:
+
+{character_names_block}
+
+**FAILURE TO USE EXACT NAMES WILL RESULT IN CONTINUITY ERRORS.**
+
+---
+
 {story_bible_reference}
 
 ## VOICE & STYLE RULES
@@ -59,9 +68,16 @@ Write the complete chapter following these guidelines:
 
 Write publication-quality prose. Show, don't tell. Trust the reader.
 
+## OUTPUT FORMAT
+Start with:
+# Chapter {chapter_number}: {chapter_title}
+
+Then write the chapter prose. Use scene breaks with "* * *" between scenes.
+DO NOT use placeholder characters like "?" for the chapter number - use the EXACT number: {chapter_number}
+
 ---
 
-BEGIN CHAPTER {chapter_number}:
+BEGIN CHAPTER {chapter_number}: {chapter_title}
 """
 
 
@@ -155,10 +171,14 @@ async def execute_chapter_writer(
     story_bible = context.inputs.get("story_bible", {})
     story_bible_reference = format_story_bible_for_chapter(story_bible)
 
+    # Build explicit character names block to prevent name drift
+    character_names_block = _build_character_names_block(story_bible, character_arch)
+
     # Build the prompt
     prompt = CHAPTER_WRITING_PROMPT.format(
         chapter_number=chapter_number,
         chapter_title=chapter_data.get("title", f"Chapter {chapter_number}"),
+        character_names_block=character_names_block,
         story_bible_reference=story_bible_reference,
         voice_specification=_format_voice_spec(context.inputs.get("voice_specification", {})),
         chapter_goal=chapter_data.get("chapter_goal", "Advance the story"),
@@ -229,6 +249,52 @@ Summary:"""
             "pov": chapter_data.get("pov", "Unknown"),
             "scenes_written": len(chapter_data.get("scenes", []))
         }
+
+
+def _build_character_names_block(story_bible: Dict[str, Any], character_arch: Dict[str, Any]) -> str:
+    """
+    Build an explicit character names block to prevent name drift during chapter generation.
+    This creates a clear list of canonical names that the LLM must use.
+    """
+    lines = []
+
+    # Get protagonist name from character architecture first (most reliable)
+    protagonist = character_arch.get("protagonist_profile", {})
+    if protagonist.get("name"):
+        lines.append(f"**PROTAGONIST**: {protagonist.get('name')} (use this exact name)")
+
+    # Get supporting cast from character architecture
+    supporting = character_arch.get("supporting_cast", [])
+    if supporting:
+        lines.append("\n**SUPPORTING CHARACTERS**:")
+        for char in supporting[:6]:  # Limit to prevent token overflow
+            name = char.get("name", "")
+            function = char.get("function", char.get("role", ""))
+            if name:
+                lines.append(f"- {name}: {function}")
+
+    # Also get from story bible character registry for completeness
+    char_registry = story_bible.get("character_registry", [])
+    if char_registry and not lines:
+        lines.append("**CHARACTERS (use EXACT names)**:")
+        for char in char_registry[:8]:
+            if isinstance(char, dict):
+                name = char.get("canonical_name", char.get("name", ""))
+                role = char.get("role", "")
+                if name:
+                    lines.append(f"- {name}: {role}")
+            elif isinstance(char, str):
+                lines.append(f"- {char}")
+
+    # Get primary location
+    loc_registry = story_bible.get("location_registry", {})
+    if isinstance(loc_registry, dict) and loc_registry.get("primary_city"):
+        lines.append(f"\n**PRIMARY SETTING**: {loc_registry.get('primary_city')}")
+
+    if not lines:
+        return "Use character names as established in the story bible."
+
+    return "\n".join(lines)
 
 
 def _format_voice_spec(voice_spec: Dict[str, Any]) -> str:
