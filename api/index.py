@@ -500,9 +500,7 @@ class StoryBibleUpdate(BaseModel):
 @app.post("/api/projects/{project_id}/story-bible")
 async def save_story_bible(project_id: str, request: StoryBibleUpdate, auth: bool = Depends(require_auth)):
     """Save or update the Story Bible for a project."""
-    from models.state import AgentStatus
-    from models.agents import AGENT_REGISTRY
-    from core.orchestrator import AgentOutput, GateResult
+    from models.state import AgentStatus, AgentOutput, GateResult
 
     project = get_orchestrator().get_project(project_id)
     if not project:
@@ -514,7 +512,6 @@ async def save_story_bible(project_id: str, request: StoryBibleUpdate, auth: boo
             agent_state = layer.agents["story_bible"]
 
             # Create or update the agent output
-            agent_def = AGENT_REGISTRY.get("story_bible")
             gate_result = GateResult(
                 passed=True,
                 criteria_met=["Manual update"],
