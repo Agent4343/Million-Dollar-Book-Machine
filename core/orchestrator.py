@@ -18,6 +18,12 @@ from models.state import (
 )
 from models.agents import AGENT_REGISTRY, AgentDefinition, get_agent_execution_order
 
+# Import persistence conditionally to avoid circular imports
+try:
+    from core.persistence import DiskPersistenceManager
+except ImportError:
+    DiskPersistenceManager = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,14 +48,18 @@ class Orchestrator:
     - Error recovery
     """
 
-    def __init__(self, llm_client: Any = None):
+    def __init__(self, llm_client: Any = None, persistence_manager: Any = None, auto_save: bool = True):
         """
         Initialize the orchestrator.
 
         Args:
             llm_client: Client for LLM API calls (e.g., Anthropic, OpenAI)
+            persistence_manager: Optional DiskPersistenceManager for auto-saving
+            auto_save: If True and persistence_manager is set, auto-save after changes
         """
         self.llm_client = llm_client
+        self.persistence_manager = persistence_manager
+        self.auto_save = auto_save
         self.agent_executors: Dict[str, Callable] = {}
         self.projects: Dict[str, BookProject] = {}
 
@@ -96,7 +106,19 @@ class Orchestrator:
         self.projects[project.project_id] = project
         logger.info(f"Created project: {project.project_id} - {title}")
 
+        # Auto-save to disk if persistence is enabled
+        self._auto_save(project)
+
         return project
+
+    def _auto_save(self, project: BookProject) -> None:
+        """Save project to disk if auto-save is enabled."""
+        if self.auto_save and self.persistence_manager:
+            try:
+                self.persistence_manager.save_project_state(project)
+                logger.debug(f"Auto-saved project: {project.project_id}")
+            except Exception as e:
+                logger.warning(f"Auto-save failed: {e}")
 
     def get_project(self, project_id: str) -> Optional[BookProject]:
         """Get a project by ID."""
@@ -268,12 +290,18 @@ class Orchestrator:
             self._check_layer_completion(project, agent_def.layer)
 
             project.update_timestamp()
+
+            # Auto-save after successful execution
+            self._auto_save(project)
+
             return output
 
         except Exception as e:
             agent_state.status = AgentStatus.FAILED
             agent_state.last_error = str(e)
             logger.exception(f"Agent {agent_id} raised exception")
+            # Still save state on failure
+            self._auto_save(project)
             raise
 
     def _default_executor(self, context: ExecutionContext) -> Dict[str, Any]:
