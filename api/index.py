@@ -36,7 +36,7 @@ from agents.strategic import STRATEGIC_EXECUTORS
 from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
-from agents.chapter_writer import execute_chapter_writer
+from agents.chapter_writer import execute_chapter_writer, CHAPTER_WRITER_EXECUTORS
 from agents.story_bible import STORY_BIBLE_EXECUTORS
 from agents.marketing import MARKETING_EXECUTORS
 
@@ -118,6 +118,7 @@ ALL_EXECUTORS = {
     **VALIDATION_EXECUTORS,
     **STORY_BIBLE_EXECUTORS,
     **MARKETING_EXECUTORS,
+    **CHAPTER_WRITER_EXECUTORS,
 }
 
 

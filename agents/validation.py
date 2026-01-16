@@ -73,11 +73,13 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
             canonical_names[first_name] = canonical
 
     # Check for name variations in text
-    name_pattern = r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b'
+    # Improved pattern: matches single names, hyphenated, multi-part, and accented characters
+    # Pattern matches: "John", "John Smith", "Mary-Jane Watson", "Jean-Claude Van Damme", "José García"
+    name_pattern = r'\b([A-Z][a-zàáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšž]+(?:-[A-Z][a-zàáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšž]+)?)\s*([A-Z][a-zàáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšž]*(?:-[A-Z][a-zàáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšž]+)?(?:\s+[A-Z][a-zàáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšž]+)*)?\b'
     found_names = {}
     for match in re.finditer(name_pattern, full_text):
         first_name = match.group(1)
-        full_name = match.group()
+        full_name = match.group().strip()
         if first_name not in found_names:
             found_names[first_name] = set()
         found_names[first_name].add(full_name)
@@ -96,7 +98,8 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
 
     # Check location consistency
     primary_city = story_bible.get("location_registry", {}).get("primary_city", "")
-    city_pattern = r'\b(New York|NYC|Manhattan|Brooklyn|Chicago|Los Angeles|LA|Boston|Miami|Philadelphia|San Francisco|Seattle|Denver|Detroit|Atlanta)\b'
+    # Extended city pattern - includes major US, UK, EU, and other international cities
+    city_pattern = r'\b(New York|NYC|Manhattan|Brooklyn|Queens|Bronx|Staten Island|Chicago|Los Angeles|LA|Boston|Miami|Philadelphia|San Francisco|Seattle|Denver|Detroit|Atlanta|Houston|Dallas|Phoenix|San Diego|Austin|Portland|Nashville|Las Vegas|Minneapolis|Cleveland|Pittsburgh|Baltimore|Tampa|Orlando|Charlotte|Indianapolis|Columbus|Milwaukee|Kansas City|Sacramento|San Jose|Washington D\.?C\.?|London|Paris|Berlin|Rome|Madrid|Barcelona|Amsterdam|Brussels|Munich|Vienna|Dublin|Edinburgh|Glasgow|Manchester|Liverpool|Birmingham|Tokyo|Beijing|Shanghai|Hong Kong|Singapore|Sydney|Melbourne|Toronto|Vancouver|Montreal|Mexico City|São Paulo|Rio de Janeiro|Buenos Aires|Cairo|Dubai|Mumbai|Delhi|Bangalore)\b'
     cities_found = set()
     for match in re.finditer(city_pattern, full_text, re.IGNORECASE):
         cities_found.add(match.group().title())
@@ -118,7 +121,9 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
 
     # Check timeline references for consistency
     timeline_dates = story_bible.get("timeline", {}).get("key_dates", [])
-    timeline_pattern = r'(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|twenty-three)\s+years?\s+ago'
+    # Expanded number words list
+    number_words = r'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred'
+    timeline_pattern = rf'(\d+|{number_words}(?:-{number_words})?)\s+years?\s+ago'
     timeline_refs = []
     for match in re.finditer(timeline_pattern, full_text, re.IGNORECASE):
         timeline_refs.append(match.group())
@@ -132,20 +137,33 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
                 expected_years.add(str(years))
 
         found_years = set()
+        # Comprehensive word-to-number mapping
         word_to_num = {
             "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
             "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-            "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20",
-            "twenty-three": "23"
+            "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+            "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+            "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40",
+            "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80",
+            "ninety": "90", "hundred": "100"
         }
+        # Handle compound numbers like "twenty-three"
+        compound_pattern = re.compile(r'(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-(\w+)')
         for ref in timeline_refs:
-            num_match = re.search(r'(\d+|' + '|'.join(word_to_num.keys()) + ')', ref, re.IGNORECASE)
-            if num_match:
-                num_str = num_match.group(1).lower()
-                if num_str in word_to_num:
-                    found_years.add(word_to_num[num_str])
-                else:
-                    found_years.add(num_str)
+            # Check for compound numbers first
+            compound_match = compound_pattern.search(ref.lower())
+            if compound_match:
+                tens = word_to_num.get(compound_match.group(1), "0")
+                ones = word_to_num.get(compound_match.group(2), "0")
+                found_years.add(str(int(tens) + int(ones)))
+            else:
+                num_match = re.search(r'(\d+|' + '|'.join(word_to_num.keys()) + ')', ref, re.IGNORECASE)
+                if num_match:
+                    num_str = num_match.group(1).lower()
+                    if num_str in word_to_num:
+                        found_years.add(word_to_num[num_str])
+                    else:
+                        found_years.add(num_str)
 
         unexpected_years = found_years - expected_years
         if unexpected_years:

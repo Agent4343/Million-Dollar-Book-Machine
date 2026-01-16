@@ -168,8 +168,9 @@ class Orchestrator:
         Gather all required inputs for an agent.
 
         Inputs come from:
-        1. User constraints
-        2. Previous agent outputs
+        1. User constraints (genre, target_word_count, etc.)
+        2. Dependency agent outputs (full output dict keyed by agent_id)
+        3. Specific named outputs from any completed agent
         """
         agent_def = AGENT_REGISTRY.get(agent_id)
         if not agent_def:
@@ -180,26 +181,72 @@ class Orchestrator:
         # Add user constraints
         inputs["user_constraints"] = project.user_constraints
 
-        # Gather from dependencies and their outputs
+        # Build output-to-agent mapping for efficient lookup
+        output_providers = self._build_output_provider_map(project)
+
+        # Gather from dependencies - include full output as agent_id key
         for dep_id in agent_def.dependencies:
             dep_state = self._find_agent_state(project, dep_id)
             if dep_state and dep_state.current_output:
                 inputs[dep_id] = dep_state.current_output.content
+            else:
+                logger.warning(f"Agent {agent_id}: dependency {dep_id} has no output")
 
-        # Also search for specific named inputs
+        # Gather specific named inputs
+        missing_inputs = []
         for input_name in agent_def.inputs:
+            # Priority 1: User constraints
             if input_name in project.user_constraints:
                 inputs[input_name] = project.user_constraints[input_name]
+                continue
 
-            # Search all completed agents for this output
+            # Priority 2: Already gathered from dependency
+            if input_name in inputs:
+                continue
+
+            # Priority 3: Find provider agent from output map
+            if input_name in output_providers:
+                provider_id = output_providers[input_name]
+                provider_state = self._find_agent_state(project, provider_id)
+                if provider_state and provider_state.current_output:
+                    content = provider_state.current_output.content
+                    if input_name in content:
+                        inputs[input_name] = content[input_name]
+                        continue
+
+            # Priority 4: Search all completed agents (fallback)
+            found = False
             for layer in project.layers.values():
                 for agent_state in layer.agents.values():
                     if agent_state.current_output:
                         content = agent_state.current_output.content
                         if input_name in content:
                             inputs[input_name] = content[input_name]
+                            found = True
+                            break
+                if found:
+                    break
+
+            if not found and input_name not in inputs:
+                missing_inputs.append(input_name)
+
+        if missing_inputs:
+            logger.debug(f"Agent {agent_id}: inputs not found (may be optional): {missing_inputs}")
 
         return inputs
+
+    def _build_output_provider_map(self, project: BookProject) -> Dict[str, str]:
+        """
+        Build a map of output names to their provider agent IDs.
+        Uses agent definitions to know which agent provides which output.
+        """
+        output_map = {}
+        for agent_id, agent_def in AGENT_REGISTRY.items():
+            for output_name in agent_def.outputs:
+                # Don't overwrite - first provider wins (respects layer order)
+                if output_name not in output_map:
+                    output_map[output_name] = agent_id
+        return output_map
 
     async def execute_agent(
         self,
@@ -327,22 +374,47 @@ class Orchestrator:
         """
         Validate an agent's output against its gate criteria.
 
-        In production, this would do sophisticated validation.
-        For now, checks that all expected outputs exist.
+        Performs:
+        1. Check all expected outputs exist
+        2. Check outputs are not None or empty
+        3. Check for placeholder markers
+        4. Check for explicit failure markers
+        5. Agent-specific validation rules
         """
         content = output.content
         missing_outputs = []
+        empty_outputs = []
+        placeholder_outputs = []
 
         for expected in agent_def.outputs:
             if expected not in content:
                 missing_outputs.append(expected)
+            else:
+                value = content[expected]
+                # Check for None or empty values
+                if value is None:
+                    empty_outputs.append(expected)
+                elif isinstance(value, str):
+                    if not value.strip():
+                        empty_outputs.append(expected)
+                    # Check for placeholder markers
+                    elif value.startswith("[Generated") or value.startswith("[Placeholder"):
+                        placeholder_outputs.append(expected)
+                elif isinstance(value, (list, dict)):
+                    if len(value) == 0:
+                        empty_outputs.append(expected)
 
+        # Report missing outputs
         if missing_outputs:
             return GateResult(
                 passed=False,
                 message=f"Missing outputs: {missing_outputs}",
                 details={"missing": missing_outputs}
             )
+
+        # Report empty outputs (warning but still passes in demo mode)
+        if empty_outputs:
+            logger.warning(f"Agent {agent_def.agent_id} has empty outputs: {empty_outputs}")
 
         # Check for explicit failure markers
         if content.get("_gate_failed"):
@@ -352,11 +424,62 @@ class Orchestrator:
                 details=content.get("_gate_details", {})
             )
 
+        # Agent-specific validation
+        validation_result = self._agent_specific_validation(agent_def, content)
+        if validation_result and not validation_result.passed:
+            return validation_result
+
         return GateResult(
             passed=True,
             message="All outputs present and gate passed",
-            details={"outputs": list(content.keys())}
+            details={
+                "outputs": list(content.keys()),
+                "empty_outputs": empty_outputs,
+                "placeholder_outputs": placeholder_outputs
+            }
         )
+
+    def _agent_specific_validation(self, agent_def: AgentDefinition, content: Dict[str, Any]) -> Optional[GateResult]:
+        """Perform agent-specific validation rules."""
+        agent_id = agent_def.agent_id
+
+        # Chapter blueprint: verify chapters have required fields
+        if agent_id == "chapter_blueprint":
+            outline = content.get("chapter_outline", [])
+            if outline:
+                for ch in outline[:3]:  # Check first 3 chapters
+                    required = ["number", "title", "chapter_goal", "scenes"]
+                    missing = [r for r in required if r not in ch]
+                    if missing:
+                        return GateResult(
+                            passed=False,
+                            message=f"Chapter outline missing required fields: {missing}",
+                            details={"missing_fields": missing}
+                        )
+
+        # Draft generation: verify chapters have text
+        if agent_id == "draft_generation":
+            chapters = content.get("chapters", [])
+            empty_chapters = [c.get("number") for c in chapters if not c.get("text")]
+            if empty_chapters and len(empty_chapters) == len(chapters):
+                return GateResult(
+                    passed=False,
+                    message=f"No chapters have text content",
+                    details={"empty_chapters": empty_chapters}
+                )
+
+        # Continuity audit: check if critical issues found
+        if agent_id == "continuity_audit":
+            report = content.get("continuity_report", {})
+            critical = report.get("critical_issues", 0)
+            if critical > 5:  # Allow some critical issues but flag if too many
+                return GateResult(
+                    passed=False,
+                    message=f"Too many critical continuity issues: {critical}",
+                    details={"critical_issues": critical}
+                )
+
+        return None  # No specific validation or validation passed
 
     def _check_layer_completion(self, project: BookProject, layer_id: int) -> None:
         """Check if a layer is complete and unlock the next one."""

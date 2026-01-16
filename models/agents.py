@@ -148,7 +148,7 @@ CHARACTER_ARCHITECTURE = AgentDefinition(
     ],
     gate_criteria="Every character pressures the theme",
     fail_condition="Passive protagonist or purposeless characters",
-    dependencies=["world_rules"]
+    dependencies=["world_rules", "thematic_architecture", "story_question"]
 )
 
 RELATIONSHIP_DYNAMICS = AgentDefinition(
@@ -161,7 +161,7 @@ RELATIONSHIP_DYNAMICS = AgentDefinition(
     outputs=["conflict_web", "power_shifts", "dependency_arcs", "relationship_matrix"],
     gate_criteria="Relationships evolve meaningfully through story",
     fail_condition="Static interactions that don't change",
-    dependencies=["character_architecture"]
+    dependencies=["character_architecture", "thematic_architecture"]
 )
 
 STORY_BIBLE = AgentDefinition(
@@ -177,7 +177,7 @@ STORY_BIBLE = AgentDefinition(
     ],
     gate_criteria="All canonical facts locked in with no ambiguity",
     fail_condition="Missing critical facts or contradictory details",
-    dependencies=["relationship_dynamics"]
+    dependencies=["relationship_dynamics", "character_architecture", "world_rules"]
 )
 
 
@@ -198,7 +198,7 @@ PLOT_STRUCTURE = AgentDefinition(
     ],
     gate_criteria="Clear escalation through all acts",
     fail_condition="Flat middle or unearned climax",
-    dependencies=["relationship_dynamics"]
+    dependencies=["story_bible", "story_question", "character_architecture"]
 )
 
 PACING_DESIGN = AgentDefinition(
@@ -227,7 +227,7 @@ CHAPTER_BLUEPRINT = AgentDefinition(
     ],
     gate_criteria="Each chapter changes story state",
     fail_condition="Filler scenes with no purpose",
-    dependencies=["pacing_design"]
+    dependencies=["pacing_design", "character_architecture"]
 )
 
 
@@ -249,7 +249,7 @@ VOICE_SPECIFICATION = AgentDefinition(
     ],
     gate_criteria="Style test passages pass consistency check",
     fail_condition="Voice drift or inconsistent tone",
-    dependencies=["chapter_blueprint"]
+    dependencies=["chapter_blueprint", "market_intelligence", "character_architecture"]
 )
 
 
@@ -265,12 +265,12 @@ DRAFT_GENERATION = AgentDefinition(
     purpose="Produce the manuscript chapters",
     inputs=[
         "chapter_blueprint", "voice_specification", "character_architecture",
-        "world_rules", "style_guide"
+        "world_rules", "style_guide", "story_bible"
     ],
     outputs=["chapters", "chapter_metadata", "word_counts", "scene_tags"],
     gate_criteria="Draft follows outline and voice spec",
     fail_condition="Off-outline drift or voice inconsistency",
-    dependencies=["voice_specification"]
+    dependencies=["voice_specification", "story_bible"]
 )
 
 
@@ -301,7 +301,7 @@ EMOTIONAL_VALIDATION = AgentDefinition(
     outputs=["scene_resonance_scores", "arc_fulfillment_check", "emotional_peaks_map"],
     gate_criteria="Emotional peaks land as designed",
     fail_condition="Flat climax or unearned emotions",
-    dependencies=["continuity_audit"]
+    dependencies=["continuity_audit", "character_architecture", "story_question", "pacing_design"]
 )
 
 
@@ -362,11 +362,11 @@ STRUCTURAL_REWRITE = AgentDefinition(
     layer=16,
     agent_type=AgentType.EDITING,
     purpose="Improve clarity, force, and resolve flagged issues",
-    inputs=["chapters", "continuity_report", "emotional_validation_results", "originality_flags"],
+    inputs=["chapters", "continuity_report", "scene_resonance_scores", "originality_score"],
     outputs=["revised_chapters", "revision_log", "resolved_flags"],
     gate_criteria="All flagged issues resolved",
     fail_condition="New inconsistencies introduced",
-    dependencies=["transformative_verification"]
+    dependencies=["transformative_verification", "continuity_audit", "emotional_validation", "originality_scan"]
 )
 
 POST_REWRITE_SCAN = AgentDefinition(
