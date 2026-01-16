@@ -437,6 +437,38 @@ async def get_agent_output(project_id: str, agent_id: str, auth: bool = Depends(
     raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
 
+@app.get("/api/projects/{project_id}/story-bible")
+async def get_story_bible(project_id: str, auth: bool = Depends(require_auth)):
+    """Get the Story Bible for a project."""
+    from agents.story_bible import format_story_bible_for_chapter
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find story_bible agent output
+    for layer in project.layers.values():
+        if "story_bible" in layer.agents:
+            agent_state = layer.agents["story_bible"]
+            if agent_state.current_output and agent_state.current_output.content:
+                story_bible = agent_state.current_output.content
+                return {
+                    "status": "available",
+                    "story_bible": story_bible,
+                    "formatted": format_story_bible_for_chapter(story_bible)
+                }
+            else:
+                return {
+                    "status": "not_generated",
+                    "message": "Story Bible has not been generated yet. Execute the story_bible agent first."
+                }
+
+    return {
+        "status": "not_available",
+        "message": "Story Bible agent not found in project"
+    }
+
+
 @app.get("/api/projects/{project_id}/manuscript")
 async def get_manuscript(project_id: str, auth: bool = Depends(require_auth)):
     """Export the manuscript."""
