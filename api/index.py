@@ -35,6 +35,7 @@ from agents.strategic import STRATEGIC_EXECUTORS
 from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
+from agents.finishing import FINISHING_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
 
 # Initialize app
@@ -95,6 +96,7 @@ ALL_EXECUTORS = {
     **STORY_SYSTEM_EXECUTORS,
     **STRUCTURAL_EXECUTORS,
     **VALIDATION_EXECUTORS,
+    **FINISHING_EXECUTORS,
 }
 
 
