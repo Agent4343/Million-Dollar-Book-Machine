@@ -12,155 +12,254 @@ These agents validate, edit, and finalize the manuscript:
 - Publishing Package
 """
 
-from typing import Dict, Any, List
+import re
+from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Set
 from core.orchestrator import ExecutionContext
 
 
 # =============================================================================
-# EXECUTOR FUNCTIONS
+# CONSTANTS
 # =============================================================================
 
-async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
-    """
-    Audit for continuity and logic errors using the Story Bible.
+# Pattern to match full names (First Last)
+NAME_PATTERN = re.compile(r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b')
 
-    This agent checks the manuscript against the canonical story bible to find:
-    - Character name inconsistencies
-    - Location mismatches
-    - Timeline contradictions
-    - Relationship errors
-    """
-    import re
+# Pattern to match common US cities
+CITY_PATTERN = re.compile(
+    r'\b(New York|NYC|Manhattan|Brooklyn|Chicago|Los Angeles|LA|Boston|'
+    r'Miami|Philadelphia|San Francisco|Seattle|Denver|Detroit|Atlanta)\b',
+    re.IGNORECASE
+)
 
-    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
-    story_bible = context.inputs.get("story_bible", {})
-    world_rules = context.inputs.get("world_rules", {})
-    characters = context.inputs.get("character_architecture", {})
-    llm = context.llm_client
+# Pattern to match timeline references like "5 years ago" or "twenty years ago"
+TIMELINE_PATTERN = re.compile(
+    r'(\d+|one|two|three|four|five|six|seven|eight|nine|ten|'
+    r'eleven|twelve|fifteen|twenty|twenty-three)\s+years?\s+ago',
+    re.IGNORECASE
+)
 
-    issues = {
-        "name_issues": [],
-        "location_issues": [],
-        "timeline_issues": [],
-        "relationship_issues": []
-    }
+# Map word numbers to digits
+WORD_TO_NUMBER = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20",
+    "twenty-three": "23"
+}
 
-    # Combine all chapter text for analysis
-    full_text = "\n\n".join([
-        f"Chapter {ch.get('number', '?')}: {ch.get('text', '')}"
-        for ch in chapters if ch.get('text')
-    ])
 
-    if not full_text:
-        return {
-            "timeline_check": {"status": "skipped", "issues": [], "notes": "No chapter text to analyze"},
-            "character_logic_check": {"status": "skipped", "issues": [], "notes": "No chapter text to analyze"},
-            "world_rule_check": {"status": "skipped", "issues": [], "notes": "No chapter text to analyze"},
-            "continuity_report": {
-                "total_issues": 0,
-                "critical_issues": 0,
-                "warnings": 0,
-                "recommendation": "Generate chapters first"
-            }
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+@dataclass
+class ValidationIssue:
+    """Represents a single validation issue found in the manuscript."""
+    issue_type: str
+    severity: str  # "critical" or "warning"
+    description: str = ""
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format for API response."""
+        result = {
+            "type": self.issue_type,
+            "severity": self.severity,
         }
+        if self.description:
+            result["description"] = self.description
+        result.update(self.details)
+        return result
 
-    # Extract canonical names from story bible
+
+@dataclass
+class ValidationResult:
+    """Result from a single validator."""
+    issues: List[ValidationIssue] = field(default_factory=list)
+
+    @property
+    def status(self) -> str:
+        return "failed" if self.issues else "passed"
+
+    @property
+    def issue_count(self) -> int:
+        return len(self.issues)
+
+    @property
+    def critical_count(self) -> int:
+        return sum(1 for i in self.issues if i.severity == "critical")
+
+
+# =============================================================================
+# VALIDATORS
+# =============================================================================
+
+def validate_name_consistency(
+    full_text: str,
+    story_bible: Dict[str, Any]
+) -> ValidationResult:
+    """
+    Check for character name inconsistencies.
+
+    Finds cases where the same first name appears with multiple last names,
+    which may indicate a character name error.
+    """
+    result = ValidationResult()
+
+    # Build canonical name lookup from story bible
     canonical_names = {}
     for char in story_bible.get("character_registry", []):
         canonical = char.get("canonical_name", "")
         if canonical:
-            first_name = canonical.split()[0] if canonical else ""
+            first_name = canonical.split()[0]
             canonical_names[first_name] = canonical
 
-    # Check for name variations in text
-    name_pattern = r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b'
-    found_names = {}
-    for match in re.finditer(name_pattern, full_text):
+    # Find all full names and group by first name
+    found_names: Dict[str, Set[str]] = {}
+    for match in NAME_PATTERN.finditer(full_text):
         first_name = match.group(1)
         full_name = match.group()
         if first_name not in found_names:
             found_names[first_name] = set()
         found_names[first_name].add(full_name)
 
-    # Report first names with multiple last names
-    for first, fulls in found_names.items():
-        if len(fulls) > 1:
-            canonical = canonical_names.get(first)
-            issues["name_issues"].append({
-                "type": "name_variation",
-                "first_name": first,
-                "variations_found": list(fulls),
-                "canonical_name": canonical or "Not specified",
-                "severity": "critical" if canonical else "warning"
-            })
+    # Report first names with multiple last name variations
+    for first_name, full_names in found_names.items():
+        if len(full_names) > 1:
+            canonical = canonical_names.get(first_name)
+            result.issues.append(ValidationIssue(
+                issue_type="name_variation",
+                severity="critical" if canonical else "warning",
+                details={
+                    "first_name": first_name,
+                    "variations_found": list(full_names),
+                    "canonical_name": canonical or "Not specified",
+                }
+            ))
 
-    # Check location consistency
+    return result
+
+
+def validate_location_consistency(
+    full_text: str,
+    story_bible: Dict[str, Any]
+) -> ValidationResult:
+    """
+    Check for location inconsistencies.
+
+    Finds city names that don't match the story's primary location.
+    """
+    result = ValidationResult()
+
     primary_city = story_bible.get("location_registry", {}).get("primary_city", "")
-    city_pattern = r'\b(New York|NYC|Manhattan|Brooklyn|Chicago|Los Angeles|LA|Boston|Miami|Philadelphia|San Francisco|Seattle|Denver|Detroit|Atlanta)\b'
-    cities_found = set()
-    for match in re.finditer(city_pattern, full_text, re.IGNORECASE):
-        cities_found.add(match.group().title())
+    if not primary_city:
+        return result
 
-    if primary_city and cities_found:
-        # Normalize primary city name
-        normalized_primary = primary_city.replace(" ", "").lower()
-        for city in cities_found:
-            normalized_city = city.replace(" ", "").lower()
-            # Check if it's a different city (not just a variant of the primary)
-            if normalized_city not in normalized_primary and normalized_primary not in normalized_city:
-                if city.lower() not in ["manhattan", "brooklyn"] or "new york" not in primary_city.lower():
-                    issues["location_issues"].append({
-                        "type": "location_mismatch",
-                        "found": city,
-                        "expected_primary": primary_city,
-                        "severity": "warning"
-                    })
+    # Find all city mentions
+    cities_found = {match.group().title() for match in CITY_PATTERN.finditer(full_text)}
+    if not cities_found:
+        return result
 
-    # Check timeline references for consistency
+    # Check each city against the primary location
+    normalized_primary = primary_city.replace(" ", "").lower()
+    is_new_york = "new york" in primary_city.lower()
+
+    for city in cities_found:
+        normalized_city = city.replace(" ", "").lower()
+
+        # Skip if it's the same city or a variant
+        if normalized_city in normalized_primary or normalized_primary in normalized_city:
+            continue
+
+        # Manhattan/Brooklyn are OK if primary is New York
+        if city.lower() in ["manhattan", "brooklyn"] and is_new_york:
+            continue
+
+        result.issues.append(ValidationIssue(
+            issue_type="location_mismatch",
+            severity="warning",
+            details={
+                "found": city,
+                "expected_primary": primary_city,
+            }
+        ))
+
+    return result
+
+
+def validate_timeline_consistency(
+    full_text: str,
+    story_bible: Dict[str, Any]
+) -> ValidationResult:
+    """
+    Check for timeline inconsistencies.
+
+    Compares timeline references in the text against the story bible's
+    canonical timeline to find contradictions.
+    """
+    result = ValidationResult()
+
+    # Get expected timeline from story bible
     timeline_dates = story_bible.get("timeline", {}).get("key_dates", [])
-    timeline_pattern = r'(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|twenty-three)\s+years?\s+ago'
-    timeline_refs = []
-    for match in re.finditer(timeline_pattern, full_text, re.IGNORECASE):
-        timeline_refs.append(match.group())
+    if not timeline_dates:
+        return result
 
-    # Report timeline inconsistencies if we have expected dates
-    if timeline_dates and timeline_refs:
-        expected_years = set()
-        for date in timeline_dates:
-            years = date.get("years_before_story")
-            if years:
-                expected_years.add(str(years))
+    # Find all timeline references in text
+    timeline_refs = [match.group() for match in TIMELINE_PATTERN.finditer(full_text)]
+    if not timeline_refs:
+        return result
 
-        found_years = set()
-        word_to_num = {
-            "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-            "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-            "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20",
-            "twenty-three": "23"
-        }
-        for ref in timeline_refs:
-            num_match = re.search(r'(\d+|' + '|'.join(word_to_num.keys()) + ')', ref, re.IGNORECASE)
-            if num_match:
-                num_str = num_match.group(1).lower()
-                if num_str in word_to_num:
-                    found_years.add(word_to_num[num_str])
-                else:
-                    found_years.add(num_str)
+    # Extract expected years
+    expected_years = {
+        str(date.get("years_before_story"))
+        for date in timeline_dates
+        if date.get("years_before_story")
+    }
 
-        unexpected_years = found_years - expected_years
-        if unexpected_years:
-            issues["timeline_issues"].append({
-                "type": "timeline_inconsistency",
+    # Extract found years, converting word numbers to digits
+    found_years = set()
+    number_pattern = re.compile(
+        r'(\d+|' + '|'.join(WORD_TO_NUMBER.keys()) + ')',
+        re.IGNORECASE
+    )
+    for ref in timeline_refs:
+        match = number_pattern.search(ref)
+        if match:
+            num_str = match.group(1).lower()
+            found_years.add(WORD_TO_NUMBER.get(num_str, num_str))
+
+    # Report unexpected timeline references
+    unexpected_years = found_years - expected_years
+    if unexpected_years:
+        result.issues.append(ValidationIssue(
+            issue_type="timeline_inconsistency",
+            severity="warning",
+            details={
                 "expected_years": list(expected_years),
                 "found_years": list(found_years),
                 "unexpected": list(unexpected_years),
-                "severity": "warning"
-            })
+            }
+        ))
 
-    # Use LLM for deeper analysis if available
-    if llm and story_bible:
-        try:
-            audit_prompt = f"""You are a continuity editor. Analyze this manuscript excerpt against the Story Bible.
+    return result
+
+
+async def validate_with_llm(
+    full_text: str,
+    story_bible: Dict[str, Any],
+    llm_client: Any
+) -> ValidationResult:
+    """
+    Use LLM for deeper continuity analysis.
+
+    Performs semantic analysis to catch issues that pattern matching misses.
+    """
+    result = ValidationResult()
+
+    if not llm_client or not story_bible:
+        return result
+
+    audit_prompt = f"""You are a continuity editor. Analyze this manuscript excerpt against the Story Bible.
 
 STORY BIBLE:
 {_format_story_bible_summary(story_bible)}
@@ -182,51 +281,143 @@ Return JSON with:
     "overall_consistency_score": 1-100
 }}"""
 
-            llm_result = await llm.generate(audit_prompt, response_format="json", max_tokens=1000)
-            if isinstance(llm_result, dict):
-                for issue in llm_result.get("issues_found", []):
-                    issue_type = issue.get("type", "other") + "_issues"
-                    if issue_type in issues:
-                        issues[issue_type].append(issue)
-        except Exception as e:
-            pass  # Fall back to pattern-based analysis
+    try:
+        llm_result = await llm_client.generate(
+            audit_prompt,
+            response_format="json",
+            max_tokens=1000
+        )
+        if isinstance(llm_result, dict):
+            for issue in llm_result.get("issues_found", []):
+                result.issues.append(ValidationIssue(
+                    issue_type=issue.get("type", "other"),
+                    severity=issue.get("severity", "warning"),
+                    description=issue.get("description", ""),
+                ))
+    except Exception:
+        pass  # Fall back to pattern-based analysis only
 
-    # Compile final report
-    total_issues = sum(len(v) for v in issues.values())
+    return result
+
+
+# =============================================================================
+# RESULT BUILDERS
+# =============================================================================
+
+def build_check_result(name: str, result: ValidationResult) -> Dict[str, Any]:
+    """Build a standardized check result dictionary."""
+    return {
+        "status": result.status,
+        "issues": [i.to_dict() for i in result.issues],
+        "notes": f"Found {result.issue_count} {name}"
+    }
+
+
+def build_continuity_report(
+    all_issues: Dict[str, List[Dict[str, Any]]],
+    total_issues: int,
+    critical_issues: int
+) -> Dict[str, Any]:
+    """Build the final continuity report summary."""
+    if critical_issues > 0:
+        recommendation = "Review and fix issues"
+    elif total_issues > 0:
+        recommendation = "Proceed with caution"
+    else:
+        recommendation = "Proceed to next stage"
+
+    return {
+        "total_issues": total_issues,
+        "critical_issues": critical_issues,
+        "warnings": total_issues - critical_issues,
+        "all_issues": all_issues,
+        "recommendation": recommendation
+    }
+
+
+def build_empty_audit_result() -> Dict[str, Any]:
+    """Build result when there's no text to analyze."""
+    empty_check = {"status": "skipped", "issues": [], "notes": "No chapter text to analyze"}
+    return {
+        "timeline_check": empty_check,
+        "character_logic_check": empty_check,
+        "world_rule_check": empty_check,
+        "continuity_report": {
+            "total_issues": 0,
+            "critical_issues": 0,
+            "warnings": 0,
+            "recommendation": "Generate chapters first"
+        }
+    }
+
+
+# =============================================================================
+# MAIN EXECUTOR
+# =============================================================================
+
+async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
+    """
+    Audit for continuity and logic errors using the Story Bible.
+
+    This agent checks the manuscript against the canonical story bible to find:
+    - Character name inconsistencies
+    - Location mismatches
+    - Timeline contradictions
+    - Relationship errors
+    """
+    # Extract inputs
+    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
+    story_bible = context.inputs.get("story_bible", {})
+
+    # Combine all chapter text
+    full_text = "\n\n".join([
+        f"Chapter {ch.get('number', '?')}: {ch.get('text', '')}"
+        for ch in chapters if ch.get('text')
+    ])
+
+    if not full_text:
+        return build_empty_audit_result()
+
+    # Run all validators
+    name_result = validate_name_consistency(full_text, story_bible)
+    location_result = validate_location_consistency(full_text, story_bible)
+    timeline_result = validate_timeline_consistency(full_text, story_bible)
+    llm_result = await validate_with_llm(full_text, story_bible, context.llm_client)
+
+    # Categorize LLM issues by type
+    llm_issues_by_type: Dict[str, List[ValidationIssue]] = {
+        "name": [], "location": [], "timeline": [], "relationship": []
+    }
+    for issue in llm_result.issues:
+        category = issue.issue_type if issue.issue_type in llm_issues_by_type else "relationship"
+        llm_issues_by_type[category].append(issue)
+
+    # Combine all issues
+    all_issues = {
+        "name_issues": [i.to_dict() for i in name_result.issues + llm_issues_by_type["name"]],
+        "location_issues": [i.to_dict() for i in location_result.issues + llm_issues_by_type["location"]],
+        "timeline_issues": [i.to_dict() for i in timeline_result.issues + llm_issues_by_type["timeline"]],
+        "relationship_issues": [i.to_dict() for i in llm_issues_by_type["relationship"]],
+    }
+
+    # Calculate totals
+    total_issues = sum(len(v) for v in all_issues.values())
     critical_issues = sum(
-        1 for issue_list in issues.values()
+        1 for issue_list in all_issues.values()
         for issue in issue_list
         if issue.get("severity") == "critical"
     )
 
     return {
-        "timeline_check": {
-            "status": "failed" if issues["timeline_issues"] else "passed",
-            "issues": issues["timeline_issues"],
-            "notes": f"Found {len(issues['timeline_issues'])} timeline issues"
-        },
-        "character_logic_check": {
-            "status": "failed" if issues["name_issues"] else "passed",
-            "issues": issues["name_issues"],
-            "notes": f"Found {len(issues['name_issues'])} name inconsistencies"
-        },
-        "world_rule_check": {
-            "status": "failed" if issues["location_issues"] else "passed",
-            "issues": issues["location_issues"],
-            "notes": f"Found {len(issues['location_issues'])} location issues"
-        },
+        "timeline_check": build_check_result("timeline issues", timeline_result),
+        "character_logic_check": build_check_result("name inconsistencies", name_result),
+        "world_rule_check": build_check_result("location issues", location_result),
         "relationship_check": {
-            "status": "failed" if issues["relationship_issues"] else "passed",
-            "issues": issues["relationship_issues"],
-            "notes": f"Found {len(issues['relationship_issues'])} relationship issues"
+            "status": "failed" if all_issues["relationship_issues"] else "passed",
+            "issues": all_issues["relationship_issues"],
+            "notes": f"Found {len(all_issues['relationship_issues'])} relationship issues"
         },
-        "continuity_report": {
-            "total_issues": total_issues,
-            "critical_issues": critical_issues,
-            "warnings": total_issues - critical_issues,
-            "all_issues": issues,
-            "recommendation": "Review and fix issues" if critical_issues > 0 else "Proceed with caution" if total_issues > 0 else "Proceed to next stage"
-        }
+        "continuity_report": build_continuity_report(all_issues, total_issues, critical_issues)
     }
 
 
