@@ -469,6 +469,52 @@ async def get_story_bible(project_id: str, auth: bool = Depends(require_auth)):
     }
 
 
+class StoryBibleUpdate(BaseModel):
+    """Request model for updating Story Bible."""
+    story_bible: dict
+
+
+@app.post("/api/projects/{project_id}/story-bible")
+async def save_story_bible(project_id: str, request: StoryBibleUpdate, auth: bool = Depends(require_auth)):
+    """Save or update the Story Bible for a project."""
+    from models.state import AgentStatus
+    from models.agents import AGENT_REGISTRY
+    from core.orchestrator import AgentOutput, GateResult
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find story_bible agent and update its output
+    for layer in project.layers.values():
+        if "story_bible" in layer.agents:
+            agent_state = layer.agents["story_bible"]
+
+            # Create or update the agent output
+            agent_def = AGENT_REGISTRY.get("story_bible")
+            gate_result = GateResult(
+                passed=True,
+                criteria_met=["Manual update"],
+                issues=[]
+            )
+
+            agent_state.current_output = AgentOutput(
+                agent_id="story_bible",
+                content=request.story_bible,
+                gate_result=gate_result
+            )
+            agent_state.status = AgentStatus.COMPLETE
+            agent_state.attempts = 1
+
+            return {
+                "status": "saved",
+                "message": "Story Bible saved successfully",
+                "story_bible": request.story_bible
+            }
+
+    raise HTTPException(status_code=404, detail="Story Bible agent not found in project")
+
+
 @app.get("/api/projects/{project_id}/manuscript")
 async def get_manuscript(project_id: str, auth: bool = Depends(require_auth)):
     """Export the manuscript."""
