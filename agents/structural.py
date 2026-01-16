@@ -9,7 +9,7 @@ These agents design and execute the story structure:
 - Draft Generation
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from core.orchestrator import ExecutionContext
 
 
@@ -335,6 +335,82 @@ Write engaging, publication-quality prose that:
 
 
 # =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _normalize_chapter_number(chapter_num: Any) -> int | None:
+    """
+    Normalize a chapter number to an integer.
+    Returns None if the value cannot be converted.
+    """
+    if chapter_num is None:
+        return None
+    if isinstance(chapter_num, int):
+        return chapter_num
+    if isinstance(chapter_num, str):
+        if chapter_num == "?" or not chapter_num.strip():
+            return None
+        try:
+            return int(chapter_num)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_chapter_blueprint(blueprint: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize chapter blueprint to ensure all chapter numbers are integers.
+    This fixes issues where the LLM outputs "?" or string numbers.
+    """
+    if not blueprint or not isinstance(blueprint, dict):
+        return blueprint
+
+    chapter_outline = blueprint.get("chapter_outline", [])
+    if not chapter_outline:
+        return blueprint
+
+    # Normalize each chapter's number
+    for idx, chapter in enumerate(chapter_outline):
+        raw_number = chapter.get("number")
+        normalized = _normalize_chapter_number(raw_number)
+
+        # If number is invalid or missing, assign sequential number
+        if normalized is None:
+            normalized = idx + 1
+
+        chapter["number"] = normalized
+
+        # Also normalize scene numbers within the chapter
+        for scene_idx, scene in enumerate(chapter.get("scenes", [])):
+            scene_num = _normalize_chapter_number(scene.get("scene_number"))
+            if scene_num is None:
+                scene_num = scene_idx + 1
+            scene["scene_number"] = scene_num
+
+    # Remove any duplicate chapter numbers by keeping only the first occurrence
+    seen_numbers = set()
+    unique_chapters = []
+    for chapter in chapter_outline:
+        num = chapter.get("number")
+        if num not in seen_numbers:
+            seen_numbers.add(num)
+            unique_chapters.append(chapter)
+
+    blueprint["chapter_outline"] = unique_chapters
+
+    # Also update related fields
+    if unique_chapters:
+        blueprint["chapter_goals"] = {
+            str(c["number"]): c.get("chapter_goal", "") for c in unique_chapters
+        }
+        blueprint["pov_assignments"] = {
+            str(c["number"]): c.get("pov", "Protagonist") for c in unique_chapters
+        }
+
+    return blueprint
+
+
+# =============================================================================
 # EXECUTOR FUNCTIONS
 # =============================================================================
 
@@ -441,6 +517,8 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
+        # Normalize chapter numbers to ensure they are integers
+        response = _normalize_chapter_blueprint(response)
         return response
     else:
         # Generate placeholder chapter outline
