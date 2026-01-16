@@ -116,7 +116,7 @@ def verify_session_token(token: str) -> bool:
             return False
         expected = create_session_token(timestamp)
         return hmac.compare_digest(token, expected)
-    except:
+    except (ValueError, TypeError):
         return False
 
 
