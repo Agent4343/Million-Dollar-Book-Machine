@@ -145,14 +145,38 @@ class ClaudeLLMClient:
                 if last_comma > 0:
                     content = content[:last_comma]
 
-        # Count and close brackets
-        open_braces = content.count('{') - content.count('}')
-        open_brackets = content.count('[') - content.count(']')
+        # Track opening brackets in order to close them correctly
+        # We need to close in reverse order of opening
+        bracket_stack = []
+        in_string = False
+        escape_next = False
+
+        for char in content:
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\' and in_string:
+                escape_next = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == '{':
+                bracket_stack.append('}')
+            elif char == '[':
+                bracket_stack.append(']')
+            elif char == '}':
+                if bracket_stack and bracket_stack[-1] == '}':
+                    bracket_stack.pop()
+            elif char == ']':
+                if bracket_stack and bracket_stack[-1] == ']':
+                    bracket_stack.pop()
 
         # Add closing brackets in reverse order of opening
         content = content.rstrip(',')  # Remove trailing comma
-        content += ']' * open_brackets
-        content += '}' * open_braces
+        content += ''.join(reversed(bracket_stack))
 
         return content
 
