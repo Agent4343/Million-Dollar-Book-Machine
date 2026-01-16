@@ -104,6 +104,68 @@ def create_session_token(timestamp: int) -> str:
     return f"{timestamp}:{signature}"
 
 
+def _normalize_chapter_number(chapter_num: Any) -> Optional[int]:
+    """
+    Normalize a chapter number to an integer.
+    Returns None if the value cannot be converted to a valid chapter number.
+    """
+    if chapter_num is None:
+        return None
+    if isinstance(chapter_num, int):
+        return chapter_num
+    if isinstance(chapter_num, str):
+        # Handle "?" or other invalid strings
+        if chapter_num == "?" or not chapter_num.strip():
+            return None
+        try:
+            return int(chapter_num)
+        except ValueError:
+            return None
+    return None
+
+
+def _store_chapter_in_manuscript(project, chapter_data: Dict[str, Any], chapter_number: int) -> bool:
+    """
+    Store a chapter in the manuscript, preventing duplicates.
+
+    Args:
+        project: The book project
+        chapter_data: The chapter content to store
+        chapter_number: The chapter number (must be a valid int)
+
+    Returns:
+        True if stored successfully, False if skipped
+    """
+    if not chapter_data.get("text") or chapter_data.get("error"):
+        return False
+
+    # Ensure chapters list exists
+    if "chapters" not in project.manuscript:
+        project.manuscript["chapters"] = []
+
+    # Normalize the chapter number in the data being stored
+    chapter_data["number"] = chapter_number
+
+    # Find and replace existing chapter, or append if new
+    chapter_exists = False
+    for idx, existing_ch in enumerate(project.manuscript["chapters"]):
+        existing_num = _normalize_chapter_number(existing_ch.get("number"))
+        if existing_num == chapter_number:
+            project.manuscript["chapters"][idx] = chapter_data
+            chapter_exists = True
+            break
+
+    if not chapter_exists:
+        project.manuscript["chapters"].append(chapter_data)
+
+    # Sort chapters by number (with safe comparison)
+    project.manuscript["chapters"].sort(
+        key=lambda x: _normalize_chapter_number(x.get("number")) or 9999
+    )
+
+    return True
+
+
 def verify_session_token(token: str) -> bool:
     if not token:
         return False
@@ -603,24 +665,8 @@ async def write_chapter(
     try:
         result = await execute_chapter_writer(context, chapter_number, quick_mode=quick_mode)
 
-        # Store chapter in manuscript
-        if result.get("text") and not result.get("error"):
-            if "chapters" not in project.manuscript:
-                project.manuscript["chapters"] = []
-
-            # Update or add chapter
-            chapter_exists = False
-            for i, ch in enumerate(project.manuscript["chapters"]):
-                if ch.get("number") == chapter_number:
-                    project.manuscript["chapters"][i] = result
-                    chapter_exists = True
-                    break
-
-            if not chapter_exists:
-                project.manuscript["chapters"].append(result)
-
-            # Sort chapters by number
-            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+        # Store chapter in manuscript (with proper duplicate prevention)
+        _store_chapter_in_manuscript(project, result, chapter_number)
 
         return {
             "success": True,
@@ -682,9 +728,17 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
             "should_continue": False
         }
 
-    # Find which chapters are already written
-    existing_chapters = {ch.get("number") for ch in project.manuscript.get("chapters", [])}
-    chapters_to_write = [ch for ch in chapter_outline if ch.get("number") not in existing_chapters]
+    # Find which chapters are already written (using normalized chapter numbers)
+    existing_chapters = {
+        _normalize_chapter_number(ch.get("number"))
+        for ch in project.manuscript.get("chapters", [])
+        if _normalize_chapter_number(ch.get("number")) is not None
+    }
+    chapters_to_write = [
+        ch for ch in chapter_outline
+        if _normalize_chapter_number(ch.get("number")) not in existing_chapters
+        and _normalize_chapter_number(ch.get("number")) is not None
+    ]
 
     if not chapters_to_write:
         return {
@@ -719,26 +773,17 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         if elapsed > (timeout - 2):
             break
 
-        chapter_num = ch.get("number")
+        # Normalize chapter number from blueprint
+        chapter_num = _normalize_chapter_number(ch.get("number"))
+        if chapter_num is None:
+            chapters_failed.append({"number": ch.get("number"), "error": "Invalid chapter number in blueprint"})
+            continue
+
         try:
             result = await execute_chapter_writer(context, chapter_num, quick_mode=request.quick_mode)
 
-            if result.get("text") and not result.get("error"):
-                # Store chapter
-                if "chapters" not in project.manuscript:
-                    project.manuscript["chapters"] = []
-
-                chapter_exists = False
-                for idx, existing_ch in enumerate(project.manuscript["chapters"]):
-                    if existing_ch.get("number") == chapter_num:
-                        project.manuscript["chapters"][idx] = result
-                        chapter_exists = True
-                        break
-
-                if not chapter_exists:
-                    project.manuscript["chapters"].append(result)
-
-                project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+            # Store chapter (with proper duplicate prevention)
+            if _store_chapter_in_manuscript(project, result, chapter_num):
                 chapters_written.append(chapter_num)
             else:
                 chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
@@ -746,9 +791,14 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         except Exception as e:
             chapters_failed.append({"number": chapter_num, "error": str(e)})
 
-    # Calculate remaining chapters
+    # Calculate remaining chapters (using normalized comparison)
     all_written = existing_chapters.union(set(chapters_written))
-    remaining = [ch.get("number") for ch in chapter_outline if ch.get("number") not in all_written]
+    remaining = [
+        _normalize_chapter_number(ch.get("number"))
+        for ch in chapter_outline
+        if _normalize_chapter_number(ch.get("number")) not in all_written
+        and _normalize_chapter_number(ch.get("number")) is not None
+    ]
 
     return {
         "success": True,
