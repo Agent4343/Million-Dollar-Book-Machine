@@ -273,6 +273,7 @@ def format_story_bible_for_chapter(story_bible: Dict[str, Any]) -> str:
     """
     Format the story bible into a concise reference string for chapter writers.
     This is injected into every chapter writing prompt to ensure consistency.
+    Handles both structured data (from agents) and plain text (from manual editor).
     """
     if not story_bible:
         return "No story bible available."
@@ -280,67 +281,122 @@ def format_story_bible_for_chapter(story_bible: Dict[str, Any]) -> str:
     lines = ["## STORY BIBLE - CANONICAL REFERENCE (MUST FOLLOW EXACTLY)"]
     lines.append("")
 
+    # Helper to format a section - handles both structured and string data
+    def format_section(title: str, data, format_func=None):
+        if not data:
+            return
+        lines.append(f"### {title}")
+        if isinstance(data, str):
+            # Plain text from editor
+            lines.append(data)
+        elif isinstance(data, list):
+            # Structured list from agent
+            for item in data:
+                if isinstance(item, dict) and format_func:
+                    lines.append(format_func(item))
+                elif isinstance(item, str):
+                    lines.append(f"- {item}")
+                else:
+                    lines.append(f"- {item}")
+        elif isinstance(data, dict):
+            # Structured dict
+            for key, value in data.items():
+                if isinstance(value, str):
+                    lines.append(f"- **{key}**: {value}")
+                else:
+                    lines.append(f"- **{key}**: {value}")
+        lines.append("")
+
     # Characters
-    lines.append("### CHARACTERS (use ONLY these names)")
-    for char in story_bible.get("character_registry", []):
-        name = char.get("canonical_name", "Unknown")
-        role = char.get("role", "")
-        age = char.get("age", "?")
-        occupation = char.get("occupation", "")
-        aliases = char.get("aliases", [])
+    char_data = story_bible.get("character_registry", [])
+    if char_data:
+        lines.append("### CHARACTERS (use ONLY these names)")
+        if isinstance(char_data, str):
+            lines.append(char_data)
+        elif isinstance(char_data, list):
+            for char in char_data:
+                if isinstance(char, dict):
+                    name = char.get("canonical_name", "Unknown")
+                    role = char.get("role", "")
+                    age = char.get("age", "?")
+                    occupation = char.get("occupation", "")
+                    aliases = char.get("aliases", [])
+                    alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+                    lines.append(f"- **{name}**{alias_str}: {role}, age {age}, {occupation}")
+                else:
+                    lines.append(f"- {char}")
+        lines.append("")
 
-        alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
-        lines.append(f"- **{name}**{alias_str}: {role}, age {age}, {occupation}")
-
-        # Add key relationships
-        for rel_id, rel_type in char.get("relationships", {}).items():
-            # Find the related character's name
-            for other_char in story_bible.get("character_registry", []):
-                if other_char.get("id") == rel_id:
-                    lines.append(f"  → {rel_type} of {other_char.get('canonical_name', rel_id)}")
-                    break
-
-    lines.append("")
-
-    # Location
-    loc_reg = story_bible.get("location_registry", {})
-    if loc_reg:
-        lines.append("### LOCATION (story takes place here)")
-        lines.append(f"- **Primary City**: {loc_reg.get('primary_city', 'Not specified')}")
-        for loc in loc_reg.get("key_locations", [])[:5]:
-            lines.append(f"- {loc.get('name', '?')}: {loc.get('description', '')[:50]}...")
-
-    lines.append("")
+    # Locations
+    loc_data = story_bible.get("location_registry", {})
+    if loc_data:
+        lines.append("### LOCATIONS")
+        if isinstance(loc_data, str):
+            lines.append(loc_data)
+        elif isinstance(loc_data, dict):
+            if loc_data.get("primary_city"):
+                lines.append(f"- **Primary City**: {loc_data.get('primary_city')}")
+            for loc in loc_data.get("key_locations", [])[:5]:
+                if isinstance(loc, dict):
+                    lines.append(f"- {loc.get('name', '?')}: {loc.get('description', '')[:50]}...")
+                else:
+                    lines.append(f"- {loc}")
+        lines.append("")
 
     # Timeline
     timeline = story_bible.get("timeline", {})
     if timeline:
-        lines.append("### TIMELINE (use these exact timeframes)")
-        lines.append(f"- **Story Present**: {timeline.get('story_present', 'Not specified')}")
-        for event in timeline.get("key_dates", [])[:5]:
-            years = event.get("years_before_story", "?")
-            lines.append(f"- {event.get('event', '?')}: {years} years ago")
+        lines.append("### TIMELINE")
+        if isinstance(timeline, str):
+            lines.append(timeline)
+        elif isinstance(timeline, dict):
+            if timeline.get("story_present"):
+                lines.append(f"- **Story Present**: {timeline.get('story_present')}")
+            for event in timeline.get("key_dates", [])[:5]:
+                if isinstance(event, dict):
+                    years = event.get("years_before_story", "?")
+                    lines.append(f"- {event.get('event', '?')}: {years} years ago")
+                else:
+                    lines.append(f"- {event}")
+        lines.append("")
 
-    lines.append("")
-
-    # Relationship map
+    # Relationships
     rel_map = story_bible.get("relationship_map", [])
     if rel_map:
         lines.append("### RELATIONSHIPS")
-        char_names = {c.get("id"): c.get("canonical_name") for c in story_bible.get("character_registry", [])}
-        for rel in rel_map[:8]:
-            char_a = char_names.get(rel.get("character_a"), rel.get("character_a"))
-            char_b = char_names.get(rel.get("character_b"), rel.get("character_b"))
-            lines.append(f"- {char_a} ↔ {char_b}: {rel.get('relationship_type', '?')}")
-
-    lines.append("")
+        if isinstance(rel_map, str):
+            lines.append(rel_map)
+        elif isinstance(rel_map, list):
+            for rel in rel_map[:8]:
+                if isinstance(rel, dict):
+                    char_a = rel.get("character_a", "?")
+                    char_b = rel.get("character_b", "?")
+                    lines.append(f"- {char_a} ↔ {char_b}: {rel.get('relationship_type', '?')}")
+                else:
+                    lines.append(f"- {rel}")
+        lines.append("")
 
     # Consistency rules
     rules = story_bible.get("consistency_rules", [])
     if rules:
-        lines.append("### CONSISTENCY RULES (MUST FOLLOW)")
-        for rule in rules[:10]:
-            lines.append(f"- {rule}")
+        lines.append("### CONSISTENCY RULES")
+        if isinstance(rules, str):
+            lines.append(rules)
+        elif isinstance(rules, list):
+            for rule in rules[:10]:
+                lines.append(f"- {rule}")
+        lines.append("")
+
+    # Backstory facts
+    facts = story_bible.get("backstory_facts", "")
+    if facts:
+        lines.append("### IMPORTANT FACTS")
+        if isinstance(facts, str):
+            lines.append(facts)
+        elif isinstance(facts, list):
+            for fact in facts[:10]:
+                lines.append(f"- {fact}")
+        lines.append("")
 
     return "\n".join(lines)
 
