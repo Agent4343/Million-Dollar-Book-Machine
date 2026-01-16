@@ -522,7 +522,7 @@ async def save_story_bible(project_id: str, request: StoryBibleUpdate, auth: boo
                 content=request.story_bible,
                 gate_result=gate_result
             )
-            agent_state.status = AgentStatus.COMPLETE
+            agent_state.status = AgentStatus.PASSED
             agent_state.attempts = 1
 
             return {
