@@ -211,8 +211,30 @@ async def check_auth(session: Optional[str] = Cookie(None, alias="book_session")
 # System Info
 # =============================================================================
 
+# Get the path to the public directory
+PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
+
+
 @app.get("/")
 async def root():
+    """Serve the frontend application."""
+    index_path = os.path.join(PUBLIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    # Fallback to API info if no frontend
+    return {
+        "service": "Million Dollar Book Machine",
+        "version": "1.0.0",
+        "description": "AI-powered book development system",
+        "total_agents": len(AGENT_REGISTRY),
+        "total_layers": len(LAYERS),
+        "llm_enabled": get_llm_client() is not None
+    }
+
+
+@app.get("/api/system/info")
+async def system_info():
+    """Get system information."""
     return {
         "service": "Million Dollar Book Machine",
         "version": "1.0.0",
@@ -1461,12 +1483,8 @@ async def save_project_to_disk(project_id: str, auth: bool = Depends(require_aut
 
 
 # =============================================================================
-# FRONTEND SERVING
+# FRONTEND SERVING (catch-all for SPA routes)
 # =============================================================================
-
-# Get the path to the public directory
-PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
-
 
 @app.get("/{full_path:path}")
 async def serve_frontend(full_path: str):
