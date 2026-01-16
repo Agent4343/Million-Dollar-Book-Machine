@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -1457,3 +1458,26 @@ async def save_project_to_disk(project_id: str, auth: bool = Depends(require_aut
         "success": True,
         "message": f"Project saved to {pm._get_project_dir(project_id)}"
     }
+
+
+# =============================================================================
+# FRONTEND SERVING
+# =============================================================================
+
+# Get the path to the public directory
+PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
+
+
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    """Serve the frontend for all non-API routes."""
+    # If the path starts with 'api', it's not found (already handled above)
+    if full_path.startswith("api"):
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+
+    # Serve the index.html for all frontend routes (SPA)
+    index_path = os.path.join(PUBLIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+
+    raise HTTPException(status_code=404, detail="Frontend not found")
