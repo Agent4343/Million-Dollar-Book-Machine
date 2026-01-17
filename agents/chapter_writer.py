@@ -119,7 +119,7 @@ async def execute_chapter_writer(
 
 **Supporting Cast**:
 """
-    for char in supporting[:3]:  # Limit to avoid token overflow
+    for char in (supporting or [])[:3]:  # Limit to avoid token overflow
         character_reference += f"- {char.get('name', '?')}: {char.get('function', 'N/A')}\n"
 
     # Get previous chapter summary if available
@@ -129,7 +129,8 @@ async def execute_chapter_writer(
         manuscript = context.project.manuscript
         prev_chapters = manuscript.get("chapters", [])
         for prev_ch in prev_chapters:
-            if prev_ch.get("number") == chapter_number - 1:
+            # Convert to int to handle JSON type coercion
+            if int(prev_ch.get("number", 0)) == int(chapter_number) - 1:
                 previous_summary = prev_ch.get("summary", "Previous chapter completed.")
                 break
 

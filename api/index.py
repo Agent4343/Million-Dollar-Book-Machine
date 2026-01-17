@@ -611,7 +611,8 @@ async def write_chapter(
             # Update or add chapter
             chapter_exists = False
             for i, ch in enumerate(project.manuscript["chapters"]):
-                if ch.get("number") == chapter_number:
+                # Convert to int to handle JSON type coercion
+                if int(ch.get("number", 0)) == int(chapter_number):
                     project.manuscript["chapters"][i] = result
                     chapter_exists = True
                     break
@@ -619,8 +620,8 @@ async def write_chapter(
             if not chapter_exists:
                 project.manuscript["chapters"].append(result)
 
-            # Sort chapters by number
-            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+            # Sort chapters by number (convert to int for proper ordering)
+            project.manuscript["chapters"].sort(key=lambda x: int(x.get("number", 0)))
 
         return {
             "success": True,
@@ -719,7 +720,8 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         if elapsed > (timeout - 2):
             break
 
-        chapter_num = ch.get("number")
+        # Convert to int to handle JSON type coercion
+        chapter_num = int(ch.get("number", 0))
         try:
             result = await execute_chapter_writer(context, chapter_num, quick_mode=request.quick_mode)
 
@@ -730,7 +732,7 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
 
                 chapter_exists = False
                 for idx, existing_ch in enumerate(project.manuscript["chapters"]):
-                    if existing_ch.get("number") == chapter_num:
+                    if int(existing_ch.get("number", 0)) == chapter_num:
                         project.manuscript["chapters"][idx] = result
                         chapter_exists = True
                         break
@@ -738,7 +740,7 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
                 if not chapter_exists:
                     project.manuscript["chapters"].append(result)
 
-                project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+                project.manuscript["chapters"].sort(key=lambda x: int(x.get("number", 0)))
                 chapters_written.append(chapter_num)
             else:
                 chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
@@ -794,7 +796,8 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
 
     chapters = project.manuscript.get("chapters", [])
     for ch in chapters:
-        if ch.get("number") == chapter_number:
+        # Convert to int to handle JSON type coercion
+        if int(ch.get("number", 0)) == int(chapter_number):
             return ch
 
     raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
