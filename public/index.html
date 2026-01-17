@@ -1653,12 +1653,14 @@
             const content = document.getElementById('storyBibleContent');
             const toggle = document.getElementById('storyBibleToggle');
 
-            if (storyBibleExpanded) {
-                content.classList.remove('hidden');
-                toggle.textContent = '▲';
-            } else {
-                content.classList.add('hidden');
-                toggle.textContent = '▼';
+            if (content && toggle) {
+                if (storyBibleExpanded) {
+                    content.classList.remove('hidden');
+                    toggle.textContent = '▲';
+                } else {
+                    content.classList.add('hidden');
+                    toggle.textContent = '▼';
+                }
             }
         }
 
@@ -1674,26 +1676,27 @@
 
                 const statusEl = document.getElementById('storyBibleStatus');
 
-                if (data.exists) {
+                if (data.exists && statusEl) {
                     statusEl.textContent = 'Configured';
                     statusEl.className = 'bible-status exists';
 
-                    // Populate form fields
+                    // Populate form fields (with null checks)
                     const bible = data.story_bible;
-                    document.getElementById('bibleSetting').value = bible.physical_rules?.geography || '';
-                    document.getElementById('bibleTimePeriod').value = bible.world_bible?.relevant_history?.split(' ')[0] || '';
-                    document.getElementById('bibleTechnology').value = bible.physical_rules?.technology || '';
-                    document.getElementById('bibleCulture').value = bible.world_bible?.culture || '';
-                    document.getElementById('bibleHistory').value = bible.world_bible?.relevant_history || '';
-                    document.getElementById('bibleNorms').value = (bible.social_rules?.norms || []).join(', ');
-                    document.getElementById('bibleTaboos').value = (bible.social_rules?.taboos || []).join(', ');
-                    document.getElementById('bibleConstraints').value = (bible.constraint_list || []).join(', ');
+                    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+                    setVal('bibleSetting', bible.physical_rules?.geography || '');
+                    setVal('bibleTimePeriod', bible.world_bible?.relevant_history?.split(' ')[0] || '');
+                    setVal('bibleTechnology', bible.physical_rules?.technology || '');
+                    setVal('bibleCulture', bible.world_bible?.culture || '');
+                    setVal('bibleHistory', bible.world_bible?.relevant_history || '');
+                    setVal('bibleNorms', (bible.social_rules?.norms || []).join(', '));
+                    setVal('bibleTaboos', (bible.social_rules?.taboos || []).join(', '));
+                    setVal('bibleConstraints', (bible.constraint_list || []).join(', '));
 
                     // Format terminology
                     const terms = bible.world_bible?.terminology || {};
                     const termStr = Object.entries(terms).map(([k,v]) => `${k}:${v}`).join(', ');
-                    document.getElementById('bibleTerminology').value = termStr;
-                } else {
+                    setVal('bibleTerminology', termStr);
+                } else if (statusEl) {
                     statusEl.textContent = 'Not Set';
                     statusEl.className = 'bible-status missing';
                 }
@@ -1709,10 +1712,13 @@
             }
 
             const statusEl = document.getElementById('storyBibleSaveStatus');
-            statusEl.textContent = 'Saving...';
+            if (statusEl) statusEl.textContent = 'Saving...';
+
+            // Helper to get value with null check
+            const getVal = (id, def = '') => { const el = document.getElementById(id); return el ? el.value : def; };
 
             // Parse terminology
-            const termStr = document.getElementById('bibleTerminology').value;
+            const termStr = getVal('bibleTerminology');
             const terminology = {};
             if (termStr) {
                 termStr.split(',').forEach(pair => {
@@ -1723,14 +1729,14 @@
 
             // Build the story bible object
             const storyBible = {
-                setting: document.getElementById('bibleSetting').value || 'Contemporary setting',
-                time_period: document.getElementById('bibleTimePeriod').value || 'Present day',
-                technology_level: document.getElementById('bibleTechnology').value || 'Modern technology',
-                culture: document.getElementById('bibleCulture').value || '',
-                key_history: document.getElementById('bibleHistory').value || '',
-                social_norms: document.getElementById('bibleNorms').value.split(',').map(s => s.trim()).filter(s => s),
-                taboos: document.getElementById('bibleTaboos').value.split(',').map(s => s.trim()).filter(s => s),
-                constraints: document.getElementById('bibleConstraints').value.split(',').map(s => s.trim()).filter(s => s),
+                setting: getVal('bibleSetting') || 'Contemporary setting',
+                time_period: getVal('bibleTimePeriod') || 'Present day',
+                technology_level: getVal('bibleTechnology') || 'Modern technology',
+                culture: getVal('bibleCulture') || '',
+                key_history: getVal('bibleHistory') || '',
+                social_norms: getVal('bibleNorms').split(',').map(s => s.trim()).filter(s => s),
+                taboos: getVal('bibleTaboos').split(',').map(s => s.trim()).filter(s => s),
+                constraints: getVal('bibleConstraints').split(',').map(s => s.trim()).filter(s => s),
                 terminology: terminology
             };
 
@@ -1747,18 +1753,23 @@
                     throw new Error(err.detail || 'Save failed');
                 }
 
-                statusEl.textContent = 'Saved!';
-                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+                if (statusEl) {
+                    statusEl.textContent = 'Saved!';
+                    setTimeout(() => { statusEl.textContent = ''; }, 2000);
+                }
 
                 // Update status
-                document.getElementById('storyBibleStatus').textContent = 'Configured';
-                document.getElementById('storyBibleStatus').className = 'bible-status exists';
+                const bibleStatus = document.getElementById('storyBibleStatus');
+                if (bibleStatus) {
+                    bibleStatus.textContent = 'Configured';
+                    bibleStatus.className = 'bible-status exists';
+                }
 
                 // Reload to refresh the bible
                 await loadStoryBible();
             } catch (error) {
                 console.error('Save story bible error:', error);
-                statusEl.textContent = 'Error: ' + error.message;
+                if (statusEl) statusEl.textContent = 'Error: ' + error.message;
             }
         }
 
@@ -1769,7 +1780,7 @@
             }
 
             const statusEl = document.getElementById('storyBibleSaveStatus');
-            statusEl.textContent = 'Generating with AI...';
+            if (statusEl) statusEl.textContent = 'Generating with AI...';
 
             try {
                 const res = await fetch(`/api/projects/${currentProject}/story-bible/generate`, {
@@ -1782,14 +1793,16 @@
                     throw new Error(err.detail || 'Generation failed');
                 }
 
-                statusEl.textContent = 'Generated!';
-                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+                if (statusEl) {
+                    statusEl.textContent = 'Generated!';
+                    setTimeout(() => { statusEl.textContent = ''; }, 2000);
+                }
 
                 // Reload to show new values
                 await loadStoryBible();
             } catch (error) {
                 console.error('Generate story bible error:', error);
-                statusEl.textContent = 'Error: ' + error.message;
+                if (statusEl) statusEl.textContent = 'Error: ' + error.message;
                 alert('Failed to generate: ' + error.message);
             }
         }
