@@ -844,6 +844,260 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
 
 
 # =============================================================================
+# Story Bible Endpoints
+# =============================================================================
+
+class StoryBibleUpdate(BaseModel):
+    """Request model for updating the story bible."""
+    physical_rules: Optional[Dict[str, Any]] = None
+    social_rules: Optional[Dict[str, Any]] = None
+    power_rules: Optional[Dict[str, Any]] = None
+    world_bible: Optional[Dict[str, Any]] = None
+    constraint_list: Optional[List[str]] = None
+
+
+class QuickStoryBibleSetup(BaseModel):
+    """Simplified story bible setup for quick configuration."""
+    setting: str = "Contemporary urban setting"
+    time_period: str = "Present day"
+    technology_level: str = "Modern technology"
+    social_norms: List[str] = []
+    taboos: List[str] = []
+    key_history: str = ""
+    culture: str = ""
+    terminology: Dict[str, str] = {}
+    constraints: List[str] = []
+
+
+@app.get("/api/projects/{project_id}/story-bible")
+async def get_story_bible(project_id: str, auth: bool = Depends(require_auth)):
+    """Get the story bible / world rules for a project."""
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find world_rules in the agent outputs
+    world_rules = None
+    for layer in project.layers.values():
+        if "world_rules" in layer.agents:
+            agent_state = layer.agents["world_rules"]
+            if agent_state.current_output:
+                world_rules = agent_state.current_output.content
+                break
+
+    if not world_rules:
+        # Return empty template for easy setup
+        return {
+            "exists": False,
+            "story_bible": {
+                "physical_rules": {
+                    "possibilities": [],
+                    "impossibilities": [],
+                    "technology": "",
+                    "geography": ""
+                },
+                "social_rules": {
+                    "power_structures": "",
+                    "norms": [],
+                    "taboos": [],
+                    "economics": ""
+                },
+                "power_rules": {
+                    "who_has_power": "",
+                    "how_gained": "",
+                    "how_lost": "",
+                    "limitations": []
+                },
+                "world_bible": {
+                    "relevant_history": "",
+                    "culture": "",
+                    "terminology": {}
+                },
+                "constraint_list": []
+            },
+            "message": "Story bible not yet created. Use PUT to set up or POST /generate to auto-generate."
+        }
+
+    return {
+        "exists": True,
+        "story_bible": world_rules
+    }
+
+
+@app.put("/api/projects/{project_id}/story-bible")
+async def update_story_bible(
+    project_id: str,
+    update: StoryBibleUpdate,
+    auth: bool = Depends(require_auth)
+):
+    """Update the story bible / world rules for a project."""
+    from models.state import AgentOutput, AgentStatus
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find or create world_rules agent state
+    world_rules_layer = None
+    for layer_id, layer in project.layers.items():
+        if "world_rules" in layer.agents:
+            world_rules_layer = layer
+            break
+
+    if not world_rules_layer:
+        raise HTTPException(
+            status_code=400,
+            detail="World rules layer not found. Run pipeline through layer 5 first."
+        )
+
+    # Get existing or create new
+    agent_state = world_rules_layer.agents["world_rules"]
+    existing = agent_state.current_output.content if agent_state.current_output else {}
+
+    # Merge updates
+    updated_rules = {
+        "physical_rules": update.physical_rules or existing.get("physical_rules", {}),
+        "social_rules": update.social_rules or existing.get("social_rules", {}),
+        "power_rules": update.power_rules or existing.get("power_rules", {}),
+        "world_bible": update.world_bible or existing.get("world_bible", {}),
+        "constraint_list": update.constraint_list if update.constraint_list is not None else existing.get("constraint_list", [])
+    }
+
+    # Update the agent state
+    agent_state.current_output = AgentOutput(content=updated_rules)
+    agent_state.status = AgentStatus.COMPLETED
+
+    return {
+        "success": True,
+        "story_bible": updated_rules,
+        "message": "Story bible updated successfully"
+    }
+
+
+@app.post("/api/projects/{project_id}/story-bible/quick-setup")
+async def quick_setup_story_bible(
+    project_id: str,
+    setup: QuickStoryBibleSetup,
+    auth: bool = Depends(require_auth)
+):
+    """Quick setup for story bible with simplified inputs."""
+    from models.state import AgentOutput, AgentStatus
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Find world_rules layer
+    world_rules_layer = None
+    for layer_id, layer in project.layers.items():
+        if "world_rules" in layer.agents:
+            world_rules_layer = layer
+            break
+
+    if not world_rules_layer:
+        raise HTTPException(
+            status_code=400,
+            detail="World rules layer not found. Initialize project first."
+        )
+
+    # Build story bible from quick setup
+    story_bible = {
+        "physical_rules": {
+            "possibilities": ["Actions consistent with " + setup.time_period],
+            "impossibilities": [],
+            "technology": setup.technology_level,
+            "geography": setup.setting
+        },
+        "social_rules": {
+            "power_structures": "Standard societal hierarchies",
+            "norms": setup.social_norms if setup.social_norms else ["Typical social expectations"],
+            "taboos": setup.taboos if setup.taboos else [],
+            "economics": "Market economy" if "modern" in setup.time_period.lower() else "Period-appropriate economy"
+        },
+        "power_rules": {
+            "who_has_power": "Those with wealth, status, or institutional backing",
+            "how_gained": "Through achievement, inheritance, or relationships",
+            "how_lost": "Through scandal, failure, or betrayal",
+            "limitations": ["Social consequences", "Legal boundaries"]
+        },
+        "world_bible": {
+            "relevant_history": setup.key_history or f"Standard {setup.time_period} historical context",
+            "culture": setup.culture or f"Culture typical of {setup.setting}",
+            "terminology": setup.terminology
+        },
+        "constraint_list": setup.constraints if setup.constraints else [
+            "Characters must act within their established abilities",
+            "Consequences follow logically from actions"
+        ]
+    }
+
+    # Update the agent state
+    agent_state = world_rules_layer.agents["world_rules"]
+    agent_state.current_output = AgentOutput(content=story_bible)
+    agent_state.status = AgentStatus.COMPLETED
+
+    return {
+        "success": True,
+        "story_bible": story_bible,
+        "message": "Story bible created from quick setup"
+    }
+
+
+@app.post("/api/projects/{project_id}/story-bible/generate")
+async def generate_story_bible(
+    project_id: str,
+    auth: bool = Depends(require_auth)
+):
+    """Auto-generate story bible using LLM based on project concept."""
+    from core.orchestrator import ExecutionContext
+    from agents.story_system import execute_world_rules
+    from models.state import AgentOutput, AgentStatus
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Gather inputs from previous agents
+    inputs = {}
+    for layer in project.layers.values():
+        for agent_id, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[agent_id] = agent_state.current_output.content
+
+    # Check we have minimum required inputs
+    if not inputs.get("concept_definition") and not inputs.get("story_question"):
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least concept_definition or story_question to generate story bible. Run strategic agents first."
+        )
+
+    context = ExecutionContext(
+        project=project,
+        inputs=inputs,
+        llm_client=get_llm_client()
+    )
+
+    try:
+        result = await execute_world_rules(context)
+
+        # Find and update world_rules agent
+        for layer in project.layers.values():
+            if "world_rules" in layer.agents:
+                agent_state = layer.agents["world_rules"]
+                agent_state.current_output = AgentOutput(content=result)
+                agent_state.status = AgentStatus.COMPLETED
+                break
+
+        return {
+            "success": True,
+            "story_bible": result,
+            "message": "Story bible generated successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate story bible: {str(e)}")
+
+
+# =============================================================================
 # Export Endpoints
 # =============================================================================
 

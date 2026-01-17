@@ -237,24 +237,82 @@ def _format_voice_spec(voice_spec: Dict[str, Any]) -> str:
 
 
 def _format_world_rules(world_rules: Dict[str, Any]) -> str:
-    """Format world rules for context."""
+    """Format complete world rules and story bible for chapter context."""
     if not world_rules:
         return "Contemporary realistic setting."
 
-    physical = world_rules.get("physical_rules", {})
-    social = world_rules.get("social_rules", {})
-
     result = ""
-    if physical.get("technology"):
-        result += f"**Technology**: {physical.get('technology')}\n"
-    if physical.get("geography"):
-        result += f"**Setting**: {physical.get('geography')}\n"
-    if social.get("norms"):
-        norms = social.get("norms", [])
-        if isinstance(norms, list):
-            result += f"**Social Norms**: {', '.join(norms[:3])}\n"
 
-    return result or "Contemporary realistic setting."
+    # Physical Rules
+    physical = world_rules.get("physical_rules", {})
+    if physical:
+        result += "**PHYSICAL WORLD**\n"
+        if physical.get("technology"):
+            result += f"- Technology: {physical.get('technology')}\n"
+        if physical.get("geography"):
+            result += f"- Setting/Geography: {physical.get('geography')}\n"
+        possibilities = physical.get("possibilities", [])
+        if possibilities and isinstance(possibilities, list):
+            result += f"- What's Possible: {', '.join(possibilities[:3])}\n"
+        impossibilities = physical.get("impossibilities", [])
+        if impossibilities and isinstance(impossibilities, list):
+            result += f"- What's Impossible: {', '.join(impossibilities[:3])}\n"
+        result += "\n"
+
+    # Social Rules
+    social = world_rules.get("social_rules", {})
+    if social:
+        result += "**SOCIAL WORLD**\n"
+        if social.get("power_structures"):
+            result += f"- Power Structures: {social.get('power_structures')}\n"
+        norms = social.get("norms", [])
+        if norms and isinstance(norms, list):
+            result += f"- Social Norms: {', '.join(norms[:4])}\n"
+        taboos = social.get("taboos", [])
+        if taboos and isinstance(taboos, list):
+            result += f"- Taboos: {', '.join(taboos[:3])}\n"
+        if social.get("economics"):
+            result += f"- Economics: {social.get('economics')}\n"
+        result += "\n"
+
+    # Power Rules
+    power = world_rules.get("power_rules", {})
+    if power:
+        result += "**POWER DYNAMICS**\n"
+        if power.get("who_has_power"):
+            result += f"- Who Has Power: {power.get('who_has_power')}\n"
+        if power.get("how_gained"):
+            result += f"- How Power is Gained: {power.get('how_gained')}\n"
+        if power.get("how_lost"):
+            result += f"- How Power is Lost: {power.get('how_lost')}\n"
+        limitations = power.get("limitations", [])
+        if limitations and isinstance(limitations, list):
+            result += f"- Limitations: {', '.join(limitations[:3])}\n"
+        result += "\n"
+
+    # Story Bible (World Bible)
+    world_bible = world_rules.get("world_bible", {})
+    if world_bible:
+        result += "**STORY BIBLE**\n"
+        if world_bible.get("relevant_history"):
+            result += f"- History: {world_bible.get('relevant_history')}\n"
+        if world_bible.get("culture"):
+            result += f"- Culture: {world_bible.get('culture')}\n"
+        terminology = world_bible.get("terminology", {})
+        if terminology and isinstance(terminology, dict):
+            terms = [f"{k}: {v}" for k, v in list(terminology.items())[:5]]
+            if terms:
+                result += f"- Key Terms: {'; '.join(terms)}\n"
+        result += "\n"
+
+    # Constraint List (Tension Creators)
+    constraints = world_rules.get("constraint_list", [])
+    if constraints and isinstance(constraints, list):
+        result += "**STORY CONSTRAINTS** (Create Tension)\n"
+        for constraint in constraints[:5]:
+            result += f"- {constraint}\n"
+
+    return result.strip() or "Contemporary realistic setting."
 
 
 # Export for registration
