@@ -4,6 +4,7 @@ Book Development API - Million Dollar Book Machine
 Multi-agent system for developing books from concept to publication.
 """
 
+import asyncio
 import hashlib
 import hmac
 import io
@@ -627,8 +628,27 @@ async def write_chapter(
             "success": True,
             "chapter": result
         }
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Chapter generation timed out. Try using quick_mode=true for faster generation."
+        )
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse LLM response: {str(e)}"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid input: {str(e)}"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_type = type(e).__name__
+        raise HTTPException(
+            status_code=500,
+            detail=f"{error_type}: {str(e)}"
+        )
 
 
 class BatchWriteRequest(BaseModel):
@@ -716,8 +736,8 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
     for i, ch in enumerate(chapters_to_write[:request.max_chapters]):
         elapsed = time.time() - start_time
 
-        # Stop if we're approaching timeout (leave 2 seconds buffer)
-        if elapsed > (timeout - 2):
+        # Stop if we're approaching timeout (leave 4 seconds buffer for response serialization)
+        if elapsed > (timeout - 4):
             break
 
         # Convert to int to handle JSON type coercion
@@ -745,8 +765,28 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
             else:
                 chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
 
+        except asyncio.TimeoutError:
+            chapters_failed.append({
+                "number": chapter_num,
+                "error": "Timeout - chapter took too long to generate",
+                "error_type": "timeout",
+                "retryable": True
+            })
+        except json.JSONDecodeError as e:
+            chapters_failed.append({
+                "number": chapter_num,
+                "error": f"Failed to parse LLM response: {str(e)}",
+                "error_type": "parse_error",
+                "retryable": True
+            })
         except Exception as e:
-            chapters_failed.append({"number": chapter_num, "error": str(e)})
+            error_type = type(e).__name__
+            chapters_failed.append({
+                "number": chapter_num,
+                "error": f"{error_type}: {str(e)}",
+                "error_type": error_type.lower(),
+                "retryable": "rate" in str(e).lower() or "timeout" in str(e).lower()
+            })
 
     # Calculate remaining chapters
     all_written = existing_chapters.union(set(chapters_written))

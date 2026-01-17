@@ -429,63 +429,110 @@ async def execute_pacing_design(context: ExecutionContext) -> Dict[str, Any]:
 
 async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]:
     """Execute chapter blueprint agent."""
+    import json as json_module
+
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
 
+    # Format inputs as readable JSON for the prompt
+    plot_structure = context.inputs.get("plot_structure", {})
+    pacing_design = context.inputs.get("pacing_design", {})
+    character_architecture = context.inputs.get("character_architecture", {})
+
     prompt = CHAPTER_BLUEPRINT_PROMPT.format(
-        plot_structure=context.inputs.get("plot_structure", {}),
-        pacing_design=context.inputs.get("pacing_design", {}),
-        character_architecture=context.inputs.get("character_architecture", {}),
+        plot_structure=json_module.dumps(plot_structure, indent=2) if plot_structure else "Standard three-act structure",
+        pacing_design=json_module.dumps(pacing_design, indent=2) if pacing_design else "Standard pacing",
+        character_architecture=json_module.dumps(character_architecture, indent=2) if character_architecture else "Protagonist-driven story",
         target_word_count=constraints.get("target_word_count", 80000)
     )
 
-    if llm:
-        response = await llm.generate(prompt, response_format="json")
-        return response
-    else:
-        # Generate placeholder chapter outline
-        chapters = []
-        for i in range(1, 26):  # 25 chapters
-            act = 1 if i <= 6 else (2 if i <= 18 else 3)
-            chapters.append({
-                "number": i,
-                "title": f"Chapter {i}",
-                "act": act,
-                "chapter_goal": f"[Goal for chapter {i}]",
-                "pov": "Protagonist",
-                "opening_hook": f"[Hook for chapter {i}]",
-                "closing_hook": f"[Closing hook for chapter {i}]",
-                "word_target": 3200,
-                "scenes": [
-                    {
-                        "scene_number": 1,
-                        "scene_question": f"[Scene question for Ch{i}-S1]",
-                        "characters": ["Protagonist"],
-                        "location": "[Location]",
-                        "conflict_type": "internal" if i % 2 == 0 else "external",
-                        "outcome": "[Outcome]",
-                        "word_target": 1600
-                    },
-                    {
-                        "scene_number": 2,
-                        "scene_question": f"[Scene question for Ch{i}-S2]",
-                        "characters": ["Protagonist", "Supporting"],
-                        "location": "[Location]",
-                        "conflict_type": "interpersonal",
-                        "outcome": "[Outcome]",
-                        "word_target": 1600
-                    }
-                ]
-            })
+    # Add book context to help LLM generate relevant chapters
+    concept = context.inputs.get("concept_definition", {})
+    if concept:
+        book_context = f"""
+## Book Context:
+- Title: {context.project.title}
+- Genre: {constraints.get('genre', 'Fiction')}
+- Premise: {concept.get('core_promise', {}).get('premise', 'N/A')}
+- Protagonist: {character_architecture.get('protagonist_profile', {}).get('name', 'The protagonist')}
 
-        return {
-            "chapter_outline": chapters,
-            "chapter_goals": {str(c["number"]): c["chapter_goal"] for c in chapters},
-            "scene_list": [f"Ch{c['number']}-S{s['scene_number']}: {s['scene_question']}" for c in chapters for s in c["scenes"]],
-            "scene_questions": {f"Ch{c['number']}-S{s['scene_number']}": s["scene_question"] for c in chapters for s in c["scenes"]},
-            "hooks": {"chapter_hooks": [c["opening_hook"] for c in chapters], "scene_hooks": []},
-            "pov_assignments": {str(c["number"]): c["pov"] for c in chapters}
-        }
+"""
+        prompt = book_context + prompt
+
+    if llm:
+        try:
+            response = await llm.generate(prompt, response_format="json", max_tokens=8000)
+
+            # Validate response has required structure
+            if isinstance(response, dict) and "chapter_outline" in response:
+                # Ensure chapter numbers are integers
+                for ch in response.get("chapter_outline", []):
+                    if "number" in ch:
+                        ch["number"] = int(ch["number"])
+                return response
+            else:
+                # If response is malformed, fall through to placeholder
+                pass
+        except Exception:
+            # Fall through to placeholder on error
+            pass
+
+    # Generate placeholder chapter outline using available context
+    protagonist_name = character_architecture.get("protagonist_profile", {}).get("name", "Protagonist")
+    plot_beats = plot_structure.get("key_events", []) if isinstance(plot_structure, dict) else []
+
+    chapters = []
+    num_chapters = max(25, len(plot_beats) * 2) if plot_beats else 25
+
+    for i in range(1, num_chapters + 1):
+        act = 1 if i <= num_chapters // 4 else (2 if i <= num_chapters * 3 // 4 else 3)
+
+        # Try to use plot beat info for chapter goals if available
+        beat_idx = (i - 1) // 2
+        if beat_idx < len(plot_beats) and isinstance(plot_beats[beat_idx], dict):
+            chapter_goal = plot_beats[beat_idx].get("description", f"Advance act {act} storyline")
+        else:
+            chapter_goal = f"Advance act {act} storyline"
+
+        chapters.append({
+            "number": i,
+            "title": f"Chapter {i}",
+            "act": act,
+            "chapter_goal": chapter_goal,
+            "pov": protagonist_name,
+            "opening_hook": f"Continue from previous chapter's momentum",
+            "closing_hook": f"Create anticipation for next chapter",
+            "word_target": 3200,
+            "scenes": [
+                {
+                    "scene_number": 1,
+                    "scene_question": f"What challenge does {protagonist_name} face?",
+                    "characters": [protagonist_name],
+                    "location": "Primary setting",
+                    "conflict_type": "internal" if i % 2 == 0 else "external",
+                    "outcome": "Partial progress with new complications",
+                    "word_target": 1600
+                },
+                {
+                    "scene_number": 2,
+                    "scene_question": f"How does {protagonist_name} respond to the challenge?",
+                    "characters": [protagonist_name, "Supporting character"],
+                    "location": "Secondary setting",
+                    "conflict_type": "interpersonal",
+                    "outcome": "Character development through conflict",
+                    "word_target": 1600
+                }
+            ]
+        })
+
+    return {
+        "chapter_outline": chapters,
+        "chapter_goals": {str(c["number"]): c["chapter_goal"] for c in chapters},
+        "scene_list": [f"Ch{c['number']}-S{s['scene_number']}: {s['scene_question']}" for c in chapters for s in c["scenes"]],
+        "scene_questions": {f"Ch{c['number']}-S{s['scene_number']}": s["scene_question"] for c in chapters for s in c["scenes"]},
+        "hooks": {"chapter_hooks": [c["opening_hook"] for c in chapters], "scene_hooks": []},
+        "pov_assignments": {str(c["number"]): c["pov"] for c in chapters}
+    }
 
 
 async def execute_voice_specification(context: ExecutionContext) -> Dict[str, Any]:

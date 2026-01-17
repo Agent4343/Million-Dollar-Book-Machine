@@ -176,21 +176,17 @@ async def execute_chapter_writer(
             temperature=0.8   # Slightly more creative for prose
         )
 
-        # Skip summary in quick mode to save time
-        if quick_mode:
-            summary = f"Preview of Chapter {chapter_number}"
-        else:
-            # Generate a summary for context in next chapter
-            summary_prompt = f"""Summarize this chapter in 2-3 sentences, focusing on:
+        # Generate summary for context in next chapter (shorter in quick mode)
+        summary_prompt = f"""Summarize this chapter in {'1-2' if quick_mode else '2-3'} sentences, focusing on:
 1. Key plot developments
 2. Character emotional state at end
 3. Any cliffhangers or hooks
 
 Chapter text:
-{chapter_text[:3000]}...
+{chapter_text[:2000 if quick_mode else 3000]}...
 
 Summary:"""
-            summary = await llm.generate(summary_prompt, max_tokens=200)
+        summary = await llm.generate(summary_prompt, max_tokens=100 if quick_mode else 200)
 
         word_count = len(chapter_text.split())
 
