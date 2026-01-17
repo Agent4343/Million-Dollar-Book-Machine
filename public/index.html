@@ -402,6 +402,126 @@
             gap: 0.5rem;
             flex-wrap: wrap;
         }
+
+        /* Quick Start Templates */
+        .templates-section {
+            margin-bottom: 1.5rem;
+        }
+        .templates-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+        .template-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .template-card:hover {
+            background: rgba(0,212,255,0.1);
+            border-color: #00d4ff;
+            transform: translateY(-2px);
+        }
+        .template-card.selected {
+            background: rgba(0,212,255,0.2);
+            border-color: #00d4ff;
+        }
+        .template-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .template-name { font-weight: 600; margin-bottom: 0.25rem; }
+        .template-desc { font-size: 0.75rem; color: #888; }
+
+        /* Getting Started Guide */
+        .getting-started {
+            background: linear-gradient(135deg, rgba(0,212,255,0.1) 0%, rgba(123,44,191,0.1) 100%);
+            border: 1px solid rgba(0,212,255,0.3);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .getting-started h2 {
+            color: #00d4ff;
+            margin-bottom: 1rem;
+        }
+        .steps-row {
+            display: flex;
+            gap: 1rem;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+        .step-item {
+            flex: 1;
+            min-width: 150px;
+            text-align: center;
+            padding: 1rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        .step-number {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 0.5rem;
+            font-weight: 700;
+        }
+        .step-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .step-desc { font-size: 0.8rem; color: #888; }
+
+        /* Quick Action Button */
+        .btn-quick-start {
+            background: linear-gradient(90deg, #ff6b6b, #ee5a24);
+            color: #fff;
+            width: 100%;
+            padding: 1rem;
+            font-size: 1.1rem;
+            margin-top: 1rem;
+        }
+        .btn-quick-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(238,90,36,0.3);
+        }
+
+        /* Tip Box */
+        .tip-box {
+            background: rgba(243,156,18,0.1);
+            border: 1px solid rgba(243,156,18,0.3);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+        }
+        .tip-box strong { color: #f39c12; }
+
+        /* Current Stage Indicator */
+        .stage-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: rgba(46,204,113,0.1);
+            border: 1px solid rgba(46,204,113,0.3);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        .stage-indicator.foundation { border-color: rgba(52,152,219,0.3); background: rgba(52,152,219,0.1); }
+        .stage-indicator.structure { border-color: rgba(155,89,182,0.3); background: rgba(155,89,182,0.1); }
+        .stage-indicator.writing { border-color: rgba(230,126,34,0.3); background: rgba(230,126,34,0.1); }
+        .stage-indicator.complete { border-color: rgba(46,204,113,0.3); background: rgba(46,204,113,0.1); }
+        .stage-dot { width: 10px; height: 10px; border-radius: 50%; animation: pulse 2s infinite; }
+        .stage-indicator.foundation .stage-dot { background: #3498db; }
+        .stage-indicator.structure .stage-dot { background: #9b59b6; }
+        .stage-indicator.writing .stage-dot { background: #e67e22; }
+        .stage-indicator.complete .stage-dot { background: #2ecc71; animation: none; }
+        .stage-text { font-weight: 500; }
+        .stage-help { font-size: 0.8rem; color: #888; margin-left: auto; }
     </style>
 </head>
 <body>
@@ -459,8 +579,73 @@
 
             <!-- New Project Tab -->
             <div id="newProjectTab" class="hidden">
+                <!-- Getting Started Guide -->
+                <div class="getting-started" id="gettingStartedGuide">
+                    <h2>How It Works</h2>
+                    <div class="steps-row">
+                        <div class="step-item">
+                            <div class="step-number">1</div>
+                            <div class="step-title">Create Project</div>
+                            <div class="step-desc">Enter your book idea and genre</div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">2</div>
+                            <div class="step-title">Run Pipeline</div>
+                            <div class="step-desc">AI develops your book structure</div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">3</div>
+                            <div class="step-title">Write Chapters</div>
+                            <div class="step-desc">AI writes each chapter</div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">4</div>
+                            <div class="step-title">Export</div>
+                            <div class="step-desc">Download as Word or EPUB</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <h2>Create New Book Project</h2>
+
+                    <!-- Quick Start Templates -->
+                    <div class="templates-section">
+                        <label>Quick Start - Choose a Template (optional)</label>
+                        <div class="templates-grid" id="templatesGrid">
+                            <div class="template-card" onclick="selectTemplate('romance')">
+                                <div class="template-icon">💕</div>
+                                <div class="template-name">Romance</div>
+                                <div class="template-desc">Love stories & relationships</div>
+                            </div>
+                            <div class="template-card" onclick="selectTemplate('thriller')">
+                                <div class="template-icon">🔍</div>
+                                <div class="template-name">Thriller</div>
+                                <div class="template-desc">Suspense & page-turners</div>
+                            </div>
+                            <div class="template-card" onclick="selectTemplate('fantasy')">
+                                <div class="template-icon">🐉</div>
+                                <div class="template-name">Fantasy</div>
+                                <div class="template-desc">Magic & epic worlds</div>
+                            </div>
+                            <div class="template-card" onclick="selectTemplate('mystery')">
+                                <div class="template-icon">🕵️</div>
+                                <div class="template-name">Mystery</div>
+                                <div class="template-desc">Whodunits & puzzles</div>
+                            </div>
+                            <div class="template-card" onclick="selectTemplate('sci_fi')">
+                                <div class="template-icon">🚀</div>
+                                <div class="template-name">Sci-Fi</div>
+                                <div class="template-desc">Future & technology</div>
+                            </div>
+                            <div class="template-card" onclick="selectTemplate('self_help')">
+                                <div class="template-icon">📈</div>
+                                <div class="template-name">Self-Help</div>
+                                <div class="template-desc">Personal growth</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <form id="newProjectForm">
                         <div class="grid-2">
                             <div>
@@ -484,8 +669,8 @@
                                 </select>
                             </div>
                         </div>
-                        <label>Book Description / Vision</label>
-                        <textarea id="projectDescription" rows="4" placeholder="Describe your book idea..."></textarea>
+                        <label>Book Description / Vision * <span style="color:#888;font-weight:normal;">(The more detail, the better!)</span></label>
+                        <textarea id="projectDescription" rows="4" placeholder="Describe your book idea... What's the main conflict? Who is the protagonist? What makes this story unique?"></textarea>
                         <div class="grid-2">
                             <div>
                                 <label>Target Word Count</label>
@@ -500,7 +685,12 @@
                         <input type="text" id="projectComps" placeholder="e.g., The Alchemist, Atomic Habits">
                         <label>Themes (comma separated)</label>
                         <input type="text" id="projectThemes" placeholder="e.g., redemption, identity, love">
-                        <button type="submit" class="btn btn-primary">Create Project</button>
+
+                        <div class="tip-box">
+                            <strong>Tip:</strong> Include specific details about your protagonist, the central conflict, and what makes your story unique. The AI uses this to build a compelling narrative.
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" style="width:100%;margin-top:1rem;">Create Project & Start Building</button>
                     </form>
                 </div>
             </div>
@@ -508,9 +698,20 @@
             <!-- Pipeline Tab -->
             <div id="pipelineTab" class="hidden">
                 <div id="noProjectSelected" class="card">
-                    <p style="text-align:center;color:#888;">Select a project from the Projects tab to view its pipeline</p>
+                    <h2 style="text-align:center;color:#00d4ff;margin-bottom:1rem;">No Project Selected</h2>
+                    <p style="text-align:center;color:#888;margin-bottom:1rem;">Select a project from the Projects tab or create a new one to get started.</p>
+                    <div style="text-align:center;">
+                        <button class="btn btn-primary" onclick="showTab('newProject')">Create New Project</button>
+                    </div>
                 </div>
                 <div id="pipelineView" class="hidden">
+                    <!-- Stage Indicator -->
+                    <div class="stage-indicator" id="stageIndicator">
+                        <span class="stage-dot"></span>
+                        <span class="stage-text" id="stageText">Getting Started</span>
+                        <span class="stage-help" id="stageHelp">Click "Run Full Pipeline" to begin</span>
+                    </div>
+
                     <!-- Progress Bar -->
                     <div class="progress-container">
                         <div class="progress-header">
@@ -565,65 +766,6 @@
                                     <button class="btn btn-secondary btn-small" onclick="exportManuscript()">Manuscript (MD)</button>
                                 </div>
                                 <p id="exportStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></p>
-                            </div>
-
-                            <!-- Story Bible Section -->
-                            <div class="story-bible-section" id="storyBibleSection">
-                                <h3 onclick="toggleStoryBible()">
-                                    <span>Story Bible</span>
-                                    <span style="display:flex;align-items:center;gap:0.5rem;">
-                                        <span id="storyBibleStatus" class="bible-status missing">Not Set</span>
-                                        <span id="storyBibleToggle">▼</span>
-                                    </span>
-                                </h3>
-                                <div id="storyBibleContent" class="story-bible-content hidden">
-                                    <p style="font-size:0.85rem;color:#888;margin-bottom:0.75rem;">Define your book's world rules, culture, and constraints</p>
-                                    <div class="story-bible-grid">
-                                        <div class="bible-field">
-                                            <label>Setting / Geography</label>
-                                            <input type="text" id="bibleSetting" placeholder="e.g., 1920s Chicago, Modern NYC">
-                                        </div>
-                                        <div class="bible-field">
-                                            <label>Time Period</label>
-                                            <input type="text" id="bibleTimePeriod" placeholder="e.g., Present day, Victorian Era">
-                                        </div>
-                                        <div class="bible-field">
-                                            <label>Technology Level</label>
-                                            <input type="text" id="bibleTechnology" placeholder="e.g., Modern technology, No electricity">
-                                        </div>
-                                        <div class="bible-field">
-                                            <label>Culture</label>
-                                            <input type="text" id="bibleCulture" placeholder="e.g., Jazz age, Corporate America">
-                                        </div>
-                                    </div>
-                                    <div class="bible-field">
-                                        <label>Key History (relevant background)</label>
-                                        <textarea id="bibleHistory" placeholder="Historical context that affects the story..."></textarea>
-                                    </div>
-                                    <div class="story-bible-grid">
-                                        <div class="bible-field">
-                                            <label>Social Norms (comma separated)</label>
-                                            <input type="text" id="bibleNorms" placeholder="e.g., Respect for elders, Hard work valued">
-                                        </div>
-                                        <div class="bible-field">
-                                            <label>Taboos (comma separated)</label>
-                                            <input type="text" id="bibleTaboos" placeholder="e.g., Discussing money, Public displays">
-                                        </div>
-                                    </div>
-                                    <div class="bible-field">
-                                        <label>Story Constraints (things that create tension, comma separated)</label>
-                                        <input type="text" id="bibleConstraints" placeholder="e.g., Time is running out, Secret must be kept">
-                                    </div>
-                                    <div class="bible-field">
-                                        <label>Key Terms (format: term1:definition1, term2:definition2)</label>
-                                        <input type="text" id="bibleTerminology" placeholder="e.g., The Order:secret society, The Mark:magical tattoo">
-                                    </div>
-                                    <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                                        <button class="btn btn-primary btn-small" onclick="saveStoryBible()">Save Story Bible</button>
-                                        <button class="btn btn-secondary btn-small" onclick="generateStoryBible()">Auto-Generate</button>
-                                        <span id="storyBibleSaveStatus" style="font-size:0.8rem;color:#888;margin-left:0.5rem;"></span>
-                                    </div>
-                                </div>
                             </div>
 
                             <!-- Chapter Writer Section -->
@@ -766,6 +908,145 @@
         // Refresh API status periodically
         setInterval(checkApiStatus, 60000); // Check every minute
 
+        // =================================================================
+        // Quick Start Templates
+        // =================================================================
+
+        const templates = {
+            romance: {
+                genre: 'romance',
+                description: 'A compelling love story featuring two protagonists who must overcome obstacles to be together. Include emotional tension, memorable meet-cute, and satisfying romantic arc.',
+                themes: 'love, second chances, vulnerability, trust',
+                audience: 'Adults 18-45, romance readers',
+                wordCount: 75000,
+                comps: 'The Notebook, Pride and Prejudice'
+            },
+            thriller: {
+                genre: 'thriller',
+                description: 'A fast-paced suspense story with high stakes, unexpected twists, and a protagonist racing against time to prevent disaster or uncover a dangerous truth.',
+                themes: 'danger, deception, survival, justice',
+                audience: 'Adults 25-55, thriller fans',
+                wordCount: 85000,
+                comps: 'Gone Girl, The Girl on the Train'
+            },
+            fantasy: {
+                genre: 'fantasy',
+                description: 'An epic fantasy adventure set in a richly imagined world with magic, memorable characters, and a quest that will change the fate of kingdoms.',
+                themes: 'heroism, magic, destiny, good vs evil',
+                audience: 'Young Adults and Adults, fantasy readers',
+                wordCount: 100000,
+                comps: 'The Name of the Wind, The Way of Kings'
+            },
+            mystery: {
+                genre: 'mystery',
+                description: 'A clever whodunit featuring a compelling detective or amateur sleuth who must unravel clues, interview suspects, and solve a puzzling crime.',
+                themes: 'justice, secrets, truth, deception',
+                audience: 'Adults 30-65, mystery lovers',
+                wordCount: 70000,
+                comps: 'The Thursday Murder Club, Big Little Lies'
+            },
+            sci_fi: {
+                genre: 'sci_fi',
+                description: 'A thought-provoking science fiction story exploring the impact of technology, space exploration, or future society on humanity.',
+                themes: 'technology, humanity, exploration, consequences',
+                audience: 'Adults 18-50, sci-fi enthusiasts',
+                wordCount: 90000,
+                comps: 'Project Hail Mary, The Martian'
+            },
+            self_help: {
+                genre: 'self_help',
+                description: 'A transformative guide helping readers achieve personal growth, develop new habits, or overcome specific challenges with practical advice and inspiring stories.',
+                themes: 'growth, transformation, habits, success',
+                audience: 'Adults 25-55, personal development seekers',
+                wordCount: 50000,
+                comps: 'Atomic Habits, The 7 Habits of Highly Effective People'
+            }
+        };
+
+        let selectedTemplate = null;
+
+        function selectTemplate(templateKey) {
+            // Clear previous selection
+            document.querySelectorAll('.template-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+
+            // Select new template
+            const template = templates[templateKey];
+            if (template) {
+                selectedTemplate = templateKey;
+                event.target.closest('.template-card').classList.add('selected');
+
+                // Fill form with template values
+                document.getElementById('projectGenre').value = template.genre;
+                document.getElementById('projectDescription').value = template.description;
+                document.getElementById('projectThemes').value = template.themes;
+                document.getElementById('projectAudience').value = template.audience;
+                document.getElementById('projectWordCount').value = template.wordCount;
+                document.getElementById('projectComps').value = template.comps;
+            }
+        }
+
+        // =================================================================
+        // Stage Indicator
+        // =================================================================
+
+        function updateStageIndicator(projectData) {
+            const indicator = document.getElementById('stageIndicator');
+            const stageText = document.getElementById('stageText');
+            const stageHelp = document.getElementById('stageHelp');
+
+            if (!projectData) {
+                indicator.className = 'stage-indicator';
+                stageText.textContent = 'Getting Started';
+                stageHelp.textContent = 'Click "Run Full Pipeline" to begin';
+                return;
+            }
+
+            // Calculate progress
+            let agents = 0, completed = 0;
+            Object.values(projectData.layers).forEach(l => {
+                Object.values(l.agents).forEach(a => {
+                    agents++;
+                    if (a.status === 'passed') completed++;
+                });
+            });
+
+            const percent = agents > 0 ? Math.round((completed / agents) * 100) : 0;
+            const currentLayer = projectData.current_layer || 0;
+
+            // Check for written chapters
+            const chaptersWritten = Object.keys(writtenChapters || {}).length;
+            const totalChapters = chapterBlueprint?.chapter_outline?.length || 0;
+
+            if (percent === 100 && chaptersWritten >= totalChapters && totalChapters > 0) {
+                // All done!
+                indicator.className = 'stage-indicator complete';
+                stageText.textContent = 'Book Complete!';
+                stageHelp.textContent = 'Export your book as Word or EPUB';
+            } else if (percent === 100) {
+                // Pipeline done, writing chapters
+                indicator.className = 'stage-indicator writing';
+                stageText.textContent = `Writing Chapters (${chaptersWritten}/${totalChapters})`;
+                stageHelp.textContent = totalChapters > 0 ? 'Chapters are being written' : 'Click "Write All Chapters" to continue';
+            } else if (currentLayer <= 4) {
+                // Foundation layers (1-4)
+                indicator.className = 'stage-indicator foundation';
+                stageText.textContent = `Building Foundation (Layer ${currentLayer}/10)`;
+                stageHelp.textContent = 'Creating core concept, characters, and themes';
+            } else if (currentLayer <= 7) {
+                // Structure layers (5-7)
+                indicator.className = 'stage-indicator structure';
+                stageText.textContent = `Developing Structure (Layer ${currentLayer}/10)`;
+                stageHelp.textContent = 'Building plot, scenes, and story architecture';
+            } else {
+                // Final layers (8-10)
+                indicator.className = 'stage-indicator writing';
+                stageText.textContent = `Finalizing Blueprint (Layer ${currentLayer}/10)`;
+                stageHelp.textContent = 'Creating detailed chapter outlines';
+            }
+        }
+
         // Tabs
         function showTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -873,6 +1154,9 @@
                 `;
                 container.appendChild(div);
             });
+
+            // Update stage indicator
+            updateStageIndicator(projectData);
         }
 
         async function viewAgent(agentId) {
@@ -1218,9 +1502,6 @@
 
             // Update chapter writer section
             await updateChapterWriter();
-
-            // Load story bible
-            await loadStoryBible();
         };
 
         // =================================================================
@@ -1577,6 +1858,9 @@
                 const icon = isWritten ? '✓' : '○';
                 return `<span class="${className}" onclick="writeChapter(${ch.number})" title="${ch.title}">${icon} Ch ${ch.number}</span>`;
             }).join('');
+
+            // Update stage indicator to reflect chapter progress
+            updateStageIndicator(projectData);
         }
 
         async function writeChapter(chapterNumber) {
