@@ -81,7 +81,8 @@ async def execute_chapter_writer(
     # Find the specific chapter
     chapter_data = None
     for ch in chapter_outline:
-        if ch.get("number") == chapter_number:
+        # Convert both to int to handle JSON type coercion (string vs int)
+        if int(ch.get("number", 0)) == int(chapter_number):
             chapter_data = ch
             break
 
