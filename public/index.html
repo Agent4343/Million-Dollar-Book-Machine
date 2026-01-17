@@ -338,6 +338,53 @@
         .chapter-item.written { background: rgba(46,204,113,0.2); color: #2ecc71; }
         .chapter-item.writing { background: rgba(243,156,18,0.2); color: #f39c12; }
 
+        /* Story Bible Section */
+        .story-bible-section {
+            background: rgba(52,152,219,0.1);
+            border: 1px solid rgba(52,152,219,0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .story-bible-section h3 {
+            color: #3498db;
+            margin-bottom: 0.75rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .story-bible-section h3:hover { color: #5dade2; }
+        .story-bible-content { margin-top: 0.75rem; }
+        .story-bible-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+        @media (max-width: 768px) {
+            .story-bible-grid { grid-template-columns: 1fr; }
+        }
+        .bible-field { margin-bottom: 0.5rem; }
+        .bible-field label {
+            font-size: 0.8rem;
+            color: #3498db;
+            margin-bottom: 0.25rem;
+        }
+        .bible-field input, .bible-field textarea {
+            font-size: 0.85rem;
+            padding: 0.5rem;
+            margin-bottom: 0;
+        }
+        .bible-field textarea { min-height: 60px; resize: vertical; }
+        .bible-status {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+        }
+        .bible-status.exists { background: rgba(46,204,113,0.2); color: #2ecc71; }
+        .bible-status.missing { background: rgba(243,156,18,0.2); color: #f39c12; }
+
         /* Export Section */
         .export-section {
             background: rgba(155,89,182,0.1);
@@ -518,6 +565,65 @@
                                     <button class="btn btn-secondary btn-small" onclick="exportManuscript()">Manuscript (MD)</button>
                                 </div>
                                 <p id="exportStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></p>
+                            </div>
+
+                            <!-- Story Bible Section -->
+                            <div class="story-bible-section" id="storyBibleSection">
+                                <h3 onclick="toggleStoryBible()">
+                                    <span>Story Bible</span>
+                                    <span style="display:flex;align-items:center;gap:0.5rem;">
+                                        <span id="storyBibleStatus" class="bible-status missing">Not Set</span>
+                                        <span id="storyBibleToggle">▼</span>
+                                    </span>
+                                </h3>
+                                <div id="storyBibleContent" class="story-bible-content hidden">
+                                    <p style="font-size:0.85rem;color:#888;margin-bottom:0.75rem;">Define your book's world rules, culture, and constraints</p>
+                                    <div class="story-bible-grid">
+                                        <div class="bible-field">
+                                            <label>Setting / Geography</label>
+                                            <input type="text" id="bibleSetting" placeholder="e.g., 1920s Chicago, Modern NYC">
+                                        </div>
+                                        <div class="bible-field">
+                                            <label>Time Period</label>
+                                            <input type="text" id="bibleTimePeriod" placeholder="e.g., Present day, Victorian Era">
+                                        </div>
+                                        <div class="bible-field">
+                                            <label>Technology Level</label>
+                                            <input type="text" id="bibleTechnology" placeholder="e.g., Modern technology, No electricity">
+                                        </div>
+                                        <div class="bible-field">
+                                            <label>Culture</label>
+                                            <input type="text" id="bibleCulture" placeholder="e.g., Jazz age, Corporate America">
+                                        </div>
+                                    </div>
+                                    <div class="bible-field">
+                                        <label>Key History (relevant background)</label>
+                                        <textarea id="bibleHistory" placeholder="Historical context that affects the story..."></textarea>
+                                    </div>
+                                    <div class="story-bible-grid">
+                                        <div class="bible-field">
+                                            <label>Social Norms (comma separated)</label>
+                                            <input type="text" id="bibleNorms" placeholder="e.g., Respect for elders, Hard work valued">
+                                        </div>
+                                        <div class="bible-field">
+                                            <label>Taboos (comma separated)</label>
+                                            <input type="text" id="bibleTaboos" placeholder="e.g., Discussing money, Public displays">
+                                        </div>
+                                    </div>
+                                    <div class="bible-field">
+                                        <label>Story Constraints (things that create tension, comma separated)</label>
+                                        <input type="text" id="bibleConstraints" placeholder="e.g., Time is running out, Secret must be kept">
+                                    </div>
+                                    <div class="bible-field">
+                                        <label>Key Terms (format: term1:definition1, term2:definition2)</label>
+                                        <input type="text" id="bibleTerminology" placeholder="e.g., The Order:secret society, The Mark:magical tattoo">
+                                    </div>
+                                    <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+                                        <button class="btn btn-primary btn-small" onclick="saveStoryBible()">Save Story Bible</button>
+                                        <button class="btn btn-secondary btn-small" onclick="generateStoryBible()">Auto-Generate</button>
+                                        <span id="storyBibleSaveStatus" style="font-size:0.8rem;color:#888;margin-left:0.5rem;"></span>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Chapter Writer Section -->
@@ -1112,6 +1218,9 @@
 
             // Update chapter writer section
             await updateChapterWriter();
+
+            // Load story bible
+            await loadStoryBible();
         };
 
         // =================================================================
@@ -1248,6 +1357,159 @@
                 console.error('Export EPUB error:', error);
                 statusEl.textContent = 'Error: ' + error.message;
                 alert('Failed to export EPUB: ' + error.message);
+            }
+        }
+
+        // =================================================================
+        // Story Bible Functions
+        // =================================================================
+
+        let storyBibleExpanded = false;
+        let currentStoryBible = null;
+
+        function toggleStoryBible() {
+            storyBibleExpanded = !storyBibleExpanded;
+            const content = document.getElementById('storyBibleContent');
+            const toggle = document.getElementById('storyBibleToggle');
+
+            if (storyBibleExpanded) {
+                content.classList.remove('hidden');
+                toggle.textContent = '▲';
+            } else {
+                content.classList.add('hidden');
+                toggle.textContent = '▼';
+            }
+        }
+
+        async function loadStoryBible() {
+            if (!currentProject) return;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible`, {credentials: 'include'});
+                if (!res.ok) return;
+
+                const data = await res.json();
+                currentStoryBible = data.story_bible;
+
+                const statusEl = document.getElementById('storyBibleStatus');
+
+                if (data.exists) {
+                    statusEl.textContent = 'Configured';
+                    statusEl.className = 'bible-status exists';
+
+                    // Populate form fields
+                    const bible = data.story_bible;
+                    document.getElementById('bibleSetting').value = bible.physical_rules?.geography || '';
+                    document.getElementById('bibleTimePeriod').value = bible.world_bible?.relevant_history?.split(' ')[0] || '';
+                    document.getElementById('bibleTechnology').value = bible.physical_rules?.technology || '';
+                    document.getElementById('bibleCulture').value = bible.world_bible?.culture || '';
+                    document.getElementById('bibleHistory').value = bible.world_bible?.relevant_history || '';
+                    document.getElementById('bibleNorms').value = (bible.social_rules?.norms || []).join(', ');
+                    document.getElementById('bibleTaboos').value = (bible.social_rules?.taboos || []).join(', ');
+                    document.getElementById('bibleConstraints').value = (bible.constraint_list || []).join(', ');
+
+                    // Format terminology
+                    const terms = bible.world_bible?.terminology || {};
+                    const termStr = Object.entries(terms).map(([k,v]) => `${k}:${v}`).join(', ');
+                    document.getElementById('bibleTerminology').value = termStr;
+                } else {
+                    statusEl.textContent = 'Not Set';
+                    statusEl.className = 'bible-status missing';
+                }
+            } catch (error) {
+                console.error('Failed to load story bible:', error);
+            }
+        }
+
+        async function saveStoryBible() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            const statusEl = document.getElementById('storyBibleSaveStatus');
+            statusEl.textContent = 'Saving...';
+
+            // Parse terminology
+            const termStr = document.getElementById('bibleTerminology').value;
+            const terminology = {};
+            if (termStr) {
+                termStr.split(',').forEach(pair => {
+                    const [key, val] = pair.split(':').map(s => s.trim());
+                    if (key && val) terminology[key] = val;
+                });
+            }
+
+            // Build the story bible object
+            const storyBible = {
+                setting: document.getElementById('bibleSetting').value || 'Contemporary setting',
+                time_period: document.getElementById('bibleTimePeriod').value || 'Present day',
+                technology_level: document.getElementById('bibleTechnology').value || 'Modern technology',
+                culture: document.getElementById('bibleCulture').value || '',
+                key_history: document.getElementById('bibleHistory').value || '',
+                social_norms: document.getElementById('bibleNorms').value.split(',').map(s => s.trim()).filter(s => s),
+                taboos: document.getElementById('bibleTaboos').value.split(',').map(s => s.trim()).filter(s => s),
+                constraints: document.getElementById('bibleConstraints').value.split(',').map(s => s.trim()).filter(s => s),
+                terminology: terminology
+            };
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible/quick-setup`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(storyBible)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Save failed');
+                }
+
+                statusEl.textContent = 'Saved!';
+                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+
+                // Update status
+                document.getElementById('storyBibleStatus').textContent = 'Configured';
+                document.getElementById('storyBibleStatus').className = 'bible-status exists';
+
+                // Reload to refresh the bible
+                await loadStoryBible();
+            } catch (error) {
+                console.error('Save story bible error:', error);
+                statusEl.textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function generateStoryBible() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            const statusEl = document.getElementById('storyBibleSaveStatus');
+            statusEl.textContent = 'Generating with AI...';
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/story-bible/generate`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Generation failed');
+                }
+
+                statusEl.textContent = 'Generated!';
+                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+
+                // Reload to show new values
+                await loadStoryBible();
+            } catch (error) {
+                console.error('Generate story bible error:', error);
+                statusEl.textContent = 'Error: ' + error.message;
+                alert('Failed to generate: ' + error.message);
             }
         }
 
