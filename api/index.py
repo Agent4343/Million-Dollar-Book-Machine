@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -183,11 +184,36 @@ async def check_auth(session: Optional[str] = Cookie(None, alias="book_session")
 
 
 # =============================================================================
-# System Info
+# Static file serving for local development
 # =============================================================================
+
+# Get the path to the public directory
+PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public")
 
 @app.get("/")
 async def root():
+    """Serve the frontend UI."""
+    index_path = os.path.join(PUBLIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    # Fallback to API info if no frontend
+    return {
+        "service": "Million Dollar Book Machine",
+        "version": "1.0.0",
+        "description": "AI-powered book development system",
+        "total_agents": len(AGENT_REGISTRY),
+        "total_layers": len(LAYERS),
+        "llm_enabled": get_llm_client() is not None
+    }
+
+
+# =============================================================================
+# System Info
+# =============================================================================
+
+@app.get("/api/info")
+async def api_info():
+    """Get API information."""
     return {
         "service": "Million Dollar Book Machine",
         "version": "1.0.0",
