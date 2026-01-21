@@ -560,6 +560,7 @@
                 <div class="tab" onclick="showTab('pipeline')">Pipeline</div>
                 <div class="tab" onclick="showTab('themes')">Themes</div>
                 <div class="tab" onclick="showTab('images')">Images</div>
+                <div class="tab" onclick="showTab('editor')">Editor</div>
             </div>
 
             <!-- Projects Tab -->
@@ -812,6 +813,200 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
                 </div>
             </div>
 
+            <!-- Editor Tab -->
+            <div id="editorTab" class="hidden">
+                <div id="noEditorProject" class="card">
+                    <p style="text-align:center;color:#888;">Select a project and write chapters first to edit your manuscript</p>
+                </div>
+                <div id="editorView" class="hidden">
+                    <div class="card">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                            <h2 style="color:#3498db;">Manuscript Editor</h2>
+                            <div style="display:flex;gap:0.5rem;">
+                                <button class="btn btn-secondary btn-small" onclick="loadManuscriptForEdit()">Reload</button>
+                                <button class="btn btn-primary btn-small" onclick="saveManuscriptEdits()">Save Changes</button>
+                            </div>
+                        </div>
+                        <p style="color:#888;margin-bottom:1rem;">Edit your manuscript, run quality checks, and prepare for Kindle publishing.</p>
+
+                        <!-- Quality Check Panel -->
+                        <div style="background:rgba(52,152,219,0.1);padding:1rem;border-radius:8px;margin-bottom:1rem;">
+                            <h3 style="color:#3498db;margin-bottom:0.75rem;">Quality Checks</h3>
+                            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+                                <button class="btn btn-small" onclick="runQualityCheck('professionalism')">Check Professionalism</button>
+                                <button class="btn btn-small" onclick="runQualityCheck('copyright')">Check Copyright Issues</button>
+                                <button class="btn btn-small" onclick="runQualityCheck('consistency')">Check Consistency</button>
+                                <button class="btn btn-small" onclick="runQualityCheck('all')">Run All Checks</button>
+                            </div>
+                            <div id="qualityCheckResults" style="display:none;background:rgba(0,0,0,0.2);padding:0.75rem;border-radius:4px;">
+                                <h4 style="color:#f39c12;margin-bottom:0.5rem;">Check Results</h4>
+                                <div id="checkResultsList"></div>
+                            </div>
+                        </div>
+
+                        <!-- Manuscript Stats -->
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem;">
+                            <div style="background:rgba(46,204,113,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                                <div style="font-size:1.5rem;color:#2ecc71;" id="editorWordCount">0</div>
+                                <div style="font-size:0.8rem;color:#888;">Words</div>
+                            </div>
+                            <div style="background:rgba(155,89,182,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                                <div style="font-size:1.5rem;color:#9b59b6;" id="editorChapterCount">0</div>
+                                <div style="font-size:0.8rem;color:#888;">Chapters</div>
+                            </div>
+                            <div style="background:rgba(241,196,15,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                                <div style="font-size:1.5rem;color:#f1c40f;" id="editorPageCount">0</div>
+                                <div style="font-size:0.8rem;color:#888;">Est. Pages</div>
+                            </div>
+                            <div style="background:rgba(231,76,60,0.1);padding:0.75rem;border-radius:8px;text-align:center;">
+                                <div style="font-size:1.5rem;color:#e74c3c;" id="editorIssueCount">0</div>
+                                <div style="font-size:0.8rem;color:#888;">Issues</div>
+                            </div>
+                        </div>
+
+                        <!-- Chapter Navigation -->
+                        <div style="margin-bottom:1rem;">
+                            <label style="color:#888;">Jump to Chapter:</label>
+                            <select id="editorChapterNav" onchange="jumpToChapter(this.value)" style="margin-left:0.5rem;">
+                                <option value="">-- Select --</option>
+                            </select>
+                        </div>
+
+                        <!-- Manuscript Editor -->
+                        <div id="manuscriptEditor" style="background:#1a1a2e;border:1px solid rgba(255,255,255,0.1);border-radius:8px;overflow:hidden;">
+                            <div style="padding:0.5rem 1rem;background:rgba(0,0,0,0.3);border-bottom:1px solid rgba(255,255,255,0.1);display:flex;gap:0.5rem;">
+                                <button class="btn btn-small" onclick="formatText('bold')" title="Bold"><b>B</b></button>
+                                <button class="btn btn-small" onclick="formatText('italic')" title="Italic"><i>I</i></button>
+                                <button class="btn btn-small" onclick="formatText('heading')" title="Heading">H</button>
+                                <span style="border-left:1px solid rgba(255,255,255,0.2);margin:0 0.25rem;"></span>
+                                <button class="btn btn-small" onclick="findReplace()" title="Find & Replace">Find/Replace</button>
+                            </div>
+                            <textarea id="manuscriptText" style="width:100%;height:500px;background:transparent;border:none;padding:1rem;color:#fff;font-family:'Georgia',serif;font-size:1rem;line-height:1.8;resize:vertical;" placeholder="Your manuscript will appear here..."></textarea>
+                        </div>
+
+                        <!-- Find & Replace Panel (hidden by default) -->
+                        <div id="findReplacePanel" style="display:none;background:rgba(0,0,0,0.3);padding:1rem;border-radius:8px;margin-top:1rem;">
+                            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:0.5rem;align-items:end;">
+                                <div>
+                                    <label style="font-size:0.85rem;color:#888;">Find:</label>
+                                    <input type="text" id="findText" placeholder="Text to find..." style="width:100%;">
+                                </div>
+                                <div>
+                                    <label style="font-size:0.85rem;color:#888;">Replace with:</label>
+                                    <input type="text" id="replaceText" placeholder="Replacement text..." style="width:100%;">
+                                </div>
+                                <div style="display:flex;gap:0.25rem;">
+                                    <button class="btn btn-small" onclick="findNext()">Find</button>
+                                    <button class="btn btn-small" onclick="replaceNext()">Replace</button>
+                                    <button class="btn btn-small" onclick="replaceAll()">All</button>
+                                </div>
+                            </div>
+                            <div id="findStatus" style="font-size:0.85rem;color:#888;margin-top:0.5rem;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Export for Kindle -->
+                    <div class="card" style="margin-top:1rem;">
+                        <h2 style="color:#e67e22;">Publish to Kindle</h2>
+                        <p style="color:#888;margin-bottom:1rem;">Export your manuscript in Kindle-ready formats.</p>
+
+                        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;">
+                            <!-- Book Metadata -->
+                            <div style="background:rgba(0,0,0,0.2);padding:1rem;border-radius:8px;">
+                                <h3 style="color:#f39c12;margin-bottom:0.75rem;">Book Metadata</h3>
+                                <div style="display:flex;flex-direction:column;gap:0.5rem;">
+                                    <div>
+                                        <label style="font-size:0.85rem;color:#888;">Author Name:</label>
+                                        <input type="text" id="authorName" placeholder="Your pen name or real name">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:0.85rem;color:#888;">Publisher:</label>
+                                        <input type="text" id="publisherName" placeholder="Self-published or publisher name">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:0.85rem;color:#888;">Copyright Year:</label>
+                                        <input type="text" id="copyrightYear" value="2025">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:0.85rem;color:#888;">ISBN (optional):</label>
+                                        <input type="text" id="isbnNumber" placeholder="Leave blank if not registered">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:0.85rem;color:#888;">Language:</label>
+                                        <select id="bookLanguage">
+                                            <option value="en">English</option>
+                                            <option value="es">Spanish</option>
+                                            <option value="fr">French</option>
+                                            <option value="de">German</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Export Options -->
+                            <div style="background:rgba(0,0,0,0.2);padding:1rem;border-radius:8px;">
+                                <h3 style="color:#2ecc71;margin-bottom:0.75rem;">Export Options</h3>
+                                <div style="display:flex;flex-direction:column;gap:0.75rem;">
+                                    <button class="btn btn-primary" onclick="exportForKindle('epub')">
+                                        Download EPUB (Kindle)
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="exportForKindle('docx')">
+                                        Download DOCX (Word)
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="exportForKindle('pdf')">
+                                        Download PDF (Print)
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="exportForKindle('txt')">
+                                        Download Plain Text
+                                    </button>
+                                </div>
+                                <p style="font-size:0.8rem;color:#888;margin-top:1rem;">
+                                    EPUB is the recommended format for Kindle Direct Publishing (KDP).
+                                    Upload directly to kdp.amazon.com
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Pre-publish Checklist -->
+                        <div style="margin-top:1rem;background:rgba(46,204,113,0.1);padding:1rem;border-radius:8px;">
+                            <h3 style="color:#2ecc71;margin-bottom:0.75rem;">Pre-Publish Checklist</h3>
+                            <div id="publishChecklist" style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;font-size:0.9rem;">
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_proofread"> Manuscript proofread
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_copyright"> Copyright issues resolved
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_cover"> Cover image ready
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_blurb"> Book description written
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_categories"> Categories selected
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_keywords"> Keywords researched
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_price"> Price decided
+                                </label>
+                                <label style="color:#888;cursor:pointer;">
+                                    <input type="checkbox" id="check_preview"> Preview tested
+                                </label>
+                            </div>
+                            <div style="margin-top:1rem;">
+                                <div style="background:rgba(0,0,0,0.2);border-radius:4px;height:8px;overflow:hidden;">
+                                    <div id="publishReadiness" style="background:#2ecc71;height:100%;width:0%;transition:width 0.3s;"></div>
+                                </div>
+                                <p style="font-size:0.85rem;color:#888;margin-top:0.5rem;"><span id="publishReadinessText">0</span>% ready to publish</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Pipeline Tab -->
             <div id="pipelineTab" class="hidden">
                 <div id="noProjectSelected" class="card">
@@ -1023,6 +1218,7 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
             document.getElementById('pipelineTab').classList.add('hidden');
             document.getElementById('themesTab').classList.add('hidden');
             document.getElementById('imagesTab').classList.add('hidden');
+            document.getElementById('editorTab').classList.add('hidden');
             document.getElementById(tab + 'Tab').classList.remove('hidden');
 
             // Load themes when switching to themes tab
@@ -1033,6 +1229,11 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
             // Load images when switching to images tab
             if (tab === 'images') {
                 loadImagesView();
+            }
+
+            // Load editor when switching to editor tab
+            if (tab === 'editor') {
+                loadEditorView();
             }
         }
 
@@ -2758,6 +2959,456 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
             } catch (error) {
                 console.error('Failed to delete image:', error);
             }
+        }
+
+        // =================================================================
+        // Editor Functions
+        // =================================================================
+
+        let manuscriptData = null;
+        let manuscriptEdited = false;
+
+        async function loadEditorView() {
+            if (!currentProject) {
+                document.getElementById('noEditorProject').classList.remove('hidden');
+                document.getElementById('editorView').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('noEditorProject').classList.add('hidden');
+            document.getElementById('editorView').classList.remove('hidden');
+
+            await loadManuscriptForEdit();
+            setupPublishChecklist();
+        }
+
+        async function loadManuscriptForEdit() {
+            if (!currentProject) return;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/chapters`, {credentials: 'include'});
+                if (!res.ok) throw new Error('Failed to load chapters');
+
+                const data = await res.json();
+                manuscriptData = data.chapters || [];
+
+                if (manuscriptData.length === 0) {
+                    document.getElementById('manuscriptText').value = 'No chapters written yet. Go to the Pipeline tab and write your chapters first.';
+                    return;
+                }
+
+                // Build manuscript text
+                let fullText = '';
+                const navSelect = document.getElementById('editorChapterNav');
+                navSelect.innerHTML = '<option value="">-- Select --</option>';
+
+                manuscriptData.forEach((chapter, idx) => {
+                    const chapterMarker = `\n\n=== CHAPTER ${chapter.number}: ${chapter.title || 'Untitled'} ===\n\n`;
+                    fullText += chapterMarker + (chapter.text || chapter.content || '[No content]') + '\n';
+
+                    const opt = document.createElement('option');
+                    opt.value = idx;
+                    opt.textContent = `Chapter ${chapter.number}: ${chapter.title || 'Untitled'}`;
+                    navSelect.appendChild(opt);
+                });
+
+                document.getElementById('manuscriptText').value = fullText.trim();
+                updateEditorStats();
+                manuscriptEdited = false;
+
+            } catch (error) {
+                console.error('Failed to load manuscript:', error);
+                document.getElementById('manuscriptText').value = 'Error loading manuscript. Please try again.';
+            }
+        }
+
+        function updateEditorStats() {
+            const text = document.getElementById('manuscriptText').value;
+            const words = text.split(/\s+/).filter(w => w.length > 0).length;
+            const chapters = (text.match(/=== CHAPTER/g) || []).length;
+            const pages = Math.ceil(words / 250); // ~250 words per page
+
+            document.getElementById('editorWordCount').textContent = words.toLocaleString();
+            document.getElementById('editorChapterCount').textContent = chapters;
+            document.getElementById('editorPageCount').textContent = pages;
+        }
+
+        // Track changes
+        document.addEventListener('DOMContentLoaded', () => {
+            const textarea = document.getElementById('manuscriptText');
+            if (textarea) {
+                textarea.addEventListener('input', () => {
+                    manuscriptEdited = true;
+                    updateEditorStats();
+                });
+            }
+        });
+
+        async function saveManuscriptEdits() {
+            if (!currentProject || !manuscriptEdited) {
+                alert('No changes to save');
+                return;
+            }
+
+            const text = document.getElementById('manuscriptText').value;
+
+            // Parse chapters from text
+            const chapterRegex = /=== CHAPTER (\d+): ([^=]+) ===\n\n([\s\S]*?)(?=\n\n=== CHAPTER|\s*$)/g;
+            const chapters = [];
+            let match;
+
+            while ((match = chapterRegex.exec(text)) !== null) {
+                chapters.push({
+                    number: parseInt(match[1]),
+                    title: match[2].trim(),
+                    text: match[3].trim()
+                });
+            }
+
+            if (chapters.length === 0) {
+                alert('Could not parse chapters. Make sure to keep the === CHAPTER X: Title === format.');
+                return;
+            }
+
+            try {
+                // Save each chapter
+                for (const chapter of chapters) {
+                    await fetch(`/api/projects/${currentProject}/chapters/${chapter.number}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify(chapter)
+                    });
+                }
+
+                alert(`Saved ${chapters.length} chapters successfully!`);
+                manuscriptEdited = false;
+            } catch (error) {
+                console.error('Failed to save:', error);
+                alert('Error saving manuscript: ' + error.message);
+            }
+        }
+
+        function jumpToChapter(idx) {
+            if (idx === '') return;
+
+            const textarea = document.getElementById('manuscriptText');
+            const text = textarea.value;
+            const chapterMarkers = [...text.matchAll(/=== CHAPTER \d+:/g)];
+
+            if (chapterMarkers[idx]) {
+                textarea.focus();
+                textarea.setSelectionRange(chapterMarkers[idx].index, chapterMarkers[idx].index);
+                textarea.scrollTop = textarea.scrollHeight * (chapterMarkers[idx].index / text.length);
+            }
+        }
+
+        function formatText(format) {
+            const textarea = document.getElementById('manuscriptText');
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const selected = textarea.value.substring(start, end);
+
+            let replacement = '';
+            switch(format) {
+                case 'bold':
+                    replacement = `**${selected}**`;
+                    break;
+                case 'italic':
+                    replacement = `*${selected}*`;
+                    break;
+                case 'heading':
+                    replacement = `\n## ${selected}\n`;
+                    break;
+            }
+
+            textarea.value = textarea.value.substring(0, start) + replacement + textarea.value.substring(end);
+            manuscriptEdited = true;
+        }
+
+        function findReplace() {
+            const panel = document.getElementById('findReplacePanel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        let lastFindIndex = 0;
+
+        function findNext() {
+            const findText = document.getElementById('findText').value;
+            if (!findText) return;
+
+            const textarea = document.getElementById('manuscriptText');
+            const text = textarea.value.toLowerCase();
+            const searchText = findText.toLowerCase();
+
+            const idx = text.indexOf(searchText, lastFindIndex);
+            if (idx !== -1) {
+                textarea.focus();
+                textarea.setSelectionRange(idx, idx + findText.length);
+                lastFindIndex = idx + 1;
+                document.getElementById('findStatus').textContent = `Found at position ${idx}`;
+            } else {
+                lastFindIndex = 0;
+                document.getElementById('findStatus').textContent = 'Not found (wrapped to start)';
+            }
+        }
+
+        function replaceNext() {
+            const findTextVal = document.getElementById('findText').value;
+            const replaceTextVal = document.getElementById('replaceText').value;
+            if (!findTextVal) return;
+
+            const textarea = document.getElementById('manuscriptText');
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const selected = textarea.value.substring(start, end);
+
+            if (selected.toLowerCase() === findTextVal.toLowerCase()) {
+                textarea.value = textarea.value.substring(0, start) + replaceTextVal + textarea.value.substring(end);
+                manuscriptEdited = true;
+                findNext();
+            } else {
+                findNext();
+            }
+        }
+
+        function replaceAll() {
+            const findTextVal = document.getElementById('findText').value;
+            const replaceTextVal = document.getElementById('replaceText').value;
+            if (!findTextVal) return;
+
+            const textarea = document.getElementById('manuscriptText');
+            const regex = new RegExp(findTextVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const count = (textarea.value.match(regex) || []).length;
+
+            textarea.value = textarea.value.replace(regex, replaceTextVal);
+            manuscriptEdited = true;
+            document.getElementById('findStatus').textContent = `Replaced ${count} occurrences`;
+            updateEditorStats();
+        }
+
+        // Quality Checks
+        function runQualityCheck(checkType) {
+            const text = document.getElementById('manuscriptText').value;
+            const results = [];
+            let issueCount = 0;
+
+            if (checkType === 'professionalism' || checkType === 'all') {
+                // Check for common issues
+                const issues = [];
+
+                // Repeated words
+                const repeatedWords = text.match(/\b(\w+)\s+\1\b/gi);
+                if (repeatedWords && repeatedWords.length > 0) {
+                    issues.push(`Found ${repeatedWords.length} repeated word pairs (e.g., "${repeatedWords[0]}")`);
+                }
+
+                // Very long sentences
+                const sentences = text.split(/[.!?]+/);
+                const longSentences = sentences.filter(s => s.split(/\s+/).length > 50);
+                if (longSentences.length > 0) {
+                    issues.push(`${longSentences.length} very long sentences (50+ words)`);
+                }
+
+                // Passive voice indicators
+                const passiveMatches = text.match(/\b(was|were|been|being|is|are|am)\s+\w+ed\b/gi);
+                if (passiveMatches && passiveMatches.length > 20) {
+                    issues.push(`High passive voice usage (${passiveMatches.length} instances)`);
+                }
+
+                // Weak words
+                const weakWords = ['very', 'really', 'just', 'quite', 'somewhat'];
+                weakWords.forEach(word => {
+                    const regex = new RegExp(`\\b${word}\\b`, 'gi');
+                    const matches = text.match(regex);
+                    if (matches && matches.length > 10) {
+                        issues.push(`Overuse of "${word}" (${matches.length} times)`);
+                    }
+                });
+
+                if (issues.length > 0) {
+                    results.push({type: 'Professionalism', issues: issues, color: '#3498db'});
+                    issueCount += issues.length;
+                } else {
+                    results.push({type: 'Professionalism', issues: ['No major issues found'], color: '#2ecc71'});
+                }
+            }
+
+            if (checkType === 'copyright' || checkType === 'all') {
+                const issues = [];
+
+                // Check for potential copyrighted phrases/names
+                const potentialIssues = [
+                    {pattern: /Harry Potter|Hogwarts|Voldemort/gi, name: 'Harry Potter references'},
+                    {pattern: /Star Wars|Jedi|Sith|Darth/gi, name: 'Star Wars references'},
+                    {pattern: /Lord of the Rings|Gandalf|Frodo|Mordor/gi, name: 'LOTR references'},
+                    {pattern: /Disney|Mickey Mouse|Marvel/gi, name: 'Disney/Marvel references'},
+                    {pattern: /Game of Thrones|Westeros|Targaryen/gi, name: 'GoT references'},
+                ];
+
+                potentialIssues.forEach(check => {
+                    const matches = text.match(check.pattern);
+                    if (matches && matches.length > 0) {
+                        issues.push(`Potential ${check.name}: "${matches[0]}" (${matches.length} instances)`);
+                    }
+                });
+
+                // Check for song lyrics pattern (4+ lines starting with caps)
+                const lyricPattern = /^[A-Z][^.!?]*\n[A-Z][^.!?]*\n[A-Z][^.!?]*\n[A-Z][^.!?]*/gm;
+                if (lyricPattern.test(text)) {
+                    issues.push('Potential song lyrics detected (verify rights)');
+                }
+
+                if (issues.length > 0) {
+                    results.push({type: 'Copyright', issues: issues, color: '#e74c3c'});
+                    issueCount += issues.length;
+                } else {
+                    results.push({type: 'Copyright', issues: ['No obvious copyright issues found'], color: '#2ecc71'});
+                }
+            }
+
+            if (checkType === 'consistency' || checkType === 'all') {
+                const issues = [];
+
+                // Check for name spelling variations
+                const properNouns = text.match(/\b[A-Z][a-z]{2,}\b/g) || [];
+                const nameCounts = {};
+                properNouns.forEach(name => {
+                    const lower = name.toLowerCase();
+                    if (!nameCounts[lower]) nameCounts[lower] = new Set();
+                    nameCounts[lower].add(name);
+                });
+
+                Object.entries(nameCounts).forEach(([lower, variations]) => {
+                    if (variations.size > 1) {
+                        issues.push(`Inconsistent capitalization: ${[...variations].join(', ')}`);
+                    }
+                });
+
+                // Check for tense consistency (very basic)
+                const pastTense = (text.match(/\b\w+ed\b/g) || []).length;
+                const presentTense = (text.match(/\b(is|are|am|has|have|does|do)\b/gi) || []).length;
+
+                if (pastTense > 100 && presentTense > 100) {
+                    const ratio = pastTense / presentTense;
+                    if (ratio > 0.5 && ratio < 2) {
+                        issues.push('Mixed tense usage detected - verify consistency');
+                    }
+                }
+
+                if (issues.length > 0) {
+                    results.push({type: 'Consistency', issues: issues, color: '#f39c12'});
+                    issueCount += issues.length;
+                } else {
+                    results.push({type: 'Consistency', issues: ['No consistency issues found'], color: '#2ecc71'});
+                }
+            }
+
+            // Display results
+            document.getElementById('editorIssueCount').textContent = issueCount;
+            document.getElementById('qualityCheckResults').style.display = 'block';
+
+            const resultsList = document.getElementById('checkResultsList');
+            resultsList.innerHTML = results.map(r => `
+                <div style="margin-bottom:0.75rem;">
+                    <strong style="color:${r.color};">${r.type}</strong>
+                    <ul style="margin:0.25rem 0 0 1.5rem;color:#ccc;">
+                        ${r.issues.map(i => `<li>${i}</li>`).join('')}
+                    </ul>
+                </div>
+            `).join('');
+        }
+
+        // Export for Kindle
+        async function exportForKindle(format) {
+            if (!currentProject) return;
+
+            const metadata = {
+                author: document.getElementById('authorName').value || 'Unknown Author',
+                publisher: document.getElementById('publisherName').value || 'Self-Published',
+                copyright_year: document.getElementById('copyrightYear').value || '2025',
+                isbn: document.getElementById('isbnNumber').value || '',
+                language: document.getElementById('bookLanguage').value || 'en'
+            };
+
+            try {
+                let endpoint = '';
+                let filename = '';
+
+                switch(format) {
+                    case 'epub':
+                        endpoint = `/api/projects/${currentProject}/export/epub`;
+                        filename = 'manuscript.epub';
+                        break;
+                    case 'docx':
+                        endpoint = `/api/projects/${currentProject}/export/docx`;
+                        filename = 'manuscript.docx';
+                        break;
+                    case 'pdf':
+                        endpoint = `/api/projects/${currentProject}/export/manuscript?format=pdf`;
+                        filename = 'manuscript.pdf';
+                        break;
+                    case 'txt':
+                        endpoint = `/api/projects/${currentProject}/export/manuscript?format=txt`;
+                        filename = 'manuscript.txt';
+                        break;
+                }
+
+                const res = await fetch(endpoint, {credentials: 'include'});
+
+                if (!res.ok) {
+                    // Try plain text export as fallback
+                    const text = document.getElementById('manuscriptText').value;
+                    const blob = new Blob([text], {type: 'text/plain'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename.replace(/\.[^.]+$/, '.txt');
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    alert('Note: Server export unavailable, downloaded as plain text instead.');
+                    return;
+                }
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+
+            } catch (error) {
+                console.error('Export failed:', error);
+                // Fallback to plain text
+                const text = document.getElementById('manuscriptText').value;
+                const blob = new Blob([text], {type: 'text/plain'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'manuscript.txt';
+                a.click();
+                URL.revokeObjectURL(url);
+                alert('Export as ' + format.toUpperCase() + ' failed. Downloaded as plain text.');
+            }
+        }
+
+        // Publish Checklist
+        function setupPublishChecklist() {
+            const checkboxes = document.querySelectorAll('#publishChecklist input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.addEventListener('change', updatePublishReadiness);
+            });
+            updatePublishReadiness();
+        }
+
+        function updatePublishReadiness() {
+            const checkboxes = document.querySelectorAll('#publishChecklist input[type="checkbox"]');
+            const checked = document.querySelectorAll('#publishChecklist input[type="checkbox"]:checked');
+            const percent = Math.round((checked.length / checkboxes.length) * 100);
+
+            document.getElementById('publishReadiness').style.width = percent + '%';
+            document.getElementById('publishReadinessText').textContent = percent;
         }
 
         checkAuth();

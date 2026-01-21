@@ -826,6 +826,52 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
     raise HTTPException(status_code=404, detail=f"Chapter {chapter_number} not found")
 
 
+@app.put("/api/projects/{project_id}/chapters/{chapter_number}")
+async def update_chapter(project_id: str, chapter_number: int, request: Request, auth: bool = Depends(require_auth)):
+    """Update a specific chapter's content."""
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    data = await request.json()
+
+    # Initialize manuscript if needed
+    if not hasattr(project, 'manuscript') or project.manuscript is None:
+        project.manuscript = {"chapters": []}
+
+    chapters = project.manuscript.get("chapters", [])
+
+    # Find and update the chapter
+    found = False
+    for ch in chapters:
+        if ch.get("number") == chapter_number:
+            ch["title"] = data.get("title", ch.get("title", ""))
+            ch["text"] = data.get("text", ch.get("text", ""))
+            ch["word_count"] = len(ch["text"].split())
+            ch["updated_at"] = datetime.utcnow().isoformat()
+            found = True
+            break
+
+    if not found:
+        # Add new chapter if it doesn't exist
+        chapters.append({
+            "number": chapter_number,
+            "title": data.get("title", f"Chapter {chapter_number}"),
+            "text": data.get("text", ""),
+            "word_count": len(data.get("text", "").split()),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        })
+
+    project.manuscript["chapters"] = chapters
+
+    # Save to storage
+    storage = get_storage()
+    await storage.save_project(project)
+
+    return {"success": True, "chapter_number": chapter_number}
+
+
 # =============================================================================
 # Export Endpoints
 # =============================================================================
