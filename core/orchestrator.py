@@ -363,7 +363,8 @@ class Orchestrator:
                 aid: {
                     "status": a.status.value,
                     "attempts": a.attempts,
-                    "has_output": a.current_output is not None
+                    "has_output": a.current_output is not None,
+                    "current_output": a.current_output.content if a.current_output else None
                 }
                 for aid, a in layer.agents.items()
             }
