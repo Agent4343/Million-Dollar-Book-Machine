@@ -584,15 +584,43 @@
             <div id="newProjectTab" class="hidden">
                 <div class="card">
                     <h2>Create New Book Project</h2>
-                    <form id="newProjectForm">
+
+                    <!-- Input Mode Toggle -->
+                    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+                        <button type="button" class="btn btn-primary" id="quickInputBtn" onclick="setInputMode('quick')">Quick Input</button>
+                        <button type="button" class="btn" id="detailedInputBtn" onclick="setInputMode('detailed')">Detailed Form</button>
+                    </div>
+
+                    <!-- Quick Input Mode -->
+                    <div id="quickInputMode">
+                        <p style="color:#888;margin-bottom:0.5rem;">Paste all your book details in one place. Use this format:</p>
+                        <pre style="background:rgba(0,0,0,0.3);padding:0.75rem;border-radius:4px;font-size:0.8rem;color:#888;margin-bottom:1rem;white-space:pre-wrap;">Title: Your Book Title
+Genre: thriller (or: romance, mystery, sci_fi, fantasy, horror, literary_fiction, memoir, self_help, business)
+Description: Your book description here...
+Word Count: 80000
+Audience: Adults 25-45
+Comps: Book 1, Book 2
+Themes: theme1, theme2, theme3</pre>
+                        <textarea id="quickInputText" rows="12" placeholder="Title: The Quiet House
+Genre: thriller
+Description: A psychological thriller about a woman who discovers her perfect suburban life is built on lies. When strange things start happening in her home, she must unravel a web of secrets while questioning her own sanity.
+Word Count: 85000
+Audience: Adults 25-55, fans of domestic thrillers
+Comps: Gone Girl, The Silent Patient, Behind Closed Doors
+Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identity"></textarea>
+                        <button type="button" class="btn btn-primary" onclick="createFromQuickInput()" style="margin-top:1rem;">Create Project</button>
+                    </div>
+
+                    <!-- Detailed Form Mode (hidden by default) -->
+                    <form id="newProjectForm" class="hidden">
                         <div class="grid-2">
                             <div>
                                 <label>Book Title *</label>
-                                <input type="text" id="projectTitle" required placeholder="Your book title">
+                                <input type="text" id="projectTitle" placeholder="Your book title">
                             </div>
                             <div>
                                 <label>Genre *</label>
-                                <select id="projectGenre" required>
+                                <select id="projectGenre">
                                     <option value="">Select genre</option>
                                     <option value="literary_fiction">Literary Fiction</option>
                                     <option value="thriller">Thriller</option>
@@ -1246,7 +1274,131 @@
             }
         }
 
-        // New Project
+        // =================================================================
+        // Quick Input Mode Functions
+        // =================================================================
+
+        function setInputMode(mode) {
+            const quickMode = document.getElementById('quickInputMode');
+            const detailedForm = document.getElementById('newProjectForm');
+            const quickBtn = document.getElementById('quickInputBtn');
+            const detailedBtn = document.getElementById('detailedInputBtn');
+
+            if (mode === 'quick') {
+                quickMode.classList.remove('hidden');
+                detailedForm.classList.add('hidden');
+                quickBtn.classList.add('btn-primary');
+                detailedBtn.classList.remove('btn-primary');
+            } else {
+                quickMode.classList.add('hidden');
+                detailedForm.classList.remove('hidden');
+                quickBtn.classList.remove('btn-primary');
+                detailedBtn.classList.add('btn-primary');
+            }
+        }
+
+        function parseQuickInput(text) {
+            const lines = text.split('\n');
+            const data = {
+                title: '',
+                genre: '',
+                description: '',
+                target_word_count: 80000,
+                target_audience: '',
+                comparable_titles: [],
+                themes: []
+            };
+
+            let currentField = null;
+            let descriptionLines = [];
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                // Check for field labels
+                const titleMatch = trimmed.match(/^title:\s*(.+)/i);
+                const genreMatch = trimmed.match(/^genre:\s*(.+)/i);
+                const descMatch = trimmed.match(/^description:\s*(.+)/i);
+                const wordMatch = trimmed.match(/^word\s*count:\s*(\d+)/i);
+                const audienceMatch = trimmed.match(/^audience:\s*(.+)/i);
+                const compsMatch = trimmed.match(/^comps?(?:arable(?:\s+titles)?)?\s*:\s*(.+)/i);
+                const themesMatch = trimmed.match(/^themes?:\s*(.+)/i);
+
+                if (titleMatch) {
+                    currentField = null;
+                    data.title = titleMatch[1].trim();
+                } else if (genreMatch) {
+                    currentField = null;
+                    data.genre = genreMatch[1].trim().toLowerCase().replace(/\s+/g, '_');
+                } else if (descMatch) {
+                    currentField = 'description';
+                    descriptionLines = [descMatch[1].trim()];
+                } else if (wordMatch) {
+                    currentField = null;
+                    data.target_word_count = parseInt(wordMatch[1]);
+                } else if (audienceMatch) {
+                    currentField = null;
+                    data.target_audience = audienceMatch[1].trim();
+                } else if (compsMatch) {
+                    currentField = null;
+                    data.comparable_titles = compsMatch[1].split(',').map(s => s.trim()).filter(s => s);
+                } else if (themesMatch) {
+                    currentField = null;
+                    data.themes = themesMatch[1].split(',').map(s => s.trim()).filter(s => s);
+                } else if (currentField === 'description') {
+                    // Continue collecting description lines
+                    descriptionLines.push(trimmed);
+                }
+            }
+
+            if (descriptionLines.length > 0) {
+                data.description = descriptionLines.join(' ');
+            }
+
+            return data;
+        }
+
+        async function createFromQuickInput() {
+            const text = document.getElementById('quickInputText').value;
+            if (!text.trim()) {
+                alert('Please enter your book details');
+                return;
+            }
+
+            const body = parseQuickInput(text);
+
+            // Validate required fields
+            if (!body.title) {
+                alert('Title is required. Please include "Title: Your Book Title"');
+                return;
+            }
+            if (!body.genre) {
+                alert('Genre is required. Please include "Genre: thriller" (or other genre)');
+                return;
+            }
+
+            const res = await fetch('/api/projects', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include',
+                body: JSON.stringify(body)
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                currentProject = data.project_id;
+                document.getElementById('quickInputText').value = '';
+                await loadProjects();
+                await loadProjectPipeline();
+                showTab('pipeline');
+            } else {
+                const err = await res.json();
+                alert('Failed to create project: ' + (err.detail || 'Unknown error'));
+            }
+        }
+
+        // New Project (Detailed Form)
         document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -1259,6 +1411,11 @@
                 comparable_titles: document.getElementById('projectComps').value.split(',').map(s => s.trim()).filter(s => s),
                 themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s)
             };
+
+            if (!body.title || !body.genre) {
+                alert('Title and Genre are required');
+                return;
+            }
 
             const res = await fetch('/api/projects', {
                 method: 'POST',
