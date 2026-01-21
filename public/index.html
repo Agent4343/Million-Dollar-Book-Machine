@@ -1610,9 +1610,9 @@
             for (const [layerId, layer] of Object.entries(projectData.layers)) {
                 if (layer.agents && layer.agents.chapter_blueprint) {
                     const agent = layer.agents.chapter_blueprint;
-                    if (agent.status === 'passed' && agent.output) {
+                    if (agent.status === 'passed' && agent.current_output) {
                         blueprintPassed = true;
-                        chapterBlueprint = agent.output.content;
+                        chapterBlueprint = agent.current_output;
                         break;
                     }
                 }
@@ -2309,8 +2309,8 @@
             if (projectData) {
                 // Try blueprint first
                 for (const layer of Object.values(projectData.layers || {})) {
-                    if (layer.agents?.chapter_blueprint?.output?.content?.chapter_outline) {
-                        chapters = layer.agents.chapter_blueprint.output.content.chapter_outline;
+                    if (layer.agents?.chapter_blueprint?.current_output?.chapter_outline) {
+                        chapters = layer.agents.chapter_blueprint.current_output.chapter_outline;
                         break;
                     }
                 }
