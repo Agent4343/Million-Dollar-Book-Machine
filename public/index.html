@@ -671,6 +671,23 @@
                         </div>
                     </div>
 
+                    <!-- Visual Analysis Status -->
+                    <div id="visualAnalysisStatus" class="card" style="margin-bottom:1rem;background:rgba(155,89,182,0.1);">
+                        <h3 style="color:#9b59b6;margin-bottom:0.5rem;">Story Analysis for Images</h3>
+                        <p style="color:#888;font-size:0.85rem;margin-bottom:0.5rem;">
+                            Images are generated using data from your book's pipeline. Run more agents to get richer, more accurate artwork.
+                        </p>
+                        <div id="visualDataChecklist" style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;font-size:0.85rem;">
+                            <span id="vd_protagonist" style="color:#888;">&#x2610; Protagonist</span>
+                            <span id="vd_setting" style="color:#888;">&#x2610; Setting</span>
+                            <span id="vd_mood" style="color:#888;">&#x2610; Mood/Tone</span>
+                            <span id="vd_themes" style="color:#888;">&#x2610; Themes</span>
+                            <span id="vd_symbols" style="color:#888;">&#x2610; Symbols</span>
+                            <span id="vd_hook" style="color:#888;">&#x2610; Story Hook</span>
+                        </div>
+                        <button class="btn btn-secondary btn-small" onclick="viewFullAnalysis()" style="margin-top:0.75rem;">View Full Analysis</button>
+                    </div>
+
                     <div class="grid-2">
                         <!-- Cover Generation -->
                         <div class="card">
@@ -2168,11 +2185,94 @@
                 projectData = await res.json();
             }
 
+            // Load visual analysis status
+            await loadVisualAnalysis();
+
             // Populate chapter select
             await populateChapterSelect();
 
             // Load existing images
             await loadProjectImages();
+        }
+
+        async function loadVisualAnalysis() {
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/visual-analysis`, {credentials: 'include'});
+                if (!res.ok) return;
+
+                const data = await res.json();
+                const avail = data.pipeline_data_available || {};
+
+                // Update checkboxes
+                updateVisualCheck('vd_protagonist', avail.has_protagonist);
+                updateVisualCheck('vd_setting', avail.has_setting);
+                updateVisualCheck('vd_mood', avail.has_mood);
+                updateVisualCheck('vd_themes', data.visual_analysis?.themes?.length > 0);
+                updateVisualCheck('vd_symbols', avail.has_symbols);
+                updateVisualCheck('vd_hook', avail.has_story_hook);
+
+                // Store for later use
+                window.currentVisualAnalysis = data.visual_analysis;
+            } catch (error) {
+                console.error('Failed to load visual analysis:', error);
+            }
+        }
+
+        function updateVisualCheck(id, hasData) {
+            const el = document.getElementById(id);
+            if (el) {
+                if (hasData) {
+                    el.innerHTML = el.innerHTML.replace('&#x2610;', '&#x2611;');
+                    el.style.color = '#2ecc71';
+                } else {
+                    el.innerHTML = el.innerHTML.replace('&#x2611;', '&#x2610;');
+                    el.style.color = '#888';
+                }
+            }
+        }
+
+        function viewFullAnalysis() {
+            if (!window.currentVisualAnalysis) {
+                alert('No visual analysis data available. Run the pipeline first.');
+                return;
+            }
+
+            const va = window.currentVisualAnalysis;
+            let msg = `VISUAL ANALYSIS FOR "${va.title}"\n`;
+            msg += `${'='.repeat(40)}\n\n`;
+
+            msg += `GENRE: ${va.genre}\n`;
+            msg += `THEMES: ${(va.themes || []).join(', ') || 'Not defined'}\n\n`;
+
+            if (va.story_hook) {
+                msg += `STORY HOOK:\n${va.story_hook}\n\n`;
+            }
+
+            if (va.protagonist) {
+                msg += `PROTAGONIST:\n`;
+                msg += `  Name: ${va.protagonist.name || 'Unknown'}\n`;
+                msg += `  Appearance: ${va.protagonist.appearance || 'Not described'}\n`;
+                msg += `  Traits: ${(va.protagonist.traits || []).join(', ') || 'Not defined'}\n\n`;
+            }
+
+            if (va.setting) {
+                msg += `SETTING:\n`;
+                msg += `  Location: ${va.setting.location || 'Unknown'}\n`;
+                msg += `  Environment: ${va.setting.environment || 'Not described'}\n`;
+                msg += `  Atmosphere: ${va.setting.atmosphere || 'Not defined'}\n\n`;
+            }
+
+            if (va.mood) {
+                msg += `MOOD/TONE: ${va.mood}\n\n`;
+            }
+
+            if (va.key_symbols && va.key_symbols.length > 0) {
+                msg += `KEY SYMBOLS: ${va.key_symbols.join(', ')}\n\n`;
+            }
+
+            msg += `\nThis data is used to create accurate, story-aware image prompts.`;
+
+            alert(msg);
         }
 
         async function checkImageApiStatus() {

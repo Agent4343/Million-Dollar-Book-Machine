@@ -1296,7 +1296,8 @@ def generate_manuscript_markdown(project) -> str:
 from core.image_gen import (
     check_image_gen_status,
     generate_book_cover,
-    generate_chapter_illustration
+    generate_chapter_illustration,
+    analyze_book_for_visuals
 )
 
 
@@ -1318,13 +1319,46 @@ async def image_gen_status(auth: bool = Depends(require_auth)):
     return check_image_gen_status()
 
 
+@app.get("/api/projects/{project_id}/visual-analysis")
+async def get_visual_analysis(project_id: str, auth: bool = Depends(require_auth)):
+    """Get the visual analysis data extracted from the book project."""
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    visual_data = analyze_book_for_visuals(project)
+
+    return {
+        "project_id": project_id,
+        "title": project.title,
+        "visual_analysis": visual_data,
+        "pipeline_data_available": {
+            "has_protagonist": bool(visual_data.get("protagonist")),
+            "has_antagonist": bool(visual_data.get("antagonist")),
+            "has_setting": bool(visual_data.get("setting")),
+            "has_mood": bool(visual_data.get("mood")),
+            "has_symbols": len(visual_data.get("key_symbols", [])) > 0,
+            "has_story_hook": bool(visual_data.get("story_hook")),
+        }
+    }
+
+
 @app.post("/api/projects/{project_id}/generate-cover")
 async def generate_cover(
     project_id: str,
     request: CoverGenerateRequest,
     auth: bool = Depends(require_auth)
 ):
-    """Generate a book cover for the project."""
+    """
+    Generate a book cover for the project.
+
+    Uses intelligent story analysis to create context-aware prompts based on:
+    - Character descriptions from character_architecture agent
+    - Setting details from world_architecture agent
+    - Themes and symbols from thematic_architecture agent
+    - Story hook from concept_definition agent
+    - Genre-specific visual styles
+    """
     project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1337,19 +1371,10 @@ async def generate_cover(
             detail=f"Image generation not available: {status['reason']}"
         )
 
-    # Get project details for prompt
-    title = project.title
-    constraints = project.user_constraints
-    genre = constraints.get("genre", "fiction")
-    description = constraints.get("description", "")
-    themes = constraints.get("themes", [])
-
     try:
+        # Use intelligent story analysis for cover generation
         result = await generate_book_cover(
-            title=title,
-            genre=genre,
-            description=description,
-            themes=themes,
+            project=project,
             cover_type=request.cover_type,
             style=request.style
         )
@@ -1364,7 +1389,8 @@ async def generate_cover(
                 "image_base64": result["image_base64"],
                 "format": result.get("format", "png"),
                 "prompt": result.get("prompt_used", ""),
-                "style": request.style
+                "style": request.style,
+                "visual_analysis": result.get("visual_analysis", {})
             }
 
         return result
@@ -1379,7 +1405,15 @@ async def generate_chapter_image(
     request: ChapterIllustrationRequest,
     auth: bool = Depends(require_auth)
 ):
-    """Generate an illustration for a specific chapter."""
+    """
+    Generate an illustration for a specific chapter.
+
+    Uses intelligent story analysis to create context-aware prompts:
+    - Analyzes actual chapter text for visual moments
+    - Incorporates book-wide themes and mood
+    - Uses genre-specific visual styles
+    - Extracts setting and character details from pipeline
+    """
     project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1392,16 +1426,20 @@ async def generate_chapter_image(
             detail=f"Image generation not available: {status['reason']}"
         )
 
-    # Get chapter details
+    # Get chapter details - prefer written text for better illustrations
     chapters = project.manuscript.get("chapters", [])
     chapter = None
+    chapter_content = ""
+
+    # First try to get the written chapter
     for ch in chapters:
         if ch.get("number") == chapter_number:
             chapter = ch
+            chapter_content = ch.get("text", "")
             break
 
+    # If no written chapter, try blueprint for summary
     if not chapter:
-        # Try to get from blueprint
         blueprint = None
         for layer in project.layers.values():
             if "chapter_blueprint" in layer.agents:
@@ -1416,32 +1454,26 @@ async def generate_chapter_image(
                     chapter = {
                         "number": chapter_number,
                         "title": ch.get("title", f"Chapter {chapter_number}"),
-                        "summary": ch.get("chapter_goal", "")
                     }
+                    # Use chapter goal and scene beats as content
+                    chapter_content = f"{ch.get('chapter_goal', '')} {ch.get('key_scene', '')} {ch.get('scene_beats', '')}"
                     break
 
     if not chapter:
         raise HTTPException(
             status_code=404,
-            detail=f"Chapter {chapter_number} not found"
+            detail=f"Chapter {chapter_number} not found. Run the pipeline first to generate chapter data."
         )
 
-    genre = project.user_constraints.get("genre", "fiction")
     chapter_title = chapter.get("title", f"Chapter {chapter_number}")
 
-    # Get a summary - either from written chapter or blueprint
-    if chapter.get("text"):
-        # Take first 500 chars as summary
-        chapter_summary = chapter["text"][:500] + "..."
-    else:
-        chapter_summary = chapter.get("summary", chapter.get("chapter_goal", "A pivotal scene"))
-
     try:
+        # Use intelligent story analysis for chapter illustration
         result = await generate_chapter_illustration(
+            project=project,
             chapter_number=chapter_number,
             chapter_title=chapter_title,
-            chapter_summary=chapter_summary,
-            genre=genre,
+            chapter_content=chapter_content,
             style=request.style
         )
 
@@ -1453,6 +1485,7 @@ async def generate_chapter_image(
             project.manuscript["images"][f"chapter_{chapter_number}"] = {
                 "type": "chapter_illustration",
                 "chapter_number": chapter_number,
+                "chapter_title": chapter_title,
                 "image_base64": result["image_base64"],
                 "format": result.get("format", "png"),
                 "prompt": result.get("prompt_used", ""),
