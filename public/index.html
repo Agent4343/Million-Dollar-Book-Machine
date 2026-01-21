@@ -355,6 +355,90 @@
             gap: 0.5rem;
             flex-wrap: wrap;
         }
+
+        /* Theme Development Styles */
+        .theme-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .theme-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: rgba(155,89,182,0.1);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .theme-header:hover {
+            background: rgba(155,89,182,0.2);
+        }
+        .theme-name {
+            font-weight: 600;
+            color: #9b59b6;
+            font-size: 1.1rem;
+        }
+        .theme-toggle {
+            color: #888;
+            font-size: 1.2rem;
+            transition: transform 0.2s;
+        }
+        .theme-card.expanded .theme-toggle {
+            transform: rotate(180deg);
+        }
+        .theme-content {
+            padding: 0;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+        }
+        .theme-card.expanded .theme-content {
+            padding: 1rem;
+            max-height: 1000px;
+        }
+        .theme-field {
+            margin-bottom: 1rem;
+        }
+        .theme-field label {
+            display: block;
+            color: #9b59b6;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+        }
+        .theme-field textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .theme-field input, .theme-field textarea {
+            margin-bottom: 0;
+        }
+        .theme-delete {
+            color: #e74c3c;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.85rem;
+        }
+        .theme-delete:hover {
+            background: rgba(231,76,60,0.2);
+            border-radius: 4px;
+        }
+        .theme-examples {
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #888;
+        }
+        .theme-examples strong {
+            color: #9b59b6;
+        }
     </style>
 </head>
 <body>
@@ -390,6 +474,7 @@
                 <div class="tab active" onclick="showTab('projects')">Projects</div>
                 <div class="tab" onclick="showTab('newProject')">New Project</div>
                 <div class="tab" onclick="showTab('pipeline')">Pipeline</div>
+                <div class="tab" onclick="showTab('themes')">Themes</div>
             </div>
 
             <!-- Projects Tab -->
@@ -455,6 +540,35 @@
                         <input type="text" id="projectThemes" placeholder="e.g., redemption, identity, love">
                         <button type="submit" class="btn btn-primary">Create Project</button>
                     </form>
+                </div>
+            </div>
+
+            <!-- Themes Tab -->
+            <div id="themesTab" class="hidden">
+                <div id="noThemeProject" class="card">
+                    <p style="text-align:center;color:#888;">Select a project from the Projects tab to develop its themes</p>
+                </div>
+                <div id="themesView" class="hidden">
+                    <div class="card">
+                        <h2 id="themesProjectTitle">Theme Development</h2>
+                        <p style="color:#888;margin-bottom:1rem;">Expand each theme to develop its meaning, manifestation in the story, and symbolic elements.</p>
+
+                        <div id="themesList"></div>
+
+                        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.1);">
+                            <h3 style="color:#888;margin-bottom:0.5rem;">Add New Theme</h3>
+                            <div style="display:flex;gap:0.5rem;">
+                                <input type="text" id="newThemeName" placeholder="Theme name (e.g., redemption)" style="flex:1;margin-bottom:0;">
+                                <button class="btn btn-primary btn-small" onclick="addNewTheme()">Add Theme</button>
+                            </div>
+                        </div>
+
+                        <div style="margin-top:1rem;">
+                            <button class="btn btn-save btn-small" onclick="saveThemes()">Save All Themes</button>
+                            <button class="btn btn-secondary btn-small" onclick="generateThemeIdeas()">AI: Generate Theme Ideas</button>
+                            <span id="themeSaveStatus" style="margin-left:0.5rem;font-size:0.85rem;color:#888;"></span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -667,7 +781,13 @@
             document.getElementById('projectsTab').classList.add('hidden');
             document.getElementById('newProjectTab').classList.add('hidden');
             document.getElementById('pipelineTab').classList.add('hidden');
+            document.getElementById('themesTab').classList.add('hidden');
             document.getElementById(tab + 'Tab').classList.remove('hidden');
+
+            // Load themes when switching to themes tab
+            if (tab === 'themes') {
+                loadThemesView();
+            }
         }
 
         // Projects
@@ -1577,6 +1697,248 @@
             } catch (error) {
                 console.error('View chapter error:', error);
             }
+        }
+
+        // =================================================================
+        // Theme Development Functions
+        // =================================================================
+
+        let themesData = {};
+
+        async function loadThemesView() {
+            if (!currentProject) {
+                document.getElementById('noThemeProject').classList.remove('hidden');
+                document.getElementById('themesView').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('noThemeProject').classList.add('hidden');
+            document.getElementById('themesView').classList.remove('hidden');
+
+            // Load project data to get themes
+            if (!projectData) {
+                const res = await fetch(`/api/projects/${currentProject}`, {credentials: 'include'});
+                projectData = await res.json();
+            }
+
+            document.getElementById('themesProjectTitle').textContent = `Theme Development: ${projectData.title}`;
+
+            // Get themes from project constraints or existing theme data
+            const projectThemes = projectData.user_constraints?.themes || [];
+
+            // Load saved theme development data from localStorage
+            const savedThemes = loadThemesFromStorage(currentProject);
+
+            // Merge: ensure all project themes exist in savedThemes
+            projectThemes.forEach(theme => {
+                if (!savedThemes[theme]) {
+                    savedThemes[theme] = createEmptyTheme(theme);
+                }
+            });
+
+            themesData = savedThemes;
+            renderThemes();
+        }
+
+        function createEmptyTheme(name) {
+            return {
+                name: name,
+                meaning: '',
+                universal_truth: '',
+                story_manifestation: '',
+                character_connections: '',
+                key_scenes: '',
+                symbols_motifs: '',
+                arc: '',
+                questions: ''
+            };
+        }
+
+        function renderThemes() {
+            const container = document.getElementById('themesList');
+
+            if (Object.keys(themesData).length === 0) {
+                container.innerHTML = '<p style="color:#888;text-align:center;padding:2rem;">No themes defined yet. Add themes above or go back to your project settings.</p>';
+                return;
+            }
+
+            container.innerHTML = Object.entries(themesData).map(([key, theme]) => `
+                <div class="theme-card" id="theme-${key.replace(/\s+/g, '-')}">
+                    <div class="theme-header" onclick="toggleTheme('${key}')">
+                        <span class="theme-name">${theme.name}</span>
+                        <div>
+                            <button class="theme-delete" onclick="event.stopPropagation(); deleteTheme('${key}')">Delete</button>
+                            <span class="theme-toggle">▼</span>
+                        </div>
+                    </div>
+                    <div class="theme-content">
+                        <div class="theme-field">
+                            <label>Core Meaning</label>
+                            <textarea placeholder="What does this theme mean in the context of your story?"
+                                onchange="updateTheme('${key}', 'meaning', this.value)">${theme.meaning || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "Gaslighting represents the erosion of self-trust when those we love manipulate our perception of reality."</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Universal Truth</label>
+                            <textarea placeholder="What universal truth does this theme explore?"
+                                onchange="updateTheme('${key}', 'universal_truth', this.value)">${theme.universal_truth || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "Our sense of reality depends on external validation, making us vulnerable to those who control our environment."</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Story Manifestation</label>
+                            <textarea placeholder="How does this theme manifest in your story's events?"
+                                onchange="updateTheme('${key}', 'story_manifestation', this.value)">${theme.story_manifestation || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "The protagonist's husband dismisses her concerns as paranoia, her therapist adjusts her medication, neighbors corroborate lies."</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Character Connections</label>
+                            <textarea placeholder="Which characters embody or challenge this theme?"
+                                onchange="updateTheme('${key}', 'character_connections', this.value)">${theme.character_connections || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "Mara (victim), David (unwitting enabler), Elise (perpetrator), Dr. Reeves (institutional gaslighting)"</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Key Scenes</label>
+                            <textarea placeholder="List pivotal scenes that explore this theme"
+                                onchange="updateTheme('${key}', 'key_scenes', this.value)">${theme.key_scenes || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "Ch 5: David finds her research, calls therapist. Ch 12: Medication increase makes Mara foggy. Ch 18: Planted evidence scene."</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Symbols & Motifs</label>
+                            <textarea placeholder="What symbols or recurring motifs represent this theme?"
+                                onchange="updateTheme('${key}', 'symbols_motifs', this.value)">${theme.symbols_motifs || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "Windows (trapped, looking out), mirrors (fractured reflection), medication bottles, locked doors."</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Thematic Arc</label>
+                            <textarea placeholder="How does this theme evolve from beginning to end?"
+                                onchange="updateTheme('${key}', 'arc', this.value)">${theme.arc || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "Beginning: Mara doubts herself. Middle: Evidence mounts but so does gaslighting. End: She trusts herself regardless of others' validation."</div>
+                        </div>
+
+                        <div class="theme-field">
+                            <label>Thematic Questions</label>
+                            <textarea placeholder="What questions does this theme ask the reader?"
+                                onchange="updateTheme('${key}', 'questions', this.value)">${theme.questions || ''}</textarea>
+                            <div class="theme-examples"><strong>Example:</strong> "How do we know what's real? Who has the power to define reality? What happens when help becomes harm?"</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleTheme(key) {
+            const card = document.getElementById(`theme-${key.replace(/\s+/g, '-')}`);
+            if (card) {
+                card.classList.toggle('expanded');
+            }
+        }
+
+        function updateTheme(key, field, value) {
+            if (themesData[key]) {
+                themesData[key][field] = value;
+                // Auto-save on change
+                saveThemesToStorage(currentProject, themesData);
+            }
+        }
+
+        function addNewTheme() {
+            const input = document.getElementById('newThemeName');
+            const name = input.value.trim();
+
+            if (!name) {
+                alert('Please enter a theme name');
+                return;
+            }
+
+            if (themesData[name]) {
+                alert('This theme already exists');
+                return;
+            }
+
+            themesData[name] = createEmptyTheme(name);
+            saveThemesToStorage(currentProject, themesData);
+            renderThemes();
+
+            input.value = '';
+
+            // Auto-expand the new theme
+            setTimeout(() => toggleTheme(name), 100);
+        }
+
+        function deleteTheme(key) {
+            if (!confirm(`Delete theme "${key}"? This cannot be undone.`)) return;
+
+            delete themesData[key];
+            saveThemesToStorage(currentProject, themesData);
+            renderThemes();
+        }
+
+        function saveThemes() {
+            saveThemesToStorage(currentProject, themesData);
+            document.getElementById('themeSaveStatus').textContent = 'Saved!';
+            setTimeout(() => {
+                document.getElementById('themeSaveStatus').textContent = '';
+            }, 2000);
+        }
+
+        function saveThemesToStorage(projectId, themes) {
+            try {
+                const key = `book_themes_${projectId}`;
+                localStorage.setItem(key, JSON.stringify(themes));
+            } catch (error) {
+                console.error('Failed to save themes:', error);
+            }
+        }
+
+        function loadThemesFromStorage(projectId) {
+            try {
+                const key = `book_themes_${projectId}`;
+                const saved = localStorage.getItem(key);
+                return saved ? JSON.parse(saved) : {};
+            } catch (error) {
+                console.error('Failed to load themes:', error);
+                return {};
+            }
+        }
+
+        async function generateThemeIdeas() {
+            if (!currentProject) return;
+
+            alert('AI theme generation will analyze your project and suggest theme development ideas. This feature requires the pipeline to be run first.');
+
+            // For now, show helpful prompts based on theme names
+            const suggestions = Object.keys(themesData).map(theme => {
+                return getThemeSuggestions(theme);
+            }).join('\n\n');
+
+            if (suggestions) {
+                alert('Theme Development Tips:\n\n' + suggestions);
+            }
+        }
+
+        function getThemeSuggestions(theme) {
+            const tips = {
+                'gaslighting': 'GASLIGHTING: Show subtle manipulation escalating. Use unreliable memories, changed objects, denied conversations. The reader should sometimes doubt along with the protagonist.',
+                'trust': 'TRUST: Explore who deserves trust and why. Show trust broken and rebuilt. Consider institutional trust vs personal trust.',
+                'memory': 'MEMORY: Use fragmented recollections, conflicting accounts, recovered memories. Memory as both weapon and shield.',
+                'motherhood': 'MOTHERHOOD: Explore protective instincts, sacrifice, inherited trauma, the gap between ideal and reality of mothering.',
+                'suburban secrets': 'SUBURBAN SECRETS: Perfect lawns hiding dysfunction. HOA rules as control. Neighbors who see everything but say nothing.',
+                'hidden identity': 'HIDDEN IDENTITY: Layers of self - who we show vs who we are. Documents, photos, digital footprints. The work of maintaining a lie.'
+            };
+
+            const lowerTheme = theme.toLowerCase();
+            for (const [key, tip] of Object.entries(tips)) {
+                if (lowerTheme.includes(key) || key.includes(lowerTheme)) {
+                    return tip;
+                }
+            }
+            return `${theme.toUpperCase()}: Consider how this theme connects to your protagonist's journey and what universal truth it reveals.`;
         }
 
         checkAuth();
