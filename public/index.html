@@ -439,6 +439,90 @@
         .theme-examples strong {
             color: #9b59b6;
         }
+
+        /* Image Generation Styles */
+        .image-gen-section {
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .image-preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 0.75rem;
+        }
+        .image-preview-item {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+            background: rgba(0,0,0,0.3);
+        }
+        .image-preview-item:hover {
+            transform: scale(1.05);
+        }
+        .image-preview-item img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .image-preview-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            padding: 0.25rem 0.5rem;
+            font-size: 0.7rem;
+            color: #fff;
+            text-align: center;
+        }
+        .image-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .image-modal-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            background: #1a1a3e;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .image-modal-content img {
+            max-width: 100%;
+            max-height: 70vh;
+            display: block;
+        }
+        .image-modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            font-size: 2rem;
+            color: #fff;
+            cursor: pointer;
+            z-index: 1001;
+        }
+        .image-placeholder {
+            width: 100%;
+            aspect-ratio: 3/4;
+            background: rgba(255,255,255,0.05);
+            border: 2px dashed rgba(255,255,255,0.2);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -475,6 +559,7 @@
                 <div class="tab" onclick="showTab('newProject')">New Project</div>
                 <div class="tab" onclick="showTab('pipeline')">Pipeline</div>
                 <div class="tab" onclick="showTab('themes')">Themes</div>
+                <div class="tab" onclick="showTab('images')">Images</div>
             </div>
 
             <!-- Projects Tab -->
@@ -567,6 +652,116 @@
                             <button class="btn btn-save btn-small" onclick="saveThemes()">Save All Themes</button>
                             <button class="btn btn-secondary btn-small" onclick="generateThemeIdeas()">AI: Generate Theme Ideas</button>
                             <span id="themeSaveStatus" style="margin-left:0.5rem;font-size:0.85rem;color:#888;"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Images Tab -->
+            <div id="imagesTab" class="hidden">
+                <div id="noImageProject" class="card">
+                    <p style="text-align:center;color:#888;">Select a project from the Projects tab to generate images</p>
+                </div>
+                <div id="imagesView" class="hidden">
+                    <!-- API Status Banner -->
+                    <div id="imageApiStatus" class="card" style="margin-bottom:1rem;">
+                        <div style="display:flex;align-items:center;gap:0.5rem;">
+                            <span id="imageApiDot" style="width:10px;height:10px;border-radius:50%;background:#888;"></span>
+                            <span id="imageApiText">Checking image generation status...</span>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <!-- Cover Generation -->
+                        <div class="card">
+                            <h2 style="color:#e67e22;">Book Covers</h2>
+                            <p style="color:#888;margin-bottom:1rem;">Generate AI-powered cover art for your book</p>
+
+                            <div class="image-gen-section">
+                                <label>Cover Style</label>
+                                <select id="coverStyle">
+                                    <option value="professional cinematic book cover">Cinematic (Recommended)</option>
+                                    <option value="minimalist modern book cover">Minimalist Modern</option>
+                                    <option value="illustrated artistic book cover">Illustrated/Artistic</option>
+                                    <option value="dramatic dark moody book cover">Dark & Moody</option>
+                                    <option value="vibrant colorful book cover">Vibrant & Colorful</option>
+                                    <option value="vintage classic book cover">Vintage Classic</option>
+                                </select>
+
+                                <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+                                    <button class="btn btn-write btn-small" onclick="generateCover('front')" id="genFrontBtn">
+                                        Generate Front Cover
+                                    </button>
+                                    <button class="btn btn-secondary btn-small" onclick="generateCover('back')" id="genBackBtn">
+                                        Generate Back Cover
+                                    </button>
+                                </div>
+
+                                <p id="coverGenStatus" style="font-size:0.85rem;color:#888;margin-top:0.5rem;"></p>
+                            </div>
+
+                            <!-- Cover Previews -->
+                            <div style="margin-top:1rem;">
+                                <h3 style="color:#888;margin-bottom:0.5rem;">Generated Covers</h3>
+                                <div class="image-preview-grid" id="coverPreviews">
+                                    <p style="color:#666;font-size:0.85rem;">No covers generated yet</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Chapter Illustrations -->
+                        <div class="card">
+                            <h2 style="color:#9b59b6;">Chapter Illustrations</h2>
+                            <p style="color:#888;margin-bottom:1rem;">Generate illustrations for each chapter</p>
+
+                            <div class="image-gen-section">
+                                <label>Illustration Style</label>
+                                <select id="chapterStyle">
+                                    <option value="moody atmospheric illustration">Atmospheric (Recommended)</option>
+                                    <option value="detailed realistic illustration">Realistic</option>
+                                    <option value="stylized artistic illustration">Stylized Art</option>
+                                    <option value="noir black and white illustration">Noir B&W</option>
+                                    <option value="watercolor soft illustration">Watercolor</option>
+                                    <option value="dramatic cinematic scene">Cinematic Scene</option>
+                                </select>
+
+                                <label style="margin-top:1rem;">Select Chapter</label>
+                                <select id="chapterSelect">
+                                    <option value="">-- Select a chapter --</option>
+                                </select>
+
+                                <div style="margin-top:1rem;">
+                                    <button class="btn btn-export btn-small" onclick="generateChapterImage()" id="genChapterBtn">
+                                        Generate Chapter Illustration
+                                    </button>
+                                    <button class="btn btn-secondary btn-small" onclick="generateAllChapterImages()" id="genAllChaptersBtn">
+                                        Generate All
+                                    </button>
+                                </div>
+
+                                <p id="chapterGenStatus" style="font-size:0.85rem;color:#888;margin-top:0.5rem;"></p>
+                            </div>
+
+                            <!-- Chapter Image Previews -->
+                            <div style="margin-top:1rem;">
+                                <h3 style="color:#888;margin-bottom:0.5rem;">Chapter Images</h3>
+                                <div class="image-preview-grid" id="chapterPreviews">
+                                    <p style="color:#666;font-size:0.85rem;">No chapter images generated yet</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Image Preview Modal -->
+                    <div id="imageModal" class="image-modal hidden" onclick="closeImageModal()">
+                        <div class="image-modal-content" onclick="event.stopPropagation()">
+                            <span class="image-modal-close" onclick="closeImageModal()">&times;</span>
+                            <img id="modalImage" src="" alt="Preview">
+                            <div id="modalInfo" style="padding:1rem;color:#888;"></div>
+                            <div style="padding:0 1rem 1rem;">
+                                <button class="btn btn-primary btn-small" onclick="downloadCurrentImage()">Download</button>
+                                <button class="btn btn-danger btn-small" onclick="deleteCurrentImage()">Delete</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -782,11 +977,17 @@
             document.getElementById('newProjectTab').classList.add('hidden');
             document.getElementById('pipelineTab').classList.add('hidden');
             document.getElementById('themesTab').classList.add('hidden');
+            document.getElementById('imagesTab').classList.add('hidden');
             document.getElementById(tab + 'Tab').classList.remove('hidden');
 
             // Load themes when switching to themes tab
             if (tab === 'themes') {
                 loadThemesView();
+            }
+
+            // Load images when switching to images tab
+            if (tab === 'images') {
+                loadImagesView();
             }
         }
 
@@ -1939,6 +2140,367 @@
                 }
             }
             return `${theme.toUpperCase()}: Consider how this theme connects to your protagonist's journey and what universal truth it reveals.`;
+        }
+
+        // =================================================================
+        // Image Generation Functions
+        // =================================================================
+
+        let currentImageKey = null;
+        let imageGenAvailable = false;
+
+        async function loadImagesView() {
+            if (!currentProject) {
+                document.getElementById('noImageProject').classList.remove('hidden');
+                document.getElementById('imagesView').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('noImageProject').classList.add('hidden');
+            document.getElementById('imagesView').classList.remove('hidden');
+
+            // Check image API status
+            await checkImageApiStatus();
+
+            // Load project data if needed
+            if (!projectData) {
+                const res = await fetch(`/api/projects/${currentProject}`, {credentials: 'include'});
+                projectData = await res.json();
+            }
+
+            // Populate chapter select
+            await populateChapterSelect();
+
+            // Load existing images
+            await loadProjectImages();
+        }
+
+        async function checkImageApiStatus() {
+            const dotEl = document.getElementById('imageApiDot');
+            const textEl = document.getElementById('imageApiText');
+
+            try {
+                const res = await fetch('/api/system/image-status', {credentials: 'include'});
+                const data = await res.json();
+
+                if (data.available) {
+                    dotEl.style.background = '#2ecc71';
+                    textEl.textContent = 'Image generation ready (Google AI)';
+                    imageGenAvailable = true;
+                } else {
+                    dotEl.style.background = '#e74c3c';
+                    textEl.innerHTML = `Image generation unavailable: ${data.reason}<br><small>Add GOOGLE_AI_API_KEY to Railway environment variables. Get free key at <a href="https://aistudio.google.com" target="_blank" style="color:#00d4ff;">aistudio.google.com</a></small>`;
+                    imageGenAvailable = false;
+                }
+            } catch (error) {
+                dotEl.style.background = '#e74c3c';
+                textEl.textContent = 'Error checking image status';
+                imageGenAvailable = false;
+            }
+        }
+
+        async function populateChapterSelect() {
+            const select = document.getElementById('chapterSelect');
+            select.innerHTML = '<option value="">-- Select a chapter --</option>';
+
+            // Get chapters from blueprint or manuscript
+            let chapters = [];
+
+            if (projectData) {
+                // Try blueprint first
+                for (const layer of Object.values(projectData.layers || {})) {
+                    if (layer.agents?.chapter_blueprint?.output?.content?.chapter_outline) {
+                        chapters = layer.agents.chapter_blueprint.output.content.chapter_outline;
+                        break;
+                    }
+                }
+            }
+
+            // If no blueprint, try manuscript
+            if (chapters.length === 0) {
+                try {
+                    const res = await fetch(`/api/projects/${currentProject}/chapters`, {credentials: 'include'});
+                    if (res.ok) {
+                        const data = await res.json();
+                        chapters = data.chapters || [];
+                    }
+                } catch (e) {}
+            }
+
+            chapters.forEach(ch => {
+                const opt = document.createElement('option');
+                opt.value = ch.number;
+                opt.textContent = `Chapter ${ch.number}: ${ch.title || 'Untitled'}`;
+                select.appendChild(opt);
+            });
+        }
+
+        async function loadProjectImages() {
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/images`, {credentials: 'include'});
+                if (!res.ok) return;
+
+                const data = await res.json();
+                renderImagePreviews(data.images || []);
+            } catch (error) {
+                console.error('Failed to load images:', error);
+            }
+        }
+
+        function renderImagePreviews(images) {
+            const coverPreviews = document.getElementById('coverPreviews');
+            const chapterPreviews = document.getElementById('chapterPreviews');
+
+            const covers = images.filter(img => img.type?.startsWith('cover_'));
+            const chapters = images.filter(img => img.type === 'chapter_illustration');
+
+            if (covers.length > 0) {
+                coverPreviews.innerHTML = covers.map(img => `
+                    <div class="image-preview-item" onclick="viewImage('${img.key}')">
+                        <div class="image-placeholder" id="preview-${img.key}">Loading...</div>
+                        <span class="image-preview-label">${img.key.replace('cover_', '').toUpperCase()}</span>
+                    </div>
+                `).join('');
+
+                // Load actual images
+                covers.forEach(img => loadImagePreview(img.key));
+            } else {
+                coverPreviews.innerHTML = '<p style="color:#666;font-size:0.85rem;">No covers generated yet</p>';
+            }
+
+            if (chapters.length > 0) {
+                chapterPreviews.innerHTML = chapters.map(img => `
+                    <div class="image-preview-item" onclick="viewImage('${img.key}')">
+                        <div class="image-placeholder" id="preview-${img.key}">Loading...</div>
+                        <span class="image-preview-label">Ch ${img.chapter_number}</span>
+                    </div>
+                `).join('');
+
+                // Load actual images
+                chapters.forEach(img => loadImagePreview(img.key));
+            } else {
+                chapterPreviews.innerHTML = '<p style="color:#666;font-size:0.85rem;">No chapter images generated yet</p>';
+            }
+        }
+
+        async function loadImagePreview(imageKey) {
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/images/${imageKey}`, {credentials: 'include'});
+                if (!res.ok) return;
+
+                const data = await res.json();
+                const previewEl = document.getElementById(`preview-${imageKey}`);
+
+                if (previewEl && data.image_base64) {
+                    const img = document.createElement('img');
+                    img.src = `data:image/${data.format || 'png'};base64,${data.image_base64}`;
+                    img.alt = imageKey;
+                    previewEl.replaceWith(img);
+                }
+            } catch (error) {
+                console.error(`Failed to load preview for ${imageKey}:`, error);
+            }
+        }
+
+        async function generateCover(coverType) {
+            if (!currentProject || !imageGenAvailable) {
+                alert('Image generation not available. Please add GOOGLE_AI_API_KEY to your Railway environment.');
+                return;
+            }
+
+            const btn = document.getElementById(coverType === 'front' ? 'genFrontBtn' : 'genBackBtn');
+            const statusEl = document.getElementById('coverGenStatus');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Generating...';
+            statusEl.textContent = `Generating ${coverType} cover... This may take 30-60 seconds.`;
+
+            try {
+                const style = document.getElementById('coverStyle').value;
+
+                const res = await fetch(`/api/projects/${currentProject}/generate-cover`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        cover_type: coverType,
+                        style: style
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = `${coverType.charAt(0).toUpperCase() + coverType.slice(1)} cover generated!`;
+                    await loadProjectImages();
+                } else {
+                    statusEl.textContent = `Error: ${data.error || 'Generation failed'}`;
+                }
+            } catch (error) {
+                statusEl.textContent = `Error: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = `Generate ${coverType.charAt(0).toUpperCase() + coverType.slice(1)} Cover`;
+            }
+        }
+
+        async function generateChapterImage() {
+            if (!currentProject || !imageGenAvailable) {
+                alert('Image generation not available. Please add GOOGLE_AI_API_KEY to your Railway environment.');
+                return;
+            }
+
+            const chapterNum = document.getElementById('chapterSelect').value;
+            if (!chapterNum) {
+                alert('Please select a chapter first');
+                return;
+            }
+
+            const btn = document.getElementById('genChapterBtn');
+            const statusEl = document.getElementById('chapterGenStatus');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Generating...';
+            statusEl.textContent = `Generating illustration for Chapter ${chapterNum}...`;
+
+            try {
+                const style = document.getElementById('chapterStyle').value;
+
+                const res = await fetch(`/api/projects/${currentProject}/generate-chapter-image/${chapterNum}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        chapter_number: parseInt(chapterNum),
+                        style: style
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    statusEl.textContent = `Chapter ${chapterNum} illustration generated!`;
+                    await loadProjectImages();
+                } else {
+                    statusEl.textContent = `Error: ${data.error || 'Generation failed'}`;
+                }
+            } catch (error) {
+                statusEl.textContent = `Error: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Generate Chapter Illustration';
+            }
+        }
+
+        async function generateAllChapterImages() {
+            if (!currentProject || !imageGenAvailable) {
+                alert('Image generation not available.');
+                return;
+            }
+
+            const select = document.getElementById('chapterSelect');
+            const chapters = Array.from(select.options).filter(o => o.value).map(o => o.value);
+
+            if (chapters.length === 0) {
+                alert('No chapters available');
+                return;
+            }
+
+            if (!confirm(`Generate illustrations for ${chapters.length} chapters? This may take several minutes.`)) {
+                return;
+            }
+
+            const btn = document.getElementById('genAllChaptersBtn');
+            const statusEl = document.getElementById('chapterGenStatus');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Generating...';
+
+            const style = document.getElementById('chapterStyle').value;
+
+            for (let i = 0; i < chapters.length; i++) {
+                const chapterNum = chapters[i];
+                statusEl.textContent = `Generating Chapter ${chapterNum} (${i + 1}/${chapters.length})...`;
+
+                try {
+                    await fetch(`/api/projects/${currentProject}/generate-chapter-image/${chapterNum}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            chapter_number: parseInt(chapterNum),
+                            style: style
+                        })
+                    });
+
+                    await loadProjectImages();
+                } catch (error) {
+                    console.error(`Failed to generate chapter ${chapterNum}:`, error);
+                }
+
+                // Small delay between generations
+                await new Promise(r => setTimeout(r, 2000));
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Generate All';
+            statusEl.textContent = 'All chapter illustrations generated!';
+        }
+
+        async function viewImage(imageKey) {
+            currentImageKey = imageKey;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/images/${imageKey}`, {credentials: 'include'});
+                if (!res.ok) return;
+
+                const data = await res.json();
+
+                const modalImg = document.getElementById('modalImage');
+                modalImg.src = `data:image/${data.format || 'png'};base64,${data.image_base64}`;
+
+                const modalInfo = document.getElementById('modalInfo');
+                modalInfo.innerHTML = `
+                    <strong>${imageKey}</strong><br>
+                    Style: ${data.style || 'N/A'}<br>
+                    <small>Prompt: ${(data.prompt || '').substring(0, 200)}...</small>
+                `;
+
+                document.getElementById('imageModal').classList.remove('hidden');
+            } catch (error) {
+                console.error('Failed to load image:', error);
+            }
+        }
+
+        function closeImageModal() {
+            document.getElementById('imageModal').classList.add('hidden');
+            currentImageKey = null;
+        }
+
+        function downloadCurrentImage() {
+            const modalImg = document.getElementById('modalImage');
+            const link = document.createElement('a');
+            link.href = modalImg.src;
+            link.download = `${currentImageKey || 'image'}.png`;
+            link.click();
+        }
+
+        async function deleteCurrentImage() {
+            if (!currentImageKey || !confirm('Delete this image?')) return;
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/images/${currentImageKey}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+
+                if (res.ok) {
+                    closeImageModal();
+                    await loadProjectImages();
+                }
+            } catch (error) {
+                console.error('Failed to delete image:', error);
+            }
         }
 
         checkAuth();
