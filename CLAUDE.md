@@ -15,6 +15,9 @@ uvicorn api.index:app --reload --port 3000
 
 # Deploy to Vercel
 vercel
+
+# Deploy to Railway
+railway up
 ```
 
 **Default Password**: `Blake2011@` (configurable via `APP_PASSWORD` env var)
