@@ -1,12 +1,19 @@
 """
-Entry point for Railway and other platforms that expect main.py.
+Railway entrypoint.
+
+Railpack falls back to running main.py/app.py when it can't infer a start command.
+This file starts the FastAPI app with uvicorn on the Railway-provided PORT.
 """
-from api.index import app
 
-# For platforms that run main.py directly
+import os
+
+import uvicorn
+
+
+def main() -> None:
+    port = int(os.environ.get("PORT", "3000"))
+    uvicorn.run("api.index:app", host="0.0.0.0", port=port, log_level="info")
+
+
 if __name__ == "__main__":
-    import uvicorn
-    import os
-
-    port = int(os.environ.get("PORT", 3000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    main()

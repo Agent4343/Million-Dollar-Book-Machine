@@ -65,33 +65,34 @@ Design the complete plot structure:
 ## Output Format (JSON):
 {{
     "act_structure": {{
-        "act_1": {{"percentage": 25, "purpose": "...", "key_events": ["..."]}},
-        "act_2": {{"percentage": 50, "purpose": "...", "key_events": ["..."]}},
-        "act_3": {{"percentage": 25, "purpose": "...", "key_events": ["..."]}}
+        "act_1": {{"percentage": 25, "purpose": "<string>", "key_events": ["<string>"]}},
+        "act_2": {{"percentage": 50, "purpose": "<string>", "key_events": ["<string>"]}},
+        "act_3": {{"percentage": 25, "purpose": "<string>", "key_events": ["<string>"]}}
     }},
     "major_beats": [
-        {{"name": "Opening Image", "description": "...", "page_target": "1-2"}},
-        ...
+        {{"name": "Opening Image", "description": "<string>", "page_target": "1-2"}}
     ],
     "reversals": [
-        {{"name": "Midpoint", "what_changes": "...", "impact": "..."}}
+        {{"name": "Midpoint", "what_changes": "<string>", "impact": "<string>"}}
     ],
     "point_of_no_return": {{
-        "moment": "...",
-        "why_irreversible": "...",
-        "protagonist_commitment": "..."
+        "moment": "<string>",
+        "why_irreversible": "<string>",
+        "protagonist_commitment": "<string>"
     }},
     "climax_design": {{
-        "setup": "...",
-        "confrontation": "...",
-        "resolution": "..."
+        "setup": "<string>",
+        "confrontation": "<string>",
+        "resolution": "<string>"
     }},
     "resolution": {{
-        "external_resolution": "...",
-        "internal_resolution": "...",
-        "final_image": "..."
+        "external_resolution": "<string>",
+        "internal_resolution": "<string>",
+        "final_image": "<string>"
     }}
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 PACING_DESIGN_PROMPT = """You are a pacing specialist. Design the tension and rhythm of the story.
@@ -129,12 +130,12 @@ Design the pacing:
 ## Output Format (JSON):
 {{
     "tension_curve": [
-        {{"point": "Opening", "level": 3, "description": "..."}},
-        {{"point": "Catalyst", "level": 5, "description": "..."}},
-        {{"point": "Midpoint", "level": 7, "description": "..."}},
-        {{"point": "All Is Lost", "level": 4, "description": "..."}},
-        {{"point": "Climax", "level": 10, "description": "..."}},
-        {{"point": "Resolution", "level": 2, "description": "..."}}
+        {{"point": "Opening", "level": 3, "description": "<string>"}},
+        {{"point": "Catalyst", "level": 5, "description": "<string>"}},
+        {{"point": "Midpoint", "level": 7, "description": "<string>"}},
+        {{"point": "All Is Lost", "level": 4, "description": "<string>"}},
+        {{"point": "Climax", "level": 10, "description": "<string>"}},
+        {{"point": "Resolution", "level": 2, "description": "<string>"}}
     ],
     "scene_density_map": {{
         "act_1": {{"action_reflection_ratio": "40:60", "dialogue_description": "50:50"}},
@@ -143,12 +144,14 @@ Design the pacing:
         "act_3": {{"action_reflection_ratio": "80:20", "dialogue_description": "40:60"}}
     }},
     "breather_points": [
-        {{"after": "...", "type": "...", "purpose": "..."}}
+        {{"after": "<string>", "type": "<string>", "purpose": "<string>"}}
     ],
     "acceleration_zones": [
-        {{"section": "...", "technique": "...", "effect": "..."}}
+        {{"section": "<string>", "technique": "<string>", "effect": "<string>"}}
     ]
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 CHAPTER_BLUEPRINT_PROMPT = """You are an outline architect. Create the detailed chapter and scene blueprint.
@@ -184,36 +187,43 @@ For each scene include:
 - Conflict type
 - Outcome
 
+## Hard Requirements (must comply)
+- Return ONLY valid JSON (no markdown).
+- Chapter numbers must be contiguous and increasing starting at 1 (1..N).
+- Each chapter must have at least 1 scene.
+- Each scene must have a numeric word_target.
+- For each chapter: sum(scene.word_target) should be close to chapter.word_target (within ±35%).
+
 ## Output Format (JSON):
 {{
     "chapter_outline": [
         {{
             "number": 1,
-            "title": "...",
+            "title": "<string>",
             "act": 1,
-            "chapter_goal": "...",
-            "pov": "...",
-            "opening_hook": "...",
-            "closing_hook": "...",
+            "chapter_goal": "<string>",
+            "pov": "<string>",
+            "opening_hook": "<string>",
+            "closing_hook": "<string>",
             "word_target": 3000,
             "scenes": [
                 {{
                     "scene_number": 1,
-                    "scene_question": "...",
-                    "characters": ["..."],
-                    "location": "...",
-                    "conflict_type": "...",
-                    "outcome": "...",
+                    "scene_question": "<string>",
+                    "characters": ["<string>"],
+                    "location": "<string>",
+                    "conflict_type": "<string>",
+                    "outcome": "<string>",
                     "word_target": 1500
                 }}
             ]
         }}
     ],
-    "chapter_goals": {{"1": "...", "2": "..."}},
-    "scene_list": ["Ch1-S1: ...", "Ch1-S2: ..."],
-    "scene_questions": {{"Ch1-S1": "...", "Ch1-S2": "..."}},
-    "hooks": {{"chapter_hooks": ["..."], "scene_hooks": ["..."]}},
-    "pov_assignments": {{"1": "Protagonist", "2": "Protagonist"}}
+    "chapter_goals": {{"1": "<string>", "2": "<string>"}},
+    "scene_list": ["Ch1-S1: <string>", "Ch1-S2: <string>"],
+    "scene_questions": {{"Ch1-S1": "<string>", "Ch1-S2": "<string>"}},
+    "hooks": {{"chapter_hooks": ["<string>"], "scene_hooks": ["<string>"]}},
+    "pov_assignments": {{"1": "<string>", "2": "<string>"}}
 }}
 """
 
@@ -259,6 +269,11 @@ Define the complete voice specification:
    - Character voice differentiation
 
 7. **Style Guide**: Dos and don'ts
+
+## Hard Requirements (must comply)
+- Return ONLY valid JSON (no markdown).
+- Include at least 1 non-empty example passage in style_guide.example_passages.
+- Example passage(s) must demonstrate the POV + tense + tone rules you specify.
 
 ## Output Format (JSON):
 {{
@@ -537,7 +552,9 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
             "style_guide": {
                 "dos": ["Show don't tell", "Active voice", "Specific details"],
                 "donts": ["Adverb overuse", "Purple prose", "Info dumps"],
-                "example_passages": ["[Example of ideal style]"]
+                "example_passages": [
+                    "He watched the elevator numbers climb as if they were a verdict. When the doors opened, the air on the executive floor smelled faintly of citrus and expensive coffee, and he felt his jaw tighten before he could stop it."
+                ]
             }
         }
 
@@ -549,6 +566,10 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
 
     chapters = []
     chapter_metadata = []
+    scene_tags: Dict[str, Any] = {}
+    deviations: List[Dict[str, Any]] = []
+    fix_plan: List[str] = []
+    chapter_scores: Dict[str, int] = {}
 
     outline = chapter_blueprint.get("chapter_outline", [])
 
@@ -575,6 +596,43 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
             chapter_text = await llm.generate(prompt)
             summary = await llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}")
 
+            # Evaluate outline adherence (structured) for this chapter
+            adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
+
+Blueprint for this chapter:
+{chapter}
+
+Generated chapter (truncated if needed):
+{chapter_text[:4500]}
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "outline_adherence_score": 0,
+  "scene_checks": [
+    {{"scene_number": 1, "present": true, "notes": "...", "deviation": false, "suggested_fix": "..."}}
+  ],
+  "chapter_deviations": [
+    {{"chapter": 1, "severity": "major|minor", "description": "...", "suggested_fix": "..."}}
+  ]
+}}
+
+Rules:
+- outline_adherence_score is 0-100.
+- scene_checks must include every scene_number listed in the blueprint.
+- If deviation=true, suggested_fix must be specific."""
+            adherence = await llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600)
+
+            score = adherence.get("outline_adherence_score")
+            if isinstance(score, int):
+                chapter_scores[str(chapter_num)] = score
+            else:
+                chapter_scores[str(chapter_num)] = 0
+
+            scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
+            for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
+                if isinstance(d, dict):
+                    deviations.append(d)
+
             chapters.append({
                 "number": chapter_num,
                 "title": chapter_title,
@@ -591,6 +649,8 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
                 "summary": f"Chapter {chapter_num} summary placeholder",
                 "word_count": 0
             })
+            chapter_scores[str(chapter_num)] = 0
+            scene_tags[f"Ch{chapter_num}"] = []
 
         chapter_metadata.append({
             "number": chapter_num,
@@ -599,11 +659,34 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
             "pov": chapter.get("pov", "Unknown")
         })
 
+    # Consolidate adherence across chapters
+    overall = 0
+    if chapter_scores:
+        overall = int(sum(chapter_scores.values()) / max(1, len(chapter_scores)))
+
+    outline_adherence = {
+        "overall_score": overall,
+        "chapter_scores": chapter_scores,
+        "notes": "Scores reflect blueprint adherence; investigate deviations for rewrite targets."
+    }
+
+    # Create a simple prioritized fix plan from deviations (fallback). LLM can refine later in rewrite agents.
+    if deviations:
+        fix_plan = [
+            f"Chapter {d.get('chapter','?')}: {d.get('suggested_fix') or d.get('description')}"
+            for d in deviations[:12]
+            if isinstance(d, dict)
+        ]
+
     return {
         "chapters": chapters,
         "chapter_metadata": chapter_metadata,
         "word_counts": {str(c["number"]): c["word_count"] for c in chapters},
-        "scene_tags": {}
+        "scene_tags": scene_tags,
+        "outline_adherence": outline_adherence,
+        "chapter_scores": chapter_scores,
+        "deviations": deviations,
+        "fix_plan": fix_plan
     }
 
 
