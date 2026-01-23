@@ -17,9 +17,11 @@ from typing import Optional, List, Any, Dict
 from dotenv import load_dotenv
 load_dotenv()
 
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Add parent directory to path
@@ -186,8 +188,9 @@ async def check_auth(session: Optional[str] = Cookie(None, alias="book_session")
 # System Info
 # =============================================================================
 
-@app.get("/")
-async def root():
+@app.get("/api/status")
+async def api_status():
+    """Return API status as JSON."""
     return {
         "service": "Million Dollar Book Machine",
         "version": "1.0.0",
@@ -196,6 +199,30 @@ async def root():
         "total_layers": len(LAYERS),
         "llm_enabled": get_llm_client() is not None
     }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Serve the web UI."""
+    # Find public/index.html relative to this file
+    api_dir = Path(__file__).parent
+    project_root = api_dir.parent
+    index_path = project_root / "public" / "index.html"
+
+    if index_path.exists():
+        return FileResponse(index_path, media_type="text/html")
+    else:
+        # Fallback: return simple HTML with redirect info
+        return HTMLResponse(content="""
+        <html>
+        <head><title>Million Dollar Book Machine</title></head>
+        <body>
+            <h1>Million Dollar Book Machine</h1>
+            <p>API is running. UI file not found.</p>
+            <p>Check <a href="/api/status">/api/status</a> for API info.</p>
+        </body>
+        </html>
+        """)
 
 
 @app.get("/api/system/llm-status")
