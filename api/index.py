@@ -17,9 +17,11 @@ from typing import Optional, List, Any, Dict
 from dotenv import load_dotenv
 load_dotenv()
 
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response, Cookie, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Add parent directory to path
@@ -36,6 +38,10 @@ from agents.story_system import STORY_SYSTEM_EXECUTORS
 from agents.structural import STRUCTURAL_EXECUTORS
 from agents.validation import VALIDATION_EXECUTORS
 from agents.chapter_writer import execute_chapter_writer
+from core.schemas import AGENT_OUTPUT_MODELS
+from core.storage import get_project_store
+from core.jobs import JobManager
+from core.storage import get_job_store
 
 # Initialize app
 app = FastAPI(
@@ -46,10 +52,21 @@ app = FastAPI(
     redoc_url=None
 )
 
+def _parse_cors_origins() -> List[str]:
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        # Default for local dev; set explicitly in Railway.
+        return ["http://localhost:3000", "http://localhost:5173"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+_cors_origins = _parse_cors_origins()
+_cors_all = "*" in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if _cors_all else _cors_origins,
+    allow_credentials=False if _cors_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,9 +79,17 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
 SESSION_DURATION = 60 * 60 * 24 * 7
 
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").lower()
+if COOKIE_SAMESITE not in ("lax", "strict", "none"):
+    COOKIE_SAMESITE = "lax"
+
 # Lazy initialization for LLM client (Vercel env vars may not be ready at import time)
 _llm_client = None
 _orchestrator = None
+_projects_loaded = False
+_job_manager: Optional[JobManager] = None
+_jobs_loaded = False
 
 def get_llm_client():
     """Get or create LLM client with lazy initialization."""
@@ -78,16 +103,39 @@ def get_llm_client():
 
 def get_orchestrator():
     """Get or create orchestrator with lazy initialization."""
-    global _orchestrator
+    global _orchestrator, _projects_loaded
     if _orchestrator is None:
         _orchestrator = Orchestrator(llm_client=get_llm_client())
         # Register all agent executors
         for agent_id, executor in ALL_EXECUTORS.items():
             _orchestrator.register_executor(agent_id, executor)
+    if not _projects_loaded:
+        # Load persisted projects once.
+        store = get_project_store()
+        for pid in store.list_project_ids():
+            data = store.load_raw(pid)
+            if isinstance(data, dict):
+                try:
+                    _orchestrator.import_project_state(data)
+                except Exception:
+                    # Skip corrupted projects rather than breaking startup.
+                    pass
+        _projects_loaded = True
     # Update LLM client in case it wasn't available before
     if _orchestrator.llm_client is None:
         _orchestrator.llm_client = get_llm_client()
     return _orchestrator
+
+
+async def get_job_manager() -> JobManager:
+    """Get or create job manager and load persisted jobs once."""
+    global _job_manager, _jobs_loaded
+    if _job_manager is None:
+        _job_manager = JobManager()
+    if not _jobs_loaded:
+        await _job_manager.load_persisted_jobs()
+        _jobs_loaded = True
+    return _job_manager
 
 # Register all agent executors
 ALL_EXECUTORS = {
@@ -164,8 +212,8 @@ async def login(request: LoginRequest, response: Response):
             value=token,
             max_age=SESSION_DURATION,
             httponly=True,
-            secure=True,
-            samesite="strict"
+            secure=COOKIE_SECURE,
+            samesite=COOKIE_SAMESITE
         )
         return {"success": True, "message": "Login successful"}
     raise HTTPException(status_code=401, detail="Invalid password")
@@ -187,15 +235,143 @@ async def check_auth(session: Optional[str] = Cookie(None, alias="book_session")
 # =============================================================================
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    """
+    Root route serves the UI for browsers and JSON for API clients.
+    """
+    accept = (request.headers.get("accept") or "").lower()
+    wants_html = "text/html" in accept
+    if wants_html:
+        try:
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "index.html")
+            with open(path, "r", encoding="utf-8") as f:
+                return HTMLResponse(f.read())
+        except Exception:
+            # Fallback to JSON if UI file missing
+            pass
+
     return {
         "service": "Million Dollar Book Machine",
         "version": "1.0.0",
         "description": "AI-powered book development system",
         "total_agents": len(AGENT_REGISTRY),
         "total_layers": len(LAYERS),
-        "llm_enabled": get_llm_client() is not None
+        "llm_enabled": get_llm_client() is not None,
+        "ui": "Open this URL in a browser for the UI.",
     }
+
+
+@app.get("/api/status")
+async def api_status():
+    """Return API status as JSON (explicit endpoint)."""
+    return {
+        "service": "Million Dollar Book Machine",
+        "version": "1.0.0",
+        "description": "AI-powered book development system",
+        "total_agents": len(AGENT_REGISTRY),
+        "total_layers": len(LAYERS),
+        "llm_enabled": get_llm_client() is not None,
+    }
+
+
+@app.get("/app")
+async def app_ui():
+    """Explicit UI route (same as / in browsers)."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "index.html")
+    with open(path, "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/healthz")
+async def healthz():
+    """Railway health check."""
+    return {"ok": True}
+
+
+# =============================================================================
+# Background Jobs
+# =============================================================================
+
+
+class RunJobRequest(BaseModel):
+    max_iterations: int = 200
+
+
+@app.post("/api/projects/{project_id}/run-job")
+async def run_project_background_job(project_id: str, req: RunJobRequest, auth: bool = Depends(require_auth)):
+    """Start running the pipeline in the background."""
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    jm = await get_job_manager()
+    try:
+        job = await jm.create_run_pipeline_job(project=project, orchestrator=orch, max_iterations=req.max_iterations)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"success": True, "job_id": job.job_id, "status": job.status.value, "project_id": job.project_id}
+
+
+@app.get("/api/jobs")
+async def list_jobs(project_id: Optional[str] = None, auth: bool = Depends(require_auth)):
+    """List recent jobs (optionally filtered by project_id)."""
+    store = get_job_store()
+    jobs = []
+    for jid in store.list_ids():
+        raw = store.load_raw(jid)
+        if not isinstance(raw, dict):
+            continue
+        if project_id and raw.get("project_id") != project_id:
+            continue
+        jobs.append(raw)
+    jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
+    return {"jobs": jobs[:200]}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str, auth: bool = Depends(require_auth)):
+    """Get job status and recent events."""
+    raw = get_job_store().load_raw(job_id)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return raw
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, auth: bool = Depends(require_auth)):
+    """Request cancellation for a running job."""
+    jm = await get_job_manager()
+    try:
+        job = await jm.cancel(job_id)
+        return {"success": True, "job": job.to_dict()}
+    except KeyError:
+        # Fallback: mark cancel on disk for jobs created on other instance
+        store = get_job_store()
+        raw = store.load_raw(job_id)
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=404, detail="Job not found")
+        raw["cancel_requested"] = True
+        store.save_raw(job_id, raw)
+        return {"success": True, "job": raw}
+
+
+class ResumeJobRequest(BaseModel):
+    max_iterations: int = 200
+
+
+@app.post("/api/jobs/{job_id}/resume")
+async def resume_job(job_id: str, req: ResumeJobRequest, auth: bool = Depends(require_auth)):
+    """Resume an interrupted/failed/cancelled job by starting a new job for the same project."""
+    orch = get_orchestrator()
+    jm = await get_job_manager()
+    try:
+        job = await jm.resume_job(job_id=job_id, orchestrator=orch, max_iterations=req.max_iterations)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"success": True, "job_id": job.job_id, "resumed_from": job.resumed_from_job_id, "status": job.status.value}
 
 
 @app.get("/api/system/llm-status")
@@ -231,7 +407,8 @@ async def list_agents(auth: bool = Depends(require_auth)):
             "type": agent_def.agent_type.value,
             "purpose": agent_def.purpose,
             "gate": agent_def.gate_criteria,
-            "fail_condition": agent_def.fail_condition
+            "fail_condition": agent_def.fail_condition,
+            "has_executor": agent_def.agent_id in ALL_EXECUTORS,
         })
     return {"agents": sorted(agents, key=lambda x: (x["layer"], x["id"]))}
 
@@ -248,6 +425,28 @@ async def list_layers(auth: bool = Depends(require_auth)):
             "agents": agents
         })
     return {"layers": layers}
+
+
+@app.get("/api/system/executors-health")
+async def executors_health(auth: bool = Depends(require_auth)):
+    """Check whether every registered agent has an executor."""
+    missing = []
+    for agent_id in AGENT_REGISTRY.keys():
+        if agent_id not in ALL_EXECUTORS:
+            missing.append(
+                {
+                    "agent_id": agent_id,
+                    "name": AGENT_REGISTRY[agent_id].name,
+                    "layer": AGENT_REGISTRY[agent_id].layer,
+                    "schema_backed": agent_id in AGENT_OUTPUT_MODELS,
+                }
+            )
+    return {
+        "ok": len(missing) == 0,
+        "missing_executors": missing,
+        "total_agents": len(AGENT_REGISTRY),
+        "total_executors": len(ALL_EXECUTORS),
+    }
 
 
 # =============================================================================
@@ -270,6 +469,9 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
         constraints.update(request.additional_constraints)
 
     project = get_orchestrator().create_project(request.title, constraints)
+    # Persist
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
 
     return {
         "success": True,
@@ -343,6 +545,9 @@ async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(req
 
     try:
         output = await get_orchestrator().execute_agent(project, agent_id)
+        # Persist after each agent run
+        store = get_project_store()
+        store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
         return {
             "success": True,
             "agent_id": agent_id,
@@ -369,6 +574,8 @@ async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require
         if agent_def and agent_def.layer == layer_id:
             try:
                 output = await get_orchestrator().execute_agent(project, agent_id)
+                store = get_project_store()
+                store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
                 results.append({
                     "agent_id": agent_id,
                     "success": output.gate_result.passed if output.gate_result else False,
@@ -431,6 +638,8 @@ async def save_checkpoint(project_id: str, name: str = "checkpoint", auth: bool 
         raise HTTPException(status_code=404, detail="Project not found")
 
     project.save_checkpoint(name)
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
     return {"success": True, "checkpoint": name, "total_checkpoints": len(project.checkpoints)}
 
 
@@ -441,42 +650,7 @@ async def export_project(project_id: str, auth: bool = Depends(require_auth)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Serialize the entire project state
-    export_data = {
-        "version": "1.0",
-        "project_id": project.project_id,
-        "title": project.title,
-        "status": project.status,
-        "current_layer": project.current_layer,
-        "user_constraints": project.user_constraints,
-        "created_at": project.created_at,
-        "updated_at": project.updated_at,
-        "manuscript": project.manuscript,
-        "layers": {}
-    }
-
-    # Export each layer and agent state
-    for layer_id, layer in project.layers.items():
-        export_data["layers"][str(layer_id)] = {
-            "name": layer.name,
-            "status": layer.status.value,
-            "agents": {}
-        }
-        for agent_id, agent_state in layer.agents.items():
-            agent_export = {
-                "status": agent_state.status.value,
-                "attempts": agent_state.attempts,
-                "output": None
-            }
-            if agent_state.current_output:
-                agent_export["output"] = {
-                    "content": agent_state.current_output.content,
-                    "gate_passed": agent_state.current_output.gate_result.passed if agent_state.current_output.gate_result else None,
-                    "gate_message": agent_state.current_output.gate_result.message if agent_state.current_output.gate_result else None
-                }
-            export_data["layers"][str(layer_id)]["agents"][agent_id] = agent_export
-
-    return export_data
+    return get_orchestrator().export_project_state(project)
 
 
 class ProjectImport(BaseModel):
@@ -495,47 +669,9 @@ class ProjectImport(BaseModel):
 @app.post("/api/projects/import")
 async def import_project(data: ProjectImport, auth: bool = Depends(require_auth)):
     """Import a previously exported project."""
-    from models.state import LayerState, AgentState, AgentStatus, LayerStatus, AgentOutput, GateResult
-
-    # Create base project
-    project = get_orchestrator().create_project(data.title, data.user_constraints)
-
-    # Override with imported data
-    project.project_id = data.project_id
-    project.status = data.status
-    project.current_layer = data.current_layer
-    project.created_at = data.created_at
-    project.updated_at = data.updated_at
-    project.manuscript = data.manuscript
-
-    # Restore layer and agent states
-    for layer_id_str, layer_data in data.layers.items():
-        layer_id = int(layer_id_str)
-        if layer_id in project.layers:
-            project.layers[layer_id].status = LayerStatus(layer_data["status"])
-
-            for agent_id, agent_data in layer_data["agents"].items():
-                if agent_id in project.layers[layer_id].agents:
-                    agent_state = project.layers[layer_id].agents[agent_id]
-                    agent_state.status = AgentStatus(agent_data["status"])
-                    agent_state.attempts = agent_data.get("attempts", 0)
-
-                    if agent_data.get("output"):
-                        output_data = agent_data["output"]
-                        gate_result = None
-                        if output_data.get("gate_passed") is not None:
-                            gate_result = GateResult(
-                                passed=output_data["gate_passed"],
-                                message=output_data.get("gate_message", "")
-                            )
-                        agent_state.current_output = AgentOutput(
-                            agent_id=agent_id,
-                            content=output_data["content"],
-                            gate_result=gate_result
-                        )
-
-    # Re-register in orchestrator with original ID
-    get_orchestrator().projects[data.project_id] = project
+    project = get_orchestrator().import_project_state(data.model_dump())
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
 
     return {
         "success": True,
@@ -621,6 +757,9 @@ async def write_chapter(
 
             # Sort chapters by number
             project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+            # Persist
+            store = get_project_store()
+            store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
 
         return {
             "success": True,
@@ -740,6 +879,9 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
 
                 project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
                 chapters_written.append(chapter_num)
+                # Persist after each chapter write
+                store = get_project_store()
+                store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
             else:
                 chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
 

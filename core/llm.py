@@ -5,6 +5,7 @@ Provides a consistent interface for the Anthropic Claude API
 that integrates with the book development orchestrator.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -82,13 +83,15 @@ class ClaudeLLMClient:
         tokens = max_tokens or self.max_tokens
 
         try:
-            # Use synchronous client (Anthropic SDK handles it)
-            response = self.client.messages.create(
+            # Anthropic SDK client is synchronous; run in a thread so we don't
+            # block the event loop (critical for background jobs + API polling).
+            response = await asyncio.to_thread(
+                self.client.messages.create,
                 model=self.model,
                 max_tokens=tokens,
                 system=system_prompt,
                 messages=messages,
-                temperature=temperature
+                temperature=temperature,
             )
 
             content = response.content[0].text
@@ -101,9 +104,16 @@ class ClaudeLLMClient:
                     content = self._fix_truncated_json(content)
 
             if response_format == "json":
-                # Extract JSON from response (handle markdown code blocks)
+                # Extract JSON from response (handle markdown code blocks / stray text)
                 json_str = self._extract_json(content)
-                return json.loads(json_str)
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # One more attempt: ask Claude to repair its own JSON.
+                    repaired = await self._repair_json_via_llm(content)
+                    if repaired is not None:
+                        return repaired
+                    raise
 
             return content
 
@@ -116,7 +126,11 @@ class ClaudeLLMClient:
             raise ValueError(f"Invalid JSON response from Claude: {e}")
 
     def _extract_json(self, content: str) -> str:
-        """Extract JSON from response, handling markdown code blocks."""
+        """
+        Extract JSON from a response, handling:
+        - Markdown code fences
+        - Leading/trailing commentary
+        """
         content = content.strip()
 
         # Remove markdown code blocks if present
@@ -128,7 +142,41 @@ class ClaudeLLMClient:
         if content.endswith("```"):
             content = content[:-3]
 
-        return content.strip()
+        content = content.strip()
+
+        # Fast path: already valid JSON
+        if content and content[0] in "{[":
+            return content
+
+        # If there's surrounding text, try to grab the outermost JSON object/array.
+        first_obj = content.find("{")
+        first_arr = content.find("[")
+        starts = [i for i in [first_obj, first_arr] if i != -1]
+        if not starts:
+            return content
+
+        start = min(starts)
+        # Heuristic end: last closing brace/bracket
+        last_obj = content.rfind("}")
+        last_arr = content.rfind("]")
+        end = max(last_obj, last_arr)
+        if end == -1 or end <= start:
+            return content[start:]
+
+        candidate = content[start : end + 1].strip()
+
+        # Try trimming from the end until JSON parses (handles extra trailing text).
+        # Keep this bounded to avoid pathological behavior.
+        for _ in range(25):
+            try:
+                json.loads(candidate)
+                return candidate
+            except Exception:
+                candidate = candidate[:-1].rstrip()
+                if not candidate:
+                    break
+
+        return content[start : end + 1].strip()
 
     def _fix_truncated_json(self, content: str) -> str:
         """Attempt to fix truncated JSON by closing open brackets."""
@@ -155,6 +203,37 @@ class ClaudeLLMClient:
         content += '}' * open_braces
 
         return content
+
+    async def _repair_json_via_llm(self, bad_content: str) -> Optional[dict]:
+        """
+        Ask the model to convert a non-parseable JSON-like response into valid JSON.
+        Returns None if repair fails.
+        """
+        try:
+            prompt = f"""Fix the following content into valid JSON.
+
+Rules:
+- Output ONLY valid JSON (no markdown, no commentary).
+- Do not use ellipses like ... anywhere.
+- If something is missing, infer a reasonable value rather than leaving placeholders.
+
+Content to repair:
+{bad_content}
+"""
+            response = await asyncio.to_thread(
+                self.client.messages.create,
+                model=self.model,
+                max_tokens=min(self.max_tokens, 6000),
+                system="You are a JSON repair assistant. Return only valid JSON.",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            fixed = response.content[0].text
+            json_str = self._extract_json(fixed)
+            return json.loads(json_str)
+        except Exception:
+            logger.exception("JSON repair attempt failed")
+            return None
 
     async def generate_structured(
         self,
