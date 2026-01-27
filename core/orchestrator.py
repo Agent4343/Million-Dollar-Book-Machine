@@ -483,14 +483,18 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         """Get comprehensive status of a project."""
         layers_status = {}
         for layer_id, layer in project.layers.items():
-            agents_status = {
-                aid: {
+            agents_status = {}
+            for aid, a in layer.agents.items():
+                agent_data = {
                     "status": a.status.value,
                     "attempts": a.attempts,
                     "has_output": a.current_output is not None
                 }
-                for aid, a in layer.agents.items()
-            }
+                # Include actual output content for agents that have completed
+                if a.current_output is not None:
+                    agent_data["current_output"] = a.current_output.content
+                agents_status[aid] = agent_data
+
             layers_status[layer_id] = {
                 "name": layer.name,
                 "status": layer.status.value,
