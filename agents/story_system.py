@@ -85,6 +85,11 @@ Define the world's operating rules:
 
 CHARACTER_ARCHITECTURE_PROMPT = """You are a character architect. Design the cast of characters as agents of thematic change.
 
+## CRITICAL: User-Provided Character Details
+{user_story_bible}
+
+**If the user provided character names, physical descriptions, or backstory above, you MUST use those EXACT details. Do NOT invent new names or change any details they provided.**
+
 ## Theme:
 {primary_theme}
 
@@ -308,8 +313,27 @@ async def execute_world_rules(context: ExecutionContext) -> Dict[str, Any]:
 async def execute_character_architecture(context: ExecutionContext) -> Dict[str, Any]:
     """Execute character architecture agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
+
+    # Check for user-provided story bible content
+    user_story_bible = constraints.get("story_bible", "")
+    user_description = constraints.get("description", "")
+    user_content = user_story_bible or user_description
+
+    # Format user content for the prompt
+    if user_content and len(user_content) > 200:
+        user_story_bible_block = f"""The author has provided the following story bible/description:
+
+{user_content[:8000]}
+
+**IMPORTANT: Extract and use the EXACT character names, ages, physical descriptions,
+relationships, and backstories from the above content. Do NOT invent new names or details.**
+"""
+    else:
+        user_story_bible_block = "(No user-provided character details - create original characters based on theme and story question)"
 
     prompt = CHARACTER_ARCHITECTURE_PROMPT.format(
+        user_story_bible=user_story_bible_block,
         primary_theme=context.inputs.get("thematic_architecture", {}).get("primary_theme", {}),
         central_dramatic_question=context.inputs.get("story_question", {}).get("central_dramatic_question", ""),
         world_rules=context.inputs.get("world_rules", {})

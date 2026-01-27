@@ -12,7 +12,7 @@ from core.orchestrator import ExecutionContext
 try:
     from agents.story_bible import format_story_bible_for_chapter
 except ImportError:
-    def format_story_bible_for_chapter(story_bible):
+    def format_story_bible_for_chapter(story_bible, user_constraints=None):
         return "No story bible available."
 
 
@@ -169,10 +169,24 @@ async def execute_chapter_writer(
 
     # Get story bible reference for consistency
     story_bible = context.inputs.get("story_bible", {})
-    story_bible_reference = format_story_bible_for_chapter(story_bible)
+    user_constraints = context.inputs.get("user_constraints", {})
+    story_bible_reference = format_story_bible_for_chapter(story_bible, user_constraints)
 
     # Build explicit character names block to prevent name drift
     character_names_block = _build_character_names_block(story_bible, character_arch)
+
+    # If user provided their own story_bible or detailed description, add it directly to ensure their vision is preserved
+    user_story_content = user_constraints.get("story_bible", "") or user_constraints.get("description", "")
+    if user_story_content and len(user_story_content) > 500:
+        story_bible_reference = f"""## AUTHOR'S STORY BIBLE (MUST FOLLOW EXACTLY)
+The author provided the following canonical story bible. All character names,
+settings, relationships, and details MUST match this exactly:
+
+{user_story_content[:5000]}
+
+---
+
+{story_bible_reference}"""
 
     # Build the prompt
     prompt = CHAPTER_WRITING_PROMPT.format(

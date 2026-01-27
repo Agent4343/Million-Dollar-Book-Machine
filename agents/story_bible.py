@@ -158,10 +158,97 @@ async def execute_story_bible(context: ExecutionContext) -> Dict[str, Any]:
 
     This runs after character_architecture, world_rules, and relationship_dynamics
     to lock in all story facts before chapter writing begins.
+
+    IMPORTANT: If the user provides their own story_bible content (via user_constraints),
+    that content takes PRIORITY over generated content to preserve the user's vision.
     """
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
 
+    # Check if user provided their own story bible content
+    user_story_bible = constraints.get("story_bible", "")
+    user_description = constraints.get("description", "")
+
+    # If user provided a detailed story bible (check for character names,
+    # physical descriptions, or other story bible markers)
+    user_content = user_story_bible or user_description
+
+    story_bible_markers = [
+        "protagonist", "antagonist", "physical description", "eye color",
+        "hair color", "age:", "occupation:", "backstory", "character",
+        "setting:", "location:", "timeline", "chapter outline", "canonical"
+    ]
+
+    # Check if user content looks like a comprehensive story bible
+    is_comprehensive_story_bible = False
+    if user_content and len(user_content) > 500:  # Substantial content
+        markers_found = sum(1 for marker in story_bible_markers
+                          if marker.lower() in user_content.lower())
+        is_comprehensive_story_bible = markers_found >= 3  # At least 3 markers
+
+    if is_comprehensive_story_bible:
+        # User provided their own comprehensive story bible - parse and use it
+        # Store both the raw text and try to structure it
+        if llm:
+            # Use LLM to structure the user's story bible into our format
+            structure_prompt = f"""The user has provided a comprehensive story bible.
+Parse this content and structure it into JSON format, preserving ALL details exactly as provided.
+
+USER'S STORY BIBLE:
+{user_content[:12000]}
+
+Extract and structure into this JSON format, preserving the EXACT names, ages, descriptions, and details from the user's content:
+{{
+    "character_registry": [
+        {{
+            "id": "char_001",
+            "canonical_name": "[EXACT name from user's content]",
+            "aliases": ["any nicknames mentioned"],
+            "age": [age as number],
+            "physical": {{
+                "height": "...",
+                "build": "...",
+                "hair": "...",
+                "eyes": "...",
+                "distinguishing_features": [...]
+            }},
+            "role": "protagonist|antagonist|supporting",
+            "occupation": "...",
+            "relationships": {{}},
+            "traits": [...],
+            "backstory": "..."
+        }}
+    ],
+    "location_registry": {{
+        "primary_city": "[city from user's content]",
+        "key_locations": [...]
+    }},
+    "timeline": {{
+        "story_present": "...",
+        "key_dates": [...]
+    }},
+    "user_provided_story_bible": true,
+    "raw_user_content": "[first 2000 chars of user content for reference]"
+}}
+
+CRITICAL: Use the EXACT names, ages, and details from the user's content. Do NOT invent or change anything."""
+
+            response = await llm.generate(structure_prompt, response_format="json")
+            response["user_provided_story_bible"] = True
+            response["raw_user_content"] = user_content[:3000]
+            return response
+        else:
+            # Demo mode - return the user's content as-is
+            return {
+                "user_provided_story_bible": True,
+                "raw_user_content": user_content,
+                "character_registry": [],
+                "location_registry": {},
+                "timeline": {},
+                "consistency_rules": ["Follow the user's story bible exactly"]
+            }
+
+    # No user-provided story bible - generate one from agent outputs
     prompt = STORY_BIBLE_PROMPT.format(
         character_architecture=context.inputs.get("character_architecture", {}),
         world_rules=context.inputs.get("world_rules", {}),
@@ -269,10 +356,13 @@ async def execute_story_bible(context: ExecutionContext) -> Dict[str, Any]:
         }
 
 
-def format_story_bible_for_chapter(story_bible: Dict[str, Any]) -> str:
+def format_story_bible_for_chapter(story_bible: Dict[str, Any], user_constraints: Dict[str, Any] = None) -> str:
     """
     Format the story bible into a concise reference string for chapter writers.
     This is injected into every chapter writing prompt to ensure consistency.
+
+    If user provided their own story bible, that content is included directly
+    to ensure their character names, settings, and details are preserved.
     """
     if not story_bible:
         return "No story bible available."
@@ -282,6 +372,37 @@ def format_story_bible_for_chapter(story_bible: Dict[str, Any]) -> str:
         return f"## STORY BIBLE REFERENCE\n\n{story_bible}"
 
     lines = ["## STORY BIBLE - CANONICAL REFERENCE (MUST FOLLOW EXACTLY)"]
+
+    # If this is a user-provided story bible, include their raw content prominently
+    if story_bible.get("user_provided_story_bible"):
+        raw_content = story_bible.get("raw_user_content", "")
+        if raw_content:
+            lines.append("")
+            lines.append("### USER-PROVIDED CANONICAL REFERENCE")
+            lines.append("**The following is the author's canonical story bible. All names, ")
+            lines.append("settings, character details, and relationships MUST match exactly:**")
+            lines.append("")
+            lines.append(raw_content[:4000])  # Include substantial portion
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+    # Also include user description/story_bible if provided in constraints
+    if user_constraints:
+        user_story_bible = user_constraints.get("story_bible", "")
+        user_description = user_constraints.get("description", "")
+        user_content = user_story_bible or user_description
+
+        if user_content and len(user_content) > 200:
+            # Check if it looks like story content
+            story_markers = ["protagonist", "antagonist", "character", "chapter", "setting"]
+            if any(marker in user_content.lower() for marker in story_markers):
+                lines.append("")
+                lines.append("### AUTHOR'S VISION (use these details exactly)")
+                lines.append(user_content[:3000])
+                lines.append("")
+                lines.append("---")
+                lines.append("")
     lines.append("")
 
     # Characters

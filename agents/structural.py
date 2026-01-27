@@ -156,6 +156,13 @@ IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output compl
 
 CHAPTER_BLUEPRINT_PROMPT = """You are an outline architect. Create the detailed chapter and scene blueprint.
 
+## CRITICAL: User-Provided Chapter Outline
+{user_chapter_outline}
+
+**If the user provided chapter outlines or a story bible above, you MUST follow their chapter structure,
+use their EXACT scene descriptions, and preserve their chapter titles. Do NOT invent new chapters or scenes
+that contradict their outline.**
+
 ## Plot Structure:
 {plot_structure}
 
@@ -447,7 +454,37 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
 
+    # Check for user-provided story bible with chapter outlines
+    user_story_bible = constraints.get("story_bible", "")
+    user_description = constraints.get("description", "")
+    user_content = user_story_bible or user_description
+
+    # Format user chapter outline if provided
+    if user_content and len(user_content) > 200:
+        # Check if it contains chapter outline markers
+        has_chapter_markers = any(marker in user_content.lower() for marker in
+            ["chapter 1", "chapter one", "ch. 1", "chapter outline", "chapters:", "scene 1", "act 1"])
+
+        if has_chapter_markers:
+            user_chapter_outline_block = f"""The author has provided the following chapter outline / story bible:
+
+{user_content[:10000]}
+
+**CRITICAL: Follow this chapter structure and scene breakdown exactly. Use the author's chapter titles,
+scene descriptions, and plot points. Do NOT invent chapters or scenes that contradict this outline.**
+"""
+        else:
+            user_chapter_outline_block = f"""The author has provided the following story vision:
+
+{user_content[:5000]}
+
+Use this content to inform the chapter structure, ensuring character names and plot points match the author's vision.
+"""
+    else:
+        user_chapter_outline_block = "(No user-provided chapter outline - create based on plot structure and pacing)"
+
     prompt = CHAPTER_BLUEPRINT_PROMPT.format(
+        user_chapter_outline=user_chapter_outline_block,
         plot_structure=context.inputs.get("plot_structure", {}),
         pacing_design=context.inputs.get("pacing_design", {}),
         character_architecture=context.inputs.get("character_architecture", {}),

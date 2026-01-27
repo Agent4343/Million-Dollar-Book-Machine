@@ -638,6 +638,8 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
                         </div>
                         <label>Book Description / Vision</label>
                         <textarea id="projectDescription" rows="4" placeholder="Describe your book idea..."></textarea>
+                        <label>Story Bible (Optional - paste your detailed character/plot reference)</label>
+                        <textarea id="projectStoryBible" rows="8" placeholder="If you have a detailed story bible with character names, physical descriptions, settings, relationships, chapter outlines, etc., paste it here. This will be used as the canonical reference for ALL generated content. Include character names exactly as you want them to appear."></textarea>
                         <div class="grid-2">
                             <div>
                                 <label>Target Word Count</label>
@@ -1603,6 +1605,8 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
         document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            const storyBible = document.getElementById('projectStoryBible').value.trim();
+
             const body = {
                 title: document.getElementById('projectTitle').value,
                 genre: document.getElementById('projectGenre').value,
@@ -1610,7 +1614,8 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
                 target_word_count: parseInt(document.getElementById('projectWordCount').value),
                 target_audience: document.getElementById('projectAudience').value,
                 comparable_titles: document.getElementById('projectComps').value.split(',').map(s => s.trim()).filter(s => s),
-                themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s)
+                themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s),
+                additional_constraints: storyBible ? { story_bible: storyBible } : {}
             };
 
             if (!body.title || !body.genre) {
