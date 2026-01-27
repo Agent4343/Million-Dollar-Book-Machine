@@ -164,6 +164,19 @@ RELATIONSHIP_DYNAMICS = AgentDefinition(
     dependencies=["character_architecture"]
 )
 
+STORY_BIBLE = AgentDefinition(
+    agent_id="story_bible",
+    name="Story Bible",
+    layer=7,
+    agent_type=AgentType.CREATIVE,
+    purpose="Create canonical reference document to ensure consistency across all chapters",
+    inputs=["character_architecture", "world_rules", "relationship_dynamics"],
+    outputs=["character_registry", "location_registry", "timeline", "relationship_map", "terminology", "backstory_facts", "consistency_rules"],
+    gate_criteria="All canonical facts locked in with no ambiguity",
+    fail_condition="Missing key character details or conflicting facts",
+    dependencies=["relationship_dynamics"]
+)
+
 
 # =============================================================================
 # LAYER 3: STRUCTURAL ENGINE
@@ -515,6 +528,63 @@ IP_CLEARANCE = AgentDefinition(
 
 
 # =============================================================================
+# LAYER 21: MARKETING & COMMERCIAL OPTIMIZATION
+# =============================================================================
+
+BLURB_GENERATOR = AgentDefinition(
+    agent_id="blurb_generator",
+    name="Amazon Blurb Generator",
+    layer=21,
+    agent_type=AgentType.GENERATION,
+    purpose="Generate Amazon-optimized book descriptions and marketing copy",
+    inputs=["concept_definition", "character_architecture", "story_question", "user_constraints"],
+    outputs=["short_blurb", "full_blurb", "a_plus_content", "tagline", "comparison_pitch"],
+    gate_criteria="Blurb follows Amazon best practices and hooks reader",
+    fail_condition="Generic blurb without emotional hooks",
+    dependencies=["publishing_package"]
+)
+
+KEYWORD_OPTIMIZER = AgentDefinition(
+    agent_id="keyword_optimizer",
+    name="KDP Keyword Optimizer",
+    layer=21,
+    agent_type=AgentType.RESEARCH,
+    purpose="Generate optimized KDP keywords and BISAC categories",
+    inputs=["user_constraints", "world_rules", "character_architecture", "thematic_architecture", "plot_structure"],
+    outputs=["primary_keywords", "backup_keywords", "bisac_categories", "amazon_categories", "search_volume_notes", "competition_notes"],
+    gate_criteria="7 high-quality keywords with proper categorization",
+    fail_condition="Keywords too generic or violate KDP rules",
+    dependencies=["blurb_generator"]
+)
+
+SERIES_BIBLE_GENERATOR = AgentDefinition(
+    agent_id="series_bible",
+    name="Series Bible Generator",
+    layer=21,
+    agent_type=AgentType.GENERATION,
+    purpose="Create series continuity bible for multi-book planning",
+    inputs=["story_bible", "draft_generation", "character_architecture"],
+    outputs=["series_potential", "unresolved_threads", "character_futures", "world_expansion", "series_hooks", "spinoff_potential", "timeline_for_series", "recurring_elements", "series_title_suggestions"],
+    gate_criteria="Series bible captures all continuation potential",
+    fail_condition="Misses obvious sequel opportunities",
+    dependencies=["keyword_optimizer"]
+)
+
+COMP_ANALYSIS = AgentDefinition(
+    agent_id="comp_analysis",
+    name="Comp Title Analysis",
+    layer=21,
+    agent_type=AgentType.RESEARCH,
+    purpose="Analyze comparable titles for market positioning",
+    inputs=["user_constraints", "publishing_package"],
+    outputs=["provided_comps", "positioning_recommendations", "price_positioning", "launch_strategy"],
+    gate_criteria="Clear positioning strategy with actionable recommendations",
+    fail_condition="No differentiation from comps",
+    dependencies=["series_bible"]
+)
+
+
+# =============================================================================
 # AGENT REGISTRY
 # =============================================================================
 
@@ -530,6 +600,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "world_rules": WORLD_RULES,
     "character_architecture": CHARACTER_ARCHITECTURE,
     "relationship_dynamics": RELATIONSHIP_DYNAMICS,
+    "story_bible": STORY_BIBLE,
     # Layer 8-10: Structural Engine
     "plot_structure": PLOT_STRUCTURE,
     "pacing_design": PACING_DESIGN,
@@ -559,6 +630,11 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "final_proof": FINAL_PROOF,
     "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
+    # Layer 21: Marketing & Commercial
+    "blurb_generator": BLURB_GENERATOR,
+    "keyword_optimizer": KEYWORD_OPTIMIZER,
+    "series_bible": SERIES_BIBLE_GENERATOR,
+    "comp_analysis": COMP_ANALYSIS,
 }
 
 
