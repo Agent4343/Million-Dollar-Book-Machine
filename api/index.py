@@ -736,6 +736,9 @@ async def write_chapter(
             if agent_state.current_output:
                 inputs[agent_id] = agent_state.current_output.content
 
+    # Add user_constraints to inputs
+    inputs["user_constraints"] = project.user_constraints
+
     context = ExecutionContext(
         project=project,
         inputs=inputs,
