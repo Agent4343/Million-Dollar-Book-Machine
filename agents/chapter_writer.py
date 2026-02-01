@@ -215,42 +215,63 @@ settings, relationships, and details MUST match this exactly:
         # Adjust token limit based on mode
         max_tokens = 1500 if quick_mode else 12000
 
-        # Generate the chapter
-        chapter_text = await llm.generate(
-            prompt,
-            max_tokens=max_tokens,
-            temperature=0.8   # Slightly more creative for prose
-        )
+        try:
+            # Generate the chapter
+            chapter_text = await llm.generate(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=0.8   # Slightly more creative for prose
+            )
 
-        # Skip summary in quick mode to save time
-        if quick_mode:
-            summary = f"Preview of Chapter {chapter_number}"
-        else:
-            # Generate a summary for context in next chapter
-            summary_prompt = f"""Summarize this chapter in 2-3 sentences, focusing on:
+            # Handle case where LLM returns dict instead of string
+            if isinstance(chapter_text, dict):
+                chapter_text = chapter_text.get("text", chapter_text.get("content", str(chapter_text)))
+
+            # Validate we got actual content
+            if not chapter_text or len(str(chapter_text)) < 50:
+                return {
+                    "error": f"LLM returned empty or too short response for chapter {chapter_number}",
+                    "chapter_number": chapter_number,
+                    "text": None
+                }
+
+            # Skip summary in quick mode to save time
+            if quick_mode:
+                summary = f"Preview of Chapter {chapter_number}"
+            else:
+                # Generate a summary for context in next chapter
+                summary_prompt = f"""Summarize this chapter in 2-3 sentences, focusing on:
 1. Key plot developments
 2. Character emotional state at end
 3. Any cliffhangers or hooks
 
 Chapter text:
-{chapter_text[:3000]}...
+{str(chapter_text)[:3000]}...
 
 Summary:"""
-            summary = await llm.generate(summary_prompt, max_tokens=200)
+                summary = await llm.generate(summary_prompt, max_tokens=200)
+                if isinstance(summary, dict):
+                    summary = summary.get("summary", str(summary))
 
-        word_count = len(chapter_text.split())
+            word_count = len(str(chapter_text).split())
 
-        return {
-            "chapter_number": chapter_number,
-            "title": chapter_data.get("title", f"Chapter {chapter_number}"),
-            "text": chapter_text,
-            "summary": summary,
-            "word_count": word_count,
-            "target_word_count": word_target,
-            "pov": chapter_data.get("pov", "Unknown"),
-            "scenes_written": len(chapter_data.get("scenes", [])),
-            "quick_mode": quick_mode
-        }
+            return {
+                "chapter_number": chapter_number,
+                "title": chapter_data.get("title", f"Chapter {chapter_number}"),
+                "text": str(chapter_text),
+                "summary": str(summary) if summary else f"Chapter {chapter_number} summary",
+                "word_count": word_count,
+                "target_word_count": word_target,
+                "pov": chapter_data.get("pov", "Unknown"),
+                "scenes_written": len(chapter_data.get("scenes", [])),
+                "quick_mode": quick_mode
+            }
+        except Exception as e:
+            return {
+                "error": f"LLM error for chapter {chapter_number}: {str(e)}",
+                "chapter_number": chapter_number,
+                "text": None
+            }
     else:
         # Demo mode placeholder
         return {

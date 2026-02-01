@@ -847,10 +847,16 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
             if agent_state.current_output:
                 inputs[agent_id] = agent_state.current_output.content
 
+    # Add user_constraints to inputs
+    inputs["user_constraints"] = project.user_constraints
+
+    llm_client = get_llm_client()
+    print(f"[CHAPTER WRITER] LLM client ready: {llm_client is not None}, inputs count: {len(inputs)}")
+
     context = ExecutionContext(
         project=project,
         inputs=inputs,
-        llm_client=get_llm_client()
+        llm_client=llm_client
     )
 
     chapters_written = []
@@ -866,7 +872,9 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
 
         chapter_num = ch.get("number")
         try:
+            print(f"[CHAPTER WRITER] Starting chapter {chapter_num}...")
             result = await execute_chapter_writer(context, chapter_num, quick_mode=request.quick_mode)
+            print(f"[CHAPTER WRITER] Result for chapter {chapter_num}: error={result.get('error')}, text_length={len(result.get('text', '') or '')}")
 
             if result.get("text") and not result.get("error"):
                 # Store chapter
@@ -888,10 +896,14 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
                 # Persist after each chapter write
                 store = get_project_store()
                 store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+                print(f"[CHAPTER WRITER] Chapter {chapter_num} written successfully!")
             else:
-                chapters_failed.append({"number": chapter_num, "error": result.get("error", "Unknown error")})
+                error_msg = result.get("error", "Unknown error - no text returned")
+                print(f"[CHAPTER WRITER] Chapter {chapter_num} failed: {error_msg}")
+                chapters_failed.append({"number": chapter_num, "error": error_msg})
 
         except Exception as e:
+            print(f"[CHAPTER WRITER] Chapter {chapter_num} exception: {str(e)}")
             chapters_failed.append({"number": chapter_num, "error": str(e)})
 
     # Calculate remaining chapters
