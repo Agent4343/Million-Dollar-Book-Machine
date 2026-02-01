@@ -97,7 +97,11 @@ async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
     """Audit for continuity and logic errors."""
     chapters = _best_available_chapters(context)
     world_rules = context.inputs.get("world_rules", {})
+    if not isinstance(world_rules, dict):
+        world_rules = {}
     characters = context.inputs.get("character_architecture", {})
+    if not isinstance(characters, dict):
+        characters = {}
 
     llm = context.llm_client
     if llm and chapters:
@@ -150,7 +154,12 @@ Rules:
 async def execute_emotional_validation(context: ExecutionContext) -> Dict[str, Any]:
     """Validate emotional impact and arc fulfillment."""
     chapters = _best_available_chapters(context)
-    protagonist_arc = context.inputs.get("protagonist_arc") or context.inputs.get("character_architecture", {}).get("protagonist_arc", {})
+    char_arch = context.inputs.get("character_architecture", {})
+    if not isinstance(char_arch, dict):
+        char_arch = {}
+    protagonist_arc = context.inputs.get("protagonist_arc") or char_arch.get("protagonist_arc", {})
+    if not isinstance(protagonist_arc, dict):
+        protagonist_arc = {}
 
     llm = context.llm_client
     if llm and chapters:
@@ -330,8 +339,14 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
     chapters = _best_available_chapters(context)
     llm = context.llm_client
     continuity = context.inputs.get("continuity_audit", {})
+    if not isinstance(continuity, dict):
+        continuity = {}
     emotional = context.inputs.get("emotional_validation", {})
+    if not isinstance(emotional, dict):
+        emotional = {}
     originality = context.inputs.get("originality_scan", {})
+    if not isinstance(originality, dict):
+        originality = {}
 
     if llm and chapters:
         limit = min(len(chapters), _limit_for_job(context, "max_rewrite_chapters", 5))
@@ -360,7 +375,11 @@ TEXT:
 {_chapter_text(ch)}
 """
             out = await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=6000)
+            if not isinstance(out, dict):
+                out = {}
             new_text = out.get("text", "")
+            if not isinstance(new_text, str):
+                new_text = str(new_text) if new_text else ""
             num = _chapter_number(ch)
             revised_ch = {
                 "number": num,
