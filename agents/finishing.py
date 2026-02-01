@@ -392,27 +392,87 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
     originality = context.inputs.get("originality_scan", {})
 
     # Get chapters that need revision
-    chapters = context.inputs.get("draft_generation", {}).get("chapters", [])
+    draft = context.inputs.get("draft_generation", {})
+    chapters = draft.get("chapters", [])
+
+    # Check if we have actual chapters or just placeholders
+    has_real_content = False
+    for ch in chapters:
+        if isinstance(ch, dict):
+            text = ch.get("text", "")
+            # Check if it's actual content (not a placeholder)
+            if text and len(text) > 200 and not text.startswith("[Chapter"):
+                has_real_content = True
+                break
+
+    # If no real chapters written yet, pass through with minimal response
+    if not has_real_content:
+        return {
+            "revised_chapters": [
+                {
+                    "chapter_number": ch.get("number", ch.get("chapter_number", i)) if isinstance(ch, dict) else i,
+                    "original_issues": [],
+                    "revisions": [],
+                    "full_revised_text": ch.get("text", "") if isinstance(ch, dict) else ""
+                }
+                for i, ch in enumerate(chapters, 1)
+            ],
+            "revision_log": [
+                {"chapter": 0, "issue_type": "info", "description": "Chapters are placeholders - no revision needed until actual content is written", "status": "skipped"}
+            ],
+            "resolved_flags": [],
+            "unresolved_flags": [],
+            "revision_summary": "No chapters with actual content to revise. Run chapter writing first."
+        }
 
     prompt = STRUCTURAL_REWRITE_PROMPT.format(
-        chapters=chapters,
+        chapters=chapters[:5],  # Limit to avoid token overflow
         continuity_issues=continuity.get("continuity_report", {}),
         emotional_feedback=emotional.get("scene_resonance_scores", {}),
         originality_flags=originality.get("structural_similarity_report", {})
     )
 
     if llm:
-        response = await llm.generate(prompt, response_format="json")
-        return response
+        try:
+            response = await llm.generate(prompt, response_format="json")
+
+            # Ensure required keys exist
+            if "revised_chapters" not in response:
+                response["revised_chapters"] = []
+            if "revision_log" not in response:
+                response["revision_log"] = []
+            if "resolved_flags" not in response:
+                response["resolved_flags"] = []
+
+            return response
+        except Exception as e:
+            # Return a valid response even on error
+            return {
+                "revised_chapters": [
+                    {
+                        "chapter_number": ch.get("number", ch.get("chapter_number", i)) if isinstance(ch, dict) else i,
+                        "original_issues": [],
+                        "revisions": [],
+                        "full_revised_text": ch.get("text", "") if isinstance(ch, dict) else ""
+                    }
+                    for i, ch in enumerate(chapters, 1)
+                ],
+                "revision_log": [
+                    {"chapter": 0, "issue_type": "error", "description": f"LLM error: {str(e)}", "status": "skipped"}
+                ],
+                "resolved_flags": [],
+                "unresolved_flags": [],
+                "revision_summary": f"Error during revision: {str(e)}"
+            }
     else:
         # Placeholder response
         return {
             "revised_chapters": [
                 {
-                    "chapter_number": i,
+                    "chapter_number": ch.get("number", ch.get("chapter_number", i)) if isinstance(ch, dict) else i,
                     "original_issues": ["[Placeholder - would contain actual issues]"],
                     "revisions": [],
-                    "full_revised_text": ch.get("text", f"[Chapter {i} revised text]")
+                    "full_revised_text": ch.get("text", f"[Chapter {i} revised text]") if isinstance(ch, dict) else f"[Chapter {i}]"
                 }
                 for i, ch in enumerate(chapters, 1)
             ],
