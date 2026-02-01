@@ -519,15 +519,26 @@ async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
 
     # Get revised chapters or fall back to original
     revised = context.inputs.get("structural_rewrite", {})
+    if not isinstance(revised, dict):
+        revised = {}
     chapters = revised.get("revised_chapters", [])
 
     if not chapters:
         # Fall back to draft generation
         draft = context.inputs.get("draft_generation", {})
+        if not isinstance(draft, dict):
+            draft = {}
         chapters = draft.get("chapters", [])
 
-    style_guide = context.inputs.get("voice_specification", {}).get("style_guide", {})
-    voice_spec = context.inputs.get("voice_specification", {})
+    # Ensure chapters is a list
+    if not isinstance(chapters, list):
+        chapters = []
+
+    voice_spec_data = context.inputs.get("voice_specification", {})
+    if not isinstance(voice_spec_data, dict):
+        voice_spec_data = {}
+    style_guide = voice_spec_data.get("style_guide", {})
+    voice_spec = voice_spec_data
 
     if llm and chapters:
         edited_chapters = []
@@ -545,6 +556,10 @@ async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
 
             ch_number = ch.get("chapter_number", ch.get("number", i + 1))
             ch_text = ch.get("full_revised_text", ch.get("text", ch.get("content", "")))
+
+            # Ensure ch_text is a string before any operations
+            if not isinstance(ch_text, str):
+                ch_text = str(ch_text) if ch_text else ""
 
             if not ch_text or len(ch_text) < 50:
                 # Skip placeholder/empty chapters
@@ -585,7 +600,16 @@ Return ONLY valid JSON:
 
             try:
                 result = await llm.generate(single_chapter_prompt, response_format="json", max_tokens=8000)
+
+                # Ensure result is a dict before calling .get()
+                if not isinstance(result, dict):
+                    result = {}
+
                 edited_text = result.get("edited_text", ch_text)
+                # Ensure edited_text is a string
+                if not isinstance(edited_text, str):
+                    edited_text = str(edited_text) if edited_text else ch_text
+
                 edits = result.get("edits_made", 0)
                 grammar = result.get("grammar_fixes", 0)
                 clarity = result.get("clarity_improvements", 0)
@@ -594,12 +618,12 @@ Return ONLY valid JSON:
                     "chapter_number": ch_number,
                     "edited_text": edited_text,
                     "word_count": len(edited_text.split()) if edited_text else 0,
-                    "edits_made": edits
+                    "edits_made": edits if isinstance(edits, int) else 0
                 })
 
-                total_edits += edits
-                grammar_count += grammar
-                clarity_count += clarity
+                total_edits += edits if isinstance(edits, int) else 0
+                grammar_count += grammar if isinstance(grammar, int) else 0
+                clarity_count += clarity if isinstance(clarity, int) else 0
 
             except Exception as e:
                 # On error, keep original text
@@ -661,9 +685,13 @@ async def execute_beta_simulation(context: ExecutionContext) -> Dict[str, Any]:
     """Execute beta reader simulation."""
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     # Get edited chapters
     line_edit = context.inputs.get("line_edit", {})
+    if not isinstance(line_edit, dict):
+        line_edit = {}
     chapters = line_edit.get("edited_chapters", [])
 
     reader_avatar = context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
@@ -762,14 +790,24 @@ async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any
     """Execute publishing package generation."""
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     title = context.project.title
     concept = context.inputs.get("concept_definition", {})
+    if not isinstance(concept, dict):
+        concept = {}
     market = context.inputs.get("market_intelligence", {})
+    if not isinstance(market, dict):
+        market = {}
 
     # Build summary from chapters
     line_edit = context.inputs.get("line_edit", {})
+    if not isinstance(line_edit, dict):
+        line_edit = {}
     chapters = line_edit.get("edited_chapters", [])
+    if not isinstance(chapters, list):
+        chapters = []
     summary = f"A {constraints.get('genre', 'fiction')} novel with {len(chapters)} chapters."
 
     prompt = PUBLISHING_PACKAGE_PROMPT.format(
