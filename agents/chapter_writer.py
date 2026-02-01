@@ -130,46 +130,63 @@ async def execute_chapter_writer(
 - **Word Target**: {scene.get('word_target', 1500)} words
 """
 
-    # Get character info for the POV character
+    # Get character info for the POV character - ensure dict type
     character_arch = context.inputs.get("character_architecture", {})
+    if not isinstance(character_arch, dict):
+        character_arch = {}
     protagonist = character_arch.get("protagonist_profile", {})
+    if not isinstance(protagonist, dict):
+        protagonist = {}
     supporting = character_arch.get("supporting_cast", [])
+    if not isinstance(supporting, list):
+        supporting = []
 
     character_reference = f"""
-**Protagonist**: {protagonist.get('name', 'Protagonist')}
-- Traits: {', '.join(protagonist.get('traits', []))}
-- Wound: {protagonist.get('backstory_wound', 'N/A')}
-- Want vs Need: {context.inputs.get('character_architecture', {}).get('want_vs_need', {})}
+**Protagonist**: {protagonist.get('name', 'Protagonist') if isinstance(protagonist, dict) else 'Protagonist'}
+- Traits: {', '.join(protagonist.get('traits', []) if isinstance(protagonist, dict) else [])}
+- Wound: {protagonist.get('backstory_wound', 'N/A') if isinstance(protagonist, dict) else 'N/A'}
+- Want vs Need: {character_arch.get('want_vs_need', {}) if isinstance(character_arch, dict) else {}}
 
 **Supporting Cast**:
 """
     for char in supporting[:3]:  # Limit to avoid token overflow
-        character_reference += f"- {char.get('name', '?')}: {char.get('function', 'N/A')}\n"
+        if isinstance(char, dict):
+            character_reference += f"- {char.get('name', '?')}: {char.get('function', 'N/A')}\n"
 
     # Get previous chapter summary if available
     previous_summary = "This is the first chapter."
     if chapter_number > 1:
         # Check if we have previous chapters in manuscript
         manuscript = context.project.manuscript
-        prev_chapters = manuscript.get("chapters", [])
-        for prev_ch in prev_chapters:
-            if prev_ch.get("number") == chapter_number - 1:
-                previous_summary = prev_ch.get("summary", "Previous chapter completed.")
-                break
+        if isinstance(manuscript, dict):
+            prev_chapters = manuscript.get("chapters", [])
+            for prev_ch in prev_chapters:
+                if isinstance(prev_ch, dict) and prev_ch.get("number") == chapter_number - 1:
+                    previous_summary = prev_ch.get("summary", "Previous chapter completed.")
+                    break
 
-    # Get thematic focus
+    # Get thematic focus - ensure dict type
     thematic = context.inputs.get("thematic_architecture", {})
+    if not isinstance(thematic, dict):
+        thematic = {}
+    primary_theme = thematic.get('primary_theme', {})
+    if not isinstance(primary_theme, dict):
+        primary_theme = {}
     thematic_focus = f"""
-- Primary Theme: {thematic.get('primary_theme', {}).get('statement', 'N/A')}
+- Primary Theme: {primary_theme.get('statement', 'N/A')}
 - Thematic Question: {thematic.get('thematic_question', 'N/A')}
 """
 
     # Adjust word target for quick mode
     word_target = 500 if quick_mode else chapter_data.get("word_target", 3000)
 
-    # Get story bible reference for consistency
+    # Get story bible reference for consistency - ensure dict types
     story_bible = context.inputs.get("story_bible", {})
+    if not isinstance(story_bible, dict):
+        story_bible = {"raw_content": str(story_bible)} if story_bible else {}
     user_constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(user_constraints, dict):
+        user_constraints = {}
     story_bible_reference = format_story_bible_for_chapter(story_bible, user_constraints)
 
     # Build explicit character names block to prevent name drift
@@ -177,7 +194,7 @@ async def execute_chapter_writer(
 
     # If user provided their own story_bible or detailed description, add it directly to ensure their vision is preserved
     user_story_content = user_constraints.get("story_bible", "") or user_constraints.get("description", "")
-    if user_story_content and len(user_story_content) > 500:
+    if user_story_content and len(str(user_story_content)) > 500:
         story_bible_reference = f"""## AUTHOR'S STORY BIBLE (MUST FOLLOW EXACTLY)
 The author provided the following canonical story bible. All character names,
 settings, relationships, and details MUST match this exactly:
@@ -291,26 +308,33 @@ def _build_character_names_block(story_bible: Dict[str, Any], character_arch: Di
     Build an explicit character names block to prevent name drift during chapter generation.
     This creates a clear list of canonical names that the LLM must use.
     """
+    # Ensure inputs are dicts
+    if not isinstance(story_bible, dict):
+        story_bible = {}
+    if not isinstance(character_arch, dict):
+        character_arch = {}
+
     lines = []
 
     # Get protagonist name from character architecture first (most reliable)
     protagonist = character_arch.get("protagonist_profile", {})
-    if protagonist.get("name"):
+    if isinstance(protagonist, dict) and protagonist.get("name"):
         lines.append(f"**PROTAGONIST**: {protagonist.get('name')} (use this exact name)")
 
     # Get supporting cast from character architecture
     supporting = character_arch.get("supporting_cast", [])
-    if supporting:
+    if isinstance(supporting, list) and supporting:
         lines.append("\n**SUPPORTING CHARACTERS**:")
         for char in supporting[:6]:  # Limit to prevent token overflow
-            name = char.get("name", "")
-            function = char.get("function", char.get("role", ""))
-            if name:
-                lines.append(f"- {name}: {function}")
+            if isinstance(char, dict):
+                name = char.get("name", "")
+                function = char.get("function", char.get("role", ""))
+                if name:
+                    lines.append(f"- {name}: {function}")
 
     # Also get from story bible character registry for completeness
     char_registry = story_bible.get("character_registry", [])
-    if char_registry and not lines:
+    if isinstance(char_registry, list) and char_registry and not lines:
         lines.append("**CHARACTERS (use EXACT names)**:")
         for char in char_registry[:8]:
             if isinstance(char, dict):
@@ -334,13 +358,28 @@ def _build_character_names_block(story_bible: Dict[str, Any], character_arch: Di
 
 def _format_voice_spec(voice_spec: Dict[str, Any]) -> str:
     """Format voice specification for the prompt."""
-    if not voice_spec:
+    if not voice_spec or not isinstance(voice_spec, dict):
         return "Standard third-person narrative voice."
 
     narrative = voice_spec.get("narrative_voice", {})
+    if not isinstance(narrative, dict):
+        narrative = {}
     syntax = voice_spec.get("syntax_patterns", {})
+    if not isinstance(syntax, dict):
+        syntax = {}
     dialogue = voice_spec.get("dialogue_style", {})
+    if not isinstance(dialogue, dict):
+        dialogue = {}
     style_guide = voice_spec.get("style_guide", {})
+    if not isinstance(style_guide, dict):
+        style_guide = {}
+
+    dos = style_guide.get('dos', ['Show dont tell'])
+    if not isinstance(dos, list):
+        dos = ['Show dont tell']
+    donts = style_guide.get('donts', ['Avoid info dumps'])
+    if not isinstance(donts, list):
+        donts = ['Avoid info dumps']
 
     return f"""
 **Narrative Voice**: {narrative.get('pov_type', 'third person')} - {narrative.get('tone', 'neutral')}
@@ -348,18 +387,22 @@ def _format_voice_spec(voice_spec: Dict[str, Any]) -> str:
 **Sentence Style**: {syntax.get('avg_sentence_length', '15-20 words')}, {syntax.get('complexity', 'varied')}
 **Dialogue**: {dialogue.get('tag_approach', 'minimal tags')}, {dialogue.get('subtext_level', 'moderate')}
 
-**Do**: {', '.join(style_guide.get('dos', ['Show dont tell'])[:5])}
-**Dont**: {', '.join(style_guide.get('donts', ['Avoid info dumps'])[:5])}
+**Do**: {', '.join(dos[:5])}
+**Dont**: {', '.join(donts[:5])}
 """
 
 
 def _format_world_rules(world_rules: Dict[str, Any]) -> str:
     """Format world rules for context."""
-    if not world_rules:
+    if not world_rules or not isinstance(world_rules, dict):
         return "Contemporary realistic setting."
 
     physical = world_rules.get("physical_rules", {})
+    if not isinstance(physical, dict):
+        physical = {}
     social = world_rules.get("social_rules", {})
+    if not isinstance(social, dict):
+        social = {}
 
     result = ""
     if physical.get("technology"):
@@ -369,7 +412,7 @@ def _format_world_rules(world_rules: Dict[str, Any]) -> str:
     if social.get("norms"):
         norms = social.get("norms", [])
         if isinstance(norms, list):
-            result += f"**Social Norms**: {', '.join(norms[:3])}\n"
+            result += f"**Social Norms**: {', '.join(str(n) for n in norms[:3])}\n"
 
     return result or "Contemporary realistic setting."
 
