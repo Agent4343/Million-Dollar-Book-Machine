@@ -194,7 +194,10 @@ async def execute_chapter_writer(
 
     # If user provided their own story_bible or detailed description, add it directly to ensure their vision is preserved
     user_story_content = user_constraints.get("story_bible", "") or user_constraints.get("description", "")
-    if user_story_content and len(str(user_story_content)) > 500:
+    # Ensure it's a string before slicing
+    if not isinstance(user_story_content, str):
+        user_story_content = str(user_story_content) if user_story_content else ""
+    if user_story_content and len(user_story_content) > 500:
         story_bible_reference = f"""## AUTHOR'S STORY BIBLE (MUST FOLLOW EXACTLY)
 The author provided the following canonical story bible. All character names,
 settings, relationships, and details MUST match this exactly:

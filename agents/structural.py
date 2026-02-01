@@ -413,6 +413,8 @@ async def execute_pacing_design(context: ExecutionContext) -> Dict[str, Any]:
     """Execute pacing design agent."""
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     prompt = PACING_DESIGN_PROMPT.format(
         plot_structure=context.inputs.get("plot_structure", {}),
@@ -453,11 +455,17 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
     """Execute chapter blueprint agent."""
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     # Check for user-provided story bible with chapter outlines
     user_story_bible = constraints.get("story_bible", "")
     user_description = constraints.get("description", "")
     user_content = user_story_bible or user_description
+
+    # Ensure user_content is a string before any slicing operations
+    if not isinstance(user_content, str):
+        user_content = str(user_content) if user_content else ""
 
     # Format user chapter outline if provided
     if user_content and len(user_content) > 200:
@@ -544,6 +552,8 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
     """Execute voice specification agent."""
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     prompt = VOICE_SPECIFICATION_PROMPT.format(
         genre=constraints.get("genre", "general fiction"),

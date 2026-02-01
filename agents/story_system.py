@@ -314,11 +314,17 @@ async def execute_character_architecture(context: ExecutionContext) -> Dict[str,
     """Execute character architecture agent."""
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     # Check for user-provided story bible content
     user_story_bible = constraints.get("story_bible", "")
     user_description = constraints.get("description", "")
     user_content = user_story_bible or user_description
+
+    # Ensure user_content is a string before slicing
+    if not isinstance(user_content, str):
+        user_content = str(user_content) if user_content else ""
 
     # Format user content for the prompt
     if user_content and len(user_content) > 200:

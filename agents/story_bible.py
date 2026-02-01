@@ -164,6 +164,8 @@ async def execute_story_bible(context: ExecutionContext) -> Dict[str, Any]:
     """
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
 
     # Check if user provided their own story bible content
     user_story_bible = constraints.get("story_bible", "")
@@ -172,6 +174,10 @@ async def execute_story_bible(context: ExecutionContext) -> Dict[str, Any]:
     # If user provided a detailed story bible (check for character names,
     # physical descriptions, or other story bible markers)
     user_content = user_story_bible or user_description
+
+    # Ensure user_content is a string before any operations
+    if not isinstance(user_content, str):
+        user_content = str(user_content) if user_content else ""
 
     story_bible_markers = [
         "protagonist", "antagonist", "physical description", "eye color",
