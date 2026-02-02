@@ -583,6 +583,15 @@ async def bypass_agent(project_id: str, agent_id: str, auth: bool = Depends(requ
 
     agent_def = AGENT_REGISTRY[agent_id]
 
+    # Helper to get agent output from project layers
+    def get_agent_output(aid: str) -> dict:
+        for layer in project.layers.values():
+            if aid in layer.agents:
+                agent_state = layer.agents[aid]
+                if agent_state.current_output:
+                    return agent_state.current_output.content
+        return {}
+
     # Create placeholder output based on agent's expected outputs
     placeholder_output = {}
     for output_key in agent_def.outputs:
@@ -598,13 +607,13 @@ async def bypass_agent(project_id: str, agent_id: str, auth: bool = Depends(requ
     # Special handling for line_edit
     if agent_id == "line_edit":
         # Get chapters from previous agents
-        draft = project.outputs.get("draft_generation", {})
+        draft = get_agent_output("draft_generation")
         if isinstance(draft, dict):
             chapters = draft.get("chapters", [])
         else:
             chapters = []
 
-        structural_rewrite = project.outputs.get("structural_rewrite", {})
+        structural_rewrite = get_agent_output("structural_rewrite")
         if isinstance(structural_rewrite, dict):
             revised = structural_rewrite.get("revised_chapters", [])
             if revised:
@@ -647,8 +656,6 @@ async def bypass_agent(project_id: str, agent_id: str, auth: bool = Depends(requ
                 timestamp=datetime.now().isoformat(),
                 gate_result=GateResult(passed=True, message="Manually bypassed", details={"bypassed": True})
             )
-            # Also store in project outputs
-            project.outputs[agent_id] = placeholder_output
             break
 
     # Persist
