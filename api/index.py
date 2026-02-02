@@ -565,6 +565,104 @@ async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(req
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/projects/{project_id}/bypass/{agent_id}")
+async def bypass_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
+    """Bypass/skip an agent by marking it as passed with placeholder output.
+
+    Use this when an agent is stuck or failing but you want to continue the pipeline.
+    """
+    from models.state import AgentOutput, AgentStatus, GateResult
+    from datetime import datetime
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if agent_id not in AGENT_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unknown agent: {agent_id}")
+
+    agent_def = AGENT_REGISTRY[agent_id]
+
+    # Create placeholder output based on agent's expected outputs
+    placeholder_output = {}
+    for output_key in agent_def.outputs:
+        if "chapters" in output_key:
+            placeholder_output[output_key] = []
+        elif "report" in output_key or "check" in output_key:
+            placeholder_output[output_key] = {"status": "bypassed", "note": "Agent was manually bypassed"}
+        elif "fixes" in output_key or "improvements" in output_key:
+            placeholder_output[output_key] = []
+        else:
+            placeholder_output[output_key] = {"bypassed": True}
+
+    # Special handling for line_edit
+    if agent_id == "line_edit":
+        # Get chapters from previous agents
+        draft = project.outputs.get("draft_generation", {})
+        if isinstance(draft, dict):
+            chapters = draft.get("chapters", [])
+        else:
+            chapters = []
+
+        structural_rewrite = project.outputs.get("structural_rewrite", {})
+        if isinstance(structural_rewrite, dict):
+            revised = structural_rewrite.get("revised_chapters", [])
+            if revised:
+                chapters = revised
+
+        # Pass through chapters unchanged
+        edited_chapters = []
+        for i, ch in enumerate(chapters if isinstance(chapters, list) else [], 1):
+            if isinstance(ch, dict):
+                edited_chapters.append({
+                    "chapter_number": ch.get("chapter_number", ch.get("number", i)),
+                    "edited_text": ch.get("full_revised_text", ch.get("text", "")),
+                    "word_count": ch.get("word_count", 0),
+                    "edits_made": 0
+                })
+
+        placeholder_output = {
+            "edited_chapters": edited_chapters,
+            "grammar_fixes": [],
+            "rhythm_improvements": [],
+            "edit_report": {
+                "total_edits": 0,
+                "grammar_fixes": 0,
+                "clarity_improvements": 0,
+                "word_replacements": 0,
+                "cuts": 0,
+                "note": "Agent was manually bypassed"
+            }
+        }
+
+    # Find and update agent state
+    for layer in project.layers.values():
+        if agent_id in layer.agents:
+            agent_state = layer.agents[agent_id]
+            agent_state.status = AgentStatus.COMPLETED
+            agent_state.current_output = AgentOutput(
+                agent_id=agent_id,
+                content=placeholder_output,
+                raw_response="[BYPASSED]",
+                timestamp=datetime.now().isoformat(),
+                gate_result=GateResult(passed=True, message="Manually bypassed", details={"bypassed": True})
+            )
+            # Also store in project outputs
+            project.outputs[agent_id] = placeholder_output
+            break
+
+    # Persist
+    store = get_project_store()
+    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "message": f"Agent {agent_id} has been bypassed. You can now continue with the next agent.",
+        "output_keys": list(placeholder_output.keys())
+    }
+
+
 @app.post("/api/projects/{project_id}/run-layer/{layer_id}")
 async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require_auth)):
     """Run all agents in a layer."""
