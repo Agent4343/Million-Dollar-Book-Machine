@@ -113,6 +113,7 @@ async def execute_chapter_writer(
     if not chapter_data:
         return {
             "error": f"Chapter {chapter_number} not found in blueprint",
+            "number": chapter_number,
             "chapter_number": chapter_number,
             "text": None
         }
@@ -251,6 +252,7 @@ settings, relationships, and details MUST match this exactly:
             if not chapter_text or len(str(chapter_text)) < 50:
                 return {
                     "error": f"LLM returned empty or too short response for chapter {chapter_number}",
+                    "number": chapter_number,
                     "chapter_number": chapter_number,
                     "text": None
                 }
@@ -276,6 +278,7 @@ Summary:"""
             word_count = len(str(chapter_text).split())
 
             return {
+                "number": chapter_number,  # Use 'number' for consistency with API
                 "chapter_number": chapter_number,
                 "title": chapter_data.get("title", f"Chapter {chapter_number}"),
                 "text": str(chapter_text),
@@ -289,12 +292,14 @@ Summary:"""
         except Exception as e:
             return {
                 "error": f"LLM error for chapter {chapter_number}: {str(e)}",
+                "number": chapter_number,
                 "chapter_number": chapter_number,
                 "text": None
             }
     else:
         # Demo mode placeholder
         return {
+            "number": chapter_number,  # Use 'number' for consistency with API
             "chapter_number": chapter_number,
             "title": chapter_data.get("title", f"Chapter {chapter_number}"),
             "text": f"[Chapter {chapter_number} would be generated here with LLM]\n\n{chapter_data.get('opening_hook', '')}",
