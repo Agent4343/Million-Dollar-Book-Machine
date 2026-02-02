@@ -1345,10 +1345,56 @@ Themes: gaslighting, trust, memory, motherhood, suburban secrets, hidden identit
             const res = await fetch(`/api/projects/${currentProject}/agent/${agentId}/output`, {credentials: 'include'});
             const data = await res.json();
 
+            let outputText = '';
             if (data.output) {
-                document.getElementById('agentOutput').textContent = JSON.stringify(data.output, null, 2);
+                outputText = JSON.stringify(data.output, null, 2);
             } else {
-                document.getElementById('agentOutput').textContent = data.message || 'No output yet';
+                outputText = data.message || 'No output yet';
+            }
+
+            // Add bypass button if agent is stuck (failed or in_progress)
+            if (data.status === 'failed' || data.status === 'in_progress') {
+                outputText += '\n\n--- AGENT STUCK? ---\n';
+                outputText += 'Click the Bypass button below to skip this agent and continue the pipeline.\n';
+            }
+
+            document.getElementById('agentOutput').textContent = outputText;
+
+            // Show/hide bypass button based on agent status
+            let bypassBtn = document.getElementById('bypassAgentBtn');
+            if (!bypassBtn) {
+                bypassBtn = document.createElement('button');
+                bypassBtn.id = 'bypassAgentBtn';
+                bypassBtn.textContent = '⏭ Bypass This Agent';
+                bypassBtn.style.cssText = 'margin-top: 10px; background: #e67e22; color: white; border: none; padding: 8px 16px; cursor: pointer; border-radius: 4px;';
+                bypassBtn.onclick = () => bypassAgent(agentId);
+                document.getElementById('agentOutput').parentElement.appendChild(bypassBtn);
+            }
+            bypassBtn.style.display = (data.status === 'failed' || data.status === 'in_progress') ? 'inline-block' : 'none';
+            bypassBtn.onclick = () => bypassAgent(agentId);
+        }
+
+        async function bypassAgent(agentId) {
+            if (!currentProject) return;
+            if (!confirm(`Are you sure you want to bypass "${agentId}"? This will skip this agent and continue the pipeline.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/bypass/${agentId}`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(`Agent "${agentId}" bypassed successfully. You can now continue the pipeline.`);
+                    await loadProjectPipeline();
+                } else {
+                    alert(`Failed to bypass agent: ${data.detail || 'Unknown error'}`);
+                }
+            } catch (err) {
+                alert(`Error bypassing agent: ${err.message}`);
             }
         }
 
