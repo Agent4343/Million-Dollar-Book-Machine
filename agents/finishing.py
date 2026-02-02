@@ -515,63 +515,79 @@ async def execute_post_rewrite_scan(context: ExecutionContext) -> Dict[str, Any]
 
 async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
     """Execute line editing agent - processes chapters one at a time to avoid timeouts."""
-    llm = context.llm_client
+    try:
+        llm = context.llm_client
 
-    # Get revised chapters or fall back to original
-    revised = context.inputs.get("structural_rewrite", {})
-    if not isinstance(revised, dict):
-        revised = {}
-    chapters = revised.get("revised_chapters", [])
+        # Get revised chapters or fall back to original
+        revised = context.inputs.get("structural_rewrite", {})
+        if not isinstance(revised, dict):
+            revised = {}
+        chapters = revised.get("revised_chapters", [])
 
-    if not chapters:
-        # Fall back to draft generation
-        draft = context.inputs.get("draft_generation", {})
-        if not isinstance(draft, dict):
-            draft = {}
-        chapters = draft.get("chapters", [])
+        if not chapters:
+            # Fall back to draft generation
+            draft = context.inputs.get("draft_generation", {})
+            if not isinstance(draft, dict):
+                draft = {}
+            chapters = draft.get("chapters", [])
 
-    # Ensure chapters is a list
-    if not isinstance(chapters, list):
-        chapters = []
+        # Ensure chapters is a list
+        if not isinstance(chapters, list):
+            chapters = []
 
-    voice_spec_data = context.inputs.get("voice_specification", {})
-    if not isinstance(voice_spec_data, dict):
-        voice_spec_data = {}
-    style_guide = voice_spec_data.get("style_guide", {})
-    voice_spec = voice_spec_data
+        voice_spec_data = context.inputs.get("voice_specification", {})
+        if not isinstance(voice_spec_data, dict):
+            voice_spec_data = {}
+        style_guide = voice_spec_data.get("style_guide", {})
+        voice_spec = voice_spec_data
 
-    if llm and chapters:
-        edited_chapters = []
-        all_grammar_fixes = []
-        all_rhythm_improvements = []
-        total_edits = 0
-        grammar_count = 0
-        clarity_count = 0
+        # If no chapters at all, return valid empty response
+        if not chapters:
+            return {
+                "edited_chapters": [],
+                "grammar_fixes": [],
+                "rhythm_improvements": [],
+                "edit_report": {
+                    "total_edits": 0,
+                    "grammar_fixes": 0,
+                    "clarity_improvements": 0,
+                    "word_replacements": 0,
+                    "cuts": 0
+                }
+            }
 
-        # Process chapters one at a time to avoid timeout
-        max_chapters = 5  # Limit for performance
-        for i, ch in enumerate(chapters[:max_chapters]):
-            if not isinstance(ch, dict):
-                continue
+        if llm:
+            edited_chapters = []
+            all_grammar_fixes = []
+            all_rhythm_improvements = []
+            total_edits = 0
+            grammar_count = 0
+            clarity_count = 0
 
-            ch_number = ch.get("chapter_number", ch.get("number", i + 1))
-            ch_text = ch.get("full_revised_text", ch.get("text", ch.get("content", "")))
+            # Process chapters one at a time to avoid timeout - reduced limit
+            max_chapters = 3  # Reduced from 5 for better timeout handling
+            for i, ch in enumerate(chapters[:max_chapters]):
+                if not isinstance(ch, dict):
+                    continue
 
-            # Ensure ch_text is a string before any operations
-            if not isinstance(ch_text, str):
-                ch_text = str(ch_text) if ch_text else ""
+                ch_number = ch.get("chapter_number", ch.get("number", i + 1))
+                ch_text = ch.get("full_revised_text", ch.get("text", ch.get("content", "")))
 
-            if not ch_text or len(ch_text) < 50:
-                # Skip placeholder/empty chapters
-                edited_chapters.append({
-                    "chapter_number": ch_number,
-                    "edited_text": ch_text,
-                    "word_count": len(ch_text.split()) if ch_text else 0,
-                    "edits_made": 0
-                })
-                continue
+                # Ensure ch_text is a string before any operations
+                if not isinstance(ch_text, str):
+                    ch_text = str(ch_text) if ch_text else ""
 
-            single_chapter_prompt = f"""You are an expert line editor. Polish this chapter for publication quality.
+                if not ch_text or len(ch_text) < 50:
+                    # Skip placeholder/empty chapters
+                    edited_chapters.append({
+                        "chapter_number": ch_number,
+                        "edited_text": ch_text,
+                        "word_count": len(ch_text.split()) if ch_text else 0,
+                        "edits_made": 0
+                    })
+                    continue
+
+                single_chapter_prompt = f"""You are an expert line editor. Polish this chapter for publication quality.
 
 ## Style Guide:
 {style_guide}
@@ -598,35 +614,48 @@ Return ONLY valid JSON:
     "clarity_improvements": 15
 }}"""
 
-            try:
-                result = await llm.generate(single_chapter_prompt, response_format="json", max_tokens=8000)
+                try:
+                    result = await llm.generate(single_chapter_prompt, response_format="json", max_tokens=8000)
 
-                # Ensure result is a dict before calling .get()
-                if not isinstance(result, dict):
-                    result = {}
+                    # Ensure result is a dict before calling .get()
+                    if not isinstance(result, dict):
+                        result = {}
 
-                edited_text = result.get("edited_text", ch_text)
-                # Ensure edited_text is a string
-                if not isinstance(edited_text, str):
-                    edited_text = str(edited_text) if edited_text else ch_text
+                    edited_text = result.get("edited_text", ch_text)
+                    # Ensure edited_text is a string
+                    if not isinstance(edited_text, str):
+                        edited_text = str(edited_text) if edited_text else ch_text
 
-                edits = result.get("edits_made", 0)
-                grammar = result.get("grammar_fixes", 0)
-                clarity = result.get("clarity_improvements", 0)
+                    edits = result.get("edits_made", 0)
+                    grammar = result.get("grammar_fixes", 0)
+                    clarity = result.get("clarity_improvements", 0)
 
-                edited_chapters.append({
-                    "chapter_number": ch_number,
-                    "edited_text": edited_text,
-                    "word_count": len(edited_text.split()) if edited_text else 0,
-                    "edits_made": edits if isinstance(edits, int) else 0
-                })
+                    edited_chapters.append({
+                        "chapter_number": ch_number,
+                        "edited_text": edited_text,
+                        "word_count": len(edited_text.split()) if edited_text else 0,
+                        "edits_made": edits if isinstance(edits, int) else 0
+                    })
 
-                total_edits += edits if isinstance(edits, int) else 0
-                grammar_count += grammar if isinstance(grammar, int) else 0
-                clarity_count += clarity if isinstance(clarity, int) else 0
+                    total_edits += edits if isinstance(edits, int) else 0
+                    grammar_count += grammar if isinstance(grammar, int) else 0
+                    clarity_count += clarity if isinstance(clarity, int) else 0
 
-            except Exception as e:
-                # On error, keep original text
+                except Exception as e:
+                    # On error, keep original text
+                    edited_chapters.append({
+                        "chapter_number": ch_number,
+                        "edited_text": ch_text,
+                        "word_count": len(ch_text.split()) if ch_text else 0,
+                        "edits_made": 0
+                    })
+
+            # Add remaining chapters unchanged
+            for i, ch in enumerate(chapters[max_chapters:], max_chapters):
+                ch_number = ch.get("chapter_number", ch.get("number", i + 1)) if isinstance(ch, dict) else i + 1
+                ch_text = ch.get("full_revised_text", ch.get("text", ch.get("content", ""))) if isinstance(ch, dict) else ""
+                if not isinstance(ch_text, str):
+                    ch_text = str(ch_text) if ch_text else ""
                 edited_chapters.append({
                     "chapter_number": ch_number,
                     "edited_text": ch_text,
@@ -634,41 +663,44 @@ Return ONLY valid JSON:
                     "edits_made": 0
                 })
 
-        # Add remaining chapters unchanged
-        for i, ch in enumerate(chapters[max_chapters:], max_chapters):
-            ch_number = ch.get("chapter_number", ch.get("number", i + 1)) if isinstance(ch, dict) else i + 1
-            ch_text = ch.get("full_revised_text", ch.get("text", ch.get("content", ""))) if isinstance(ch, dict) else ""
-            edited_chapters.append({
-                "chapter_number": ch_number,
-                "edited_text": ch_text,
-                "word_count": len(ch_text.split()) if ch_text else 0,
-                "edits_made": 0
-            })
-
-        return {
-            "edited_chapters": edited_chapters,
-            "grammar_fixes": all_grammar_fixes,
-            "rhythm_improvements": all_rhythm_improvements,
-            "edit_report": {
-                "total_edits": total_edits,
-                "grammar_fixes": grammar_count,
-                "clarity_improvements": clarity_count,
-                "word_replacements": 0,
-                "cuts": 0
-            }
-        }
-    else:
-        # Demo mode - pass through chapters
-        return {
-            "edited_chapters": [
-                {
-                    "chapter_number": ch.get("chapter_number", ch.get("number", i)) if isinstance(ch, dict) else i,
-                    "edited_text": ch.get("full_revised_text", ch.get("text", f"[Chapter {i}]")) if isinstance(ch, dict) else f"[Chapter {i}]",
-                    "word_count": len(ch.get("full_revised_text", ch.get("text", "")).split()) if isinstance(ch, dict) else 0,
-                    "edits_made": 0
+            return {
+                "edited_chapters": edited_chapters,
+                "grammar_fixes": all_grammar_fixes,
+                "rhythm_improvements": all_rhythm_improvements,
+                "edit_report": {
+                    "total_edits": total_edits,
+                    "grammar_fixes": grammar_count,
+                    "clarity_improvements": clarity_count,
+                    "word_replacements": 0,
+                    "cuts": 0
                 }
-                for i, ch in enumerate(chapters, 1)
-            ],
+            }
+        else:
+            # Demo mode - pass through chapters
+            return {
+                "edited_chapters": [
+                    {
+                        "chapter_number": ch.get("chapter_number", ch.get("number", i)) if isinstance(ch, dict) else i,
+                        "edited_text": ch.get("full_revised_text", ch.get("text", f"[Chapter {i}]")) if isinstance(ch, dict) else f"[Chapter {i}]",
+                        "word_count": len(ch.get("full_revised_text", ch.get("text", "")).split()) if isinstance(ch, dict) else 0,
+                        "edits_made": 0
+                    }
+                    for i, ch in enumerate(chapters, 1)
+                ],
+                "grammar_fixes": [],
+                "rhythm_improvements": [],
+                "edit_report": {
+                    "total_edits": 0,
+                    "grammar_fixes": 0,
+                    "clarity_improvements": 0,
+                    "word_replacements": 0,
+                    "cuts": 0
+                }
+            }
+    except Exception as e:
+        # Catch-all to ensure we always return a valid response
+        return {
+            "edited_chapters": [],
             "grammar_fixes": [],
             "rhythm_improvements": [],
             "edit_report": {
@@ -676,7 +708,8 @@ Return ONLY valid JSON:
                 "grammar_fixes": 0,
                 "clarity_improvements": 0,
                 "word_replacements": 0,
-                "cuts": 0
+                "cuts": 0,
+                "error": str(e)
             }
         }
 
