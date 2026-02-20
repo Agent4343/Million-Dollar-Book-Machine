@@ -7,13 +7,54 @@ Generates professional book formats:
 - Markdown
 """
 
+import html
 import io
 import re
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
-def generate_docx(project, include_outline: bool = False) -> bytes:
+def _get_best_chapters(project, chapters_override: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    if isinstance(chapters_override, list):
+        return chapters_override
+    chapters = project.manuscript.get("chapters", [])
+    if isinstance(chapters, list):
+        return chapters
+    return []
+
+
+def _front_matter_defaults(project) -> Dict[str, Any]:
+    c = project.user_constraints or {}
+    year = c.get("copyright_year") or datetime.now(timezone.utc).year
+    return {
+        "author_name": c.get("author_name") or c.get("pen_name") or "Author Name",
+        "publisher_name": c.get("publisher_name") or "",
+        "copyright_year": year,
+        "include_disclaimer": bool(c.get("include_disclaimer", True)),
+        "disclaimer_text": c.get("disclaimer_text") or "This is a work of fiction. Names, characters, businesses, places, events, and incidents are either the products of the author’s imagination or used in a fictitious manner.",
+        "isbn": c.get("isbn") or "",
+        "rights_statement": c.get("rights_statement") or "All rights reserved.",
+    }
+
+
+def _supplemental_matter(project) -> Dict[str, Any]:
+    c = project.user_constraints or {}
+    also_by = c.get("also_by") or c.get("also_by_titles") or []
+    if isinstance(also_by, str):
+        also_by = [t.strip() for t in also_by.split(",") if t.strip()]
+    if not isinstance(also_by, list):
+        also_by = []
+    also_by = [str(t).strip() for t in also_by if str(t).strip()]
+    return {
+        "also_by": also_by,
+        "acknowledgements": (c.get("acknowledgements") or "").strip(),
+        "about_author": (c.get("about_author") or c.get("about_author_text") or "").strip(),
+        "newsletter_cta": (c.get("newsletter_cta") or "").strip(),
+        "newsletter_url": (c.get("newsletter_url") or "").strip(),
+    }
+
+
+def generate_docx(project, include_outline: bool = False, chapters_override: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
     Generate a Word document from the project manuscript.
 
@@ -60,6 +101,8 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     for _ in range(3):
         doc.add_paragraph()
 
+    fm = _front_matter_defaults(project)
+
     # Subtitle/description if available
     if project.user_constraints.get('description'):
         subtitle = doc.add_paragraph()
@@ -81,6 +124,34 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     # Page break after title
     doc.add_page_break()
 
+    # === Copyright / Disclaimer Page (KDP recommended) ===
+    copyright_heading = doc.add_heading("Copyright", level=1)
+    copyright_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+    cpara = doc.add_paragraph()
+    cpara.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cpara.add_run(f"© {fm['copyright_year']} {fm['author_name']}\n{fm['rights_statement']}")
+    if fm.get("isbn"):
+        doc.add_paragraph().add_run(f"ISBN: {fm['isbn']}")
+    if fm.get("publisher_name"):
+        doc.add_paragraph().add_run(f"Publisher: {fm['publisher_name']}")
+    if fm.get("include_disclaimer"):
+        doc.add_paragraph()
+        disc = doc.add_paragraph()
+        disc.add_run("Disclaimer: ").bold = True
+        doc.add_paragraph(fm.get("disclaimer_text", ""))
+
+    doc.add_page_break()
+
+    sup = _supplemental_matter(project)
+
+    # === Also By (optional) ===
+    if sup["also_by"]:
+        doc.add_heading("Also By", level=1)
+        for t in sup["also_by"]:
+            doc.add_paragraph(t)
+        doc.add_page_break()
+
     # Get all agent outputs for use throughout document
     outputs = {}
     for layer in project.layers.values():
@@ -91,7 +162,7 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     # === Table of Contents ===
     toc_heading = doc.add_heading('Table of Contents', level=1)
 
-    chapters = project.manuscript.get('chapters', [])
+    chapters = _get_best_chapters(project, chapters_override=chapters_override)
 
     # If no written chapters, use chapter blueprint for TOC
     if not chapters and 'chapter_blueprint' in outputs:
@@ -246,6 +317,25 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
         doc.add_heading("No Content Yet", level=1)
         doc.add_paragraph("Run the pipeline to generate your book outline, then use the Chapter Writer to create full chapters.")
 
+    # === Back Matter (optional) ===
+    if sup.get("acknowledgements"):
+        doc.add_heading("Acknowledgements", level=1)
+        doc.add_paragraph(sup["acknowledgements"])
+        doc.add_page_break()
+
+    if sup.get("newsletter_cta") or sup.get("newsletter_url"):
+        doc.add_heading("Stay in Touch", level=1)
+        if sup.get("newsletter_cta"):
+            doc.add_paragraph(sup["newsletter_cta"])
+        if sup.get("newsletter_url"):
+            doc.add_paragraph(sup["newsletter_url"])
+        doc.add_page_break()
+
+    if sup.get("about_author"):
+        doc.add_heading("About the Author", level=1)
+        doc.add_paragraph(sup["about_author"])
+        doc.add_page_break()
+
     # Save to bytes
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -253,7 +343,7 @@ def generate_docx(project, include_outline: bool = False) -> bytes:
     return buffer.getvalue()
 
 
-def generate_epub(project) -> bytes:
+def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
     Generate an EPUB file from the project manuscript.
     Compatible with Kindle and other eReaders.
@@ -274,7 +364,8 @@ def generate_epub(project) -> bytes:
     book.set_language('en')
 
     # Add author (placeholder - could be made configurable)
-    book.add_author('Author Name')
+    fm = _front_matter_defaults(project)
+    book.add_author(fm["author_name"])
 
     # Add description
     if project.user_constraints.get('description'):
@@ -285,24 +376,63 @@ def generate_epub(project) -> bytes:
     book.add_metadata('DC', 'subject', genre)
 
     # Create chapters
-    chapters = project.manuscript.get('chapters', [])
+    chapters = _get_best_chapters(project, chapters_override=chapters_override)
     epub_chapters = []
+    sup = _supplemental_matter(project)
 
     # Title page
     title_page = epub.EpubHtml(title='Title Page', file_name='title.xhtml', lang='en')
     title_page.content = f'''
     <html>
-    <head><title>{project.title}</title></head>
+    <head><title>{html.escape(project.title)}</title></head>
     <body>
         <div style="text-align: center; margin-top: 30%;">
-            <h1 style="font-size: 2.5em;">{project.title}</h1>
-            <p style="margin-top: 2em; font-style: italic;">{genre}</p>
+            <h1 style="font-size: 2.5em;">{html.escape(project.title)}</h1>
+            <p style="margin-top: 2em; font-style: italic;">{html.escape(genre)}</p>
         </div>
     </body>
     </html>
     '''
     book.add_item(title_page)
     epub_chapters.append(title_page)
+
+    # Copyright page (KDP recommended)
+    copyright_page = epub.EpubHtml(title='Copyright', file_name='copyright.xhtml', lang='en')
+    disclaimer_html = ""
+    if fm.get("include_disclaimer"):
+        disclaimer_html = f"<p><strong>Disclaimer:</strong> {html.escape(fm.get('disclaimer_text', ''))}</p>"
+    publisher_html = f"<p>Publisher: {html.escape(fm.get('publisher_name', ''))}</p>" if fm.get("publisher_name") else ""
+    isbn_html = f"<p>ISBN: {html.escape(str(fm.get('isbn', '')))}</p>" if fm.get("isbn") else ""
+    copyright_page.content = f"""
+    <html>
+    <head><title>Copyright</title></head>
+    <body>
+        <h1>Copyright</h1>
+        <p>© {fm['copyright_year']} {html.escape(fm['author_name'])}. {html.escape(fm['rights_statement'])}</p>
+        {publisher_html}
+        {isbn_html}
+        {disclaimer_html}
+    </body>
+    </html>
+    """
+    book.add_item(copyright_page)
+    epub_chapters.append(copyright_page)
+
+    # Also By (optional)
+    if sup["also_by"]:
+        also_by_page = epub.EpubHtml(title="Also By", file_name="also_by.xhtml", lang="en")
+        items = "".join(f"<li>{html.escape(t)}</li>" for t in sup["also_by"])
+        also_by_page.content = f"""
+        <html>
+        <head><title>Also By</title></head>
+        <body>
+            <h1>Also By</h1>
+            <ul>{items}</ul>
+        </body>
+        </html>
+        """
+        book.add_item(also_by_page)
+        epub_chapters.append(also_by_page)
 
     if chapters:
         for chapter in sorted(chapters, key=lambda x: x.get('number', 0)):
@@ -321,7 +451,7 @@ def generate_epub(project) -> bytes:
             if text:
                 # Convert text to HTML paragraphs
                 paragraphs = text.split('\n\n')
-                html_content = f'<h1>Chapter {ch_num}: {ch_title}</h1>\n'
+                html_content = f'<h1>Chapter {ch_num}: {html.escape(ch_title)}</h1>\n'
 
                 for para in paragraphs:
                     para = para.strip()
@@ -335,7 +465,7 @@ def generate_epub(project) -> bytes:
                             html_content += f'<p style="text-indent: 1.5em; margin: 0.5em 0;">{para}</p>\n'
             else:
                 html_content = f'''
-                <h1>Chapter {ch_num}: {ch_title}</h1>
+                <h1>Chapter {ch_num}: {html.escape(ch_title)}</h1>
                 <p><em>Chapter content not yet written.</em></p>
                 '''
 
@@ -364,6 +494,34 @@ def generate_epub(project) -> bytes:
         '''
         book.add_item(empty_ch)
         epub_chapters.append(empty_ch)
+
+    # Back matter (optional)
+    if sup.get("acknowledgements"):
+        acks = epub.EpubHtml(title="Acknowledgements", file_name="acknowledgements.xhtml", lang="en")
+        txt = sup["acknowledgements"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        acks.content = f"<html><head><title>Acknowledgements</title></head><body><h1>Acknowledgements</h1><p>{txt}</p></body></html>"
+        book.add_item(acks)
+        epub_chapters.append(acks)
+
+    if sup.get("newsletter_cta") or sup.get("newsletter_url"):
+        news = epub.EpubHtml(title="Stay in Touch", file_name="newsletter.xhtml", lang="en")
+        cta = sup.get("newsletter_cta", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        url = sup.get("newsletter_url", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts = []
+        if cta:
+            parts.append(f"<p>{cta}</p>")
+        if url:
+            parts.append(f"<p>{url}</p>")
+        news.content = f"<html><head><title>Stay in Touch</title></head><body><h1>Stay in Touch</h1>{''.join(parts)}</body></html>"
+        book.add_item(news)
+        epub_chapters.append(news)
+
+    if sup.get("about_author"):
+        about = epub.EpubHtml(title="About the Author", file_name="about_author.xhtml", lang="en")
+        txt = sup["about_author"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        about.content = f"<html><head><title>About the Author</title></head><body><h1>About the Author</h1><p>{txt}</p></body></html>"
+        book.add_item(about)
+        epub_chapters.append(about)
 
     # Define Table of Contents
     book.toc = tuple(epub_chapters)

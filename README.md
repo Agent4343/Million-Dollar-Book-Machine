@@ -4,7 +4,7 @@ AI-powered multi-agent system for developing books from concept to publication.
 
 ## System Overview
 
-This system uses **21 specialized agents** across **11 development layers** to take a book from initial concept through to publication-ready manuscript.
+This system uses **27 specialized agents** across **21 development layers** to take a book from initial concept through to publication-ready manuscript.
 
 ### Development Layers
 
@@ -29,8 +29,8 @@ This system uses **21 specialized agents** across **11 development layers** to t
 | 16 | Rewrite & Revalidation | structural_rewrite, post_rewrite_scan |
 | 17 | Line & Copy Edit | line_edit |
 | 18 | Beta Reader Simulation | beta_simulation |
-| 19 | Final Quality Validation | final_validation |
-| 20 | Publishing Package | publishing_package, ip_clearance |
+| 19 | Final Quality Validation | human_editor_review, final_validation, production_readiness |
+| 20 | Publishing Package | publishing_package, final_proof, kdp_readiness, ip_clearance |
 
 ### How It Works
 
@@ -62,7 +62,7 @@ uvicorn api.index:app --reload --port 3000
 vercel
 ```
 
-Password: `Blake2011@` (configurable via APP_PASSWORD env var)
+Password: Set the `APP_PASSWORD` environment variable before starting (an auto-generated password is printed to the log if unset).
 
 ## API Endpoints
 
@@ -81,7 +81,9 @@ Password: `Blake2011@` (configurable via APP_PASSWORD env var)
 - `GET /api/projects` - List all projects
 - `GET /api/projects/{id}` - Get project details
 - `GET /api/projects/{id}/available-agents` - Get agents ready to run
+- `GET /api/projects/{id}/debug/availability` - Diagnose why a project is blocked (unmet deps, locked layers)
 - `POST /api/projects/{id}/execute/{agent}` - Run specific agent
+- `POST /api/projects/{id}/agents/{agent}/reset` - Reset a failed agent back to PENDING
 - `GET /api/projects/{id}/agent/{agent}/output` - Get agent output
 - `GET /api/projects/{id}/manuscript` - Export manuscript
 
@@ -140,10 +142,15 @@ Million-Dollar-Book-Machine/
 **Plagiarism Audit**: Legal risk assessment
 **Transformative Verification**: Legal defensibility check
 **Structural Rewrite**: Prose improvement, flag resolution
+**Post-Rewrite Scan**: Re-validates quality after rewrite
 **Line Edit**: Grammar, rhythm, editorial polish
 **Beta Simulation**: Simulated reader response, engagement analysis
+**Human Editor Review**: AI-simulated senior editor assessment with editorial letter
 **Final Validation**: Core promise fulfillment check
+**Production Readiness**: QA release checklist and blocker identification
 **Publishing Package**: Blurb, synopsis, metadata, keywords
+**Final Proof**: Full-manuscript copy check and consistency scan
+**KDP Readiness**: Validates EPUB/DOCX exports for Kindle publishing
 **IP Clearance**: Title and naming safety verification
 
 ## Claude API Configuration
@@ -155,7 +162,7 @@ The system uses the **Anthropic Claude API** for content generation.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key | Required for AI generation |
-| `APP_PASSWORD` | Login password | `Blake2011@` |
+| `APP_PASSWORD` | Login password | Auto-generated (printed to log) |
 | `SESSION_SECRET` | Session signing secret | Auto-generated |
 
 ### Local Development
@@ -198,3 +205,54 @@ After login, check `/api/system/llm-status` to verify Claude is configured:
 ## License
 
 MIT
+
+## Railway Deployment
+
+1. Connect your GitHub repository to [Railway](https://railway.app)
+2. Add environment variables in the Railway dashboard:
+   - `ANTHROPIC_API_KEY` — your Anthropic API key
+   - `APP_PASSWORD` — your chosen login password
+   - `SESSION_SECRET` — a stable random secret (e.g. `openssl rand -hex 32`)
+3. Railway will auto-detect the `Procfile` and deploy
+
+## Debugging a Blocked Project
+
+If a pipeline job ends with status `blocked`, the job record's `progress.blocked_reason` field contains a
+full diagnostic payload.  You can also query the debug endpoint directly:
+
+```bash
+# 1. Login and capture the session cookie
+curl -c cookies.txt -X POST https://your-app/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"password": "YOUR_APP_PASSWORD"}'
+
+# 2. List your projects
+curl -b cookies.txt https://your-app/api/projects
+
+# 3. Get project status
+curl -b cookies.txt https://your-app/api/projects/<project_id>
+
+# 4. See which agents are ready to run
+curl -b cookies.txt https://your-app/api/projects/<project_id>/available-agents
+
+# 5. Debug why the project is blocked (unmet dependencies, locked layers)
+curl -b cookies.txt https://your-app/api/projects/<project_id>/debug/availability
+
+# 6. Reset a failed agent so it can be retried
+curl -b cookies.txt -X POST https://your-app/api/projects/<project_id>/agents/<agent_id>/reset
+```
+
+The debug endpoint returns:
+- **`available_agents`** – agents that can run right now (should be empty when blocked)
+- **`blocked_candidates`** – PENDING agents with at least one dependency not yet PASSED, including which dep and its current status
+- **`locked_layer_reasons`** – locked layers with the list of agents in the preceding layer that haven't passed yet
+- **`agent_status_counts`** – summary counts across all agents by status (pending, passed, failed, …)
+- **`layer_status_counts`** – summary counts across all layers by status (locked, available, in_progress, completed)
+
+A blocked job can be resumed once the underlying cause is resolved:
+
+```bash
+curl -b cookies.txt -X POST https://your-app/api/jobs/<job_id>/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"max_iterations": 200}'
+```

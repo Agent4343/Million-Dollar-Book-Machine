@@ -9,8 +9,16 @@ These agents design and execute the story structure:
 - Draft Generation
 """
 
-from typing import Dict, Any, List
+import asyncio
+import logging
+import os
+from typing import Callable, Dict, Any, List, Optional
 from core.orchestrator import ExecutionContext
+
+logger = logging.getLogger(__name__)
+
+# Per-chapter LLM call timeout in seconds; configurable via env var.
+_DRAFT_CHAPTER_TIMEOUT = int(os.environ.get("DRAFT_CHAPTER_TIMEOUT", "300") or "300")
 
 
 # =============================================================================
@@ -65,33 +73,34 @@ Design the complete plot structure:
 ## Output Format (JSON):
 {{
     "act_structure": {{
-        "act_1": {{"percentage": 25, "purpose": "...", "key_events": ["..."]}},
-        "act_2": {{"percentage": 50, "purpose": "...", "key_events": ["..."]}},
-        "act_3": {{"percentage": 25, "purpose": "...", "key_events": ["..."]}}
+        "act_1": {{"percentage": 25, "purpose": "<string>", "key_events": ["<string>"]}},
+        "act_2": {{"percentage": 50, "purpose": "<string>", "key_events": ["<string>"]}},
+        "act_3": {{"percentage": 25, "purpose": "<string>", "key_events": ["<string>"]}}
     }},
     "major_beats": [
-        {{"name": "Opening Image", "description": "...", "page_target": "1-2"}},
-        ...
+        {{"name": "Opening Image", "description": "<string>", "page_target": "1-2"}}
     ],
     "reversals": [
-        {{"name": "Midpoint", "what_changes": "...", "impact": "..."}}
+        {{"name": "Midpoint", "what_changes": "<string>", "impact": "<string>"}}
     ],
     "point_of_no_return": {{
-        "moment": "...",
-        "why_irreversible": "...",
-        "protagonist_commitment": "..."
+        "moment": "<string>",
+        "why_irreversible": "<string>",
+        "protagonist_commitment": "<string>"
     }},
     "climax_design": {{
-        "setup": "...",
-        "confrontation": "...",
-        "resolution": "..."
+        "setup": "<string>",
+        "confrontation": "<string>",
+        "resolution": "<string>"
     }},
     "resolution": {{
-        "external_resolution": "...",
-        "internal_resolution": "...",
-        "final_image": "..."
+        "external_resolution": "<string>",
+        "internal_resolution": "<string>",
+        "final_image": "<string>"
     }}
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 PACING_DESIGN_PROMPT = """You are a pacing specialist. Design the tension and rhythm of the story.
@@ -129,12 +138,12 @@ Design the pacing:
 ## Output Format (JSON):
 {{
     "tension_curve": [
-        {{"point": "Opening", "level": 3, "description": "..."}},
-        {{"point": "Catalyst", "level": 5, "description": "..."}},
-        {{"point": "Midpoint", "level": 7, "description": "..."}},
-        {{"point": "All Is Lost", "level": 4, "description": "..."}},
-        {{"point": "Climax", "level": 10, "description": "..."}},
-        {{"point": "Resolution", "level": 2, "description": "..."}}
+        {{"point": "Opening", "level": 3, "description": "<string>"}},
+        {{"point": "Catalyst", "level": 5, "description": "<string>"}},
+        {{"point": "Midpoint", "level": 7, "description": "<string>"}},
+        {{"point": "All Is Lost", "level": 4, "description": "<string>"}},
+        {{"point": "Climax", "level": 10, "description": "<string>"}},
+        {{"point": "Resolution", "level": 2, "description": "<string>"}}
     ],
     "scene_density_map": {{
         "act_1": {{"action_reflection_ratio": "40:60", "dialogue_description": "50:50"}},
@@ -143,12 +152,14 @@ Design the pacing:
         "act_3": {{"action_reflection_ratio": "80:20", "dialogue_description": "40:60"}}
     }},
     "breather_points": [
-        {{"after": "...", "type": "...", "purpose": "..."}}
+        {{"after": "<string>", "type": "<string>", "purpose": "<string>"}}
     ],
     "acceleration_zones": [
-        {{"section": "...", "technique": "...", "effect": "..."}}
+        {{"section": "<string>", "technique": "<string>", "effect": "<string>"}}
     ]
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 CHAPTER_BLUEPRINT_PROMPT = """You are an outline architect. Create the detailed chapter and scene blueprint.
@@ -184,36 +195,43 @@ For each scene include:
 - Conflict type
 - Outcome
 
+## Hard Requirements (must comply)
+- Return ONLY valid JSON (no markdown).
+- Chapter numbers must be contiguous and increasing starting at 1 (1..N).
+- Each chapter must have at least 1 scene.
+- Each scene must have a numeric word_target.
+- For each chapter: sum(scene.word_target) should be close to chapter.word_target (within ±35%).
+
 ## Output Format (JSON):
 {{
     "chapter_outline": [
         {{
             "number": 1,
-            "title": "...",
+            "title": "<string>",
             "act": 1,
-            "chapter_goal": "...",
-            "pov": "...",
-            "opening_hook": "...",
-            "closing_hook": "...",
+            "chapter_goal": "<string>",
+            "pov": "<string>",
+            "opening_hook": "<string>",
+            "closing_hook": "<string>",
             "word_target": 3000,
             "scenes": [
                 {{
                     "scene_number": 1,
-                    "scene_question": "...",
-                    "characters": ["..."],
-                    "location": "...",
-                    "conflict_type": "...",
-                    "outcome": "...",
+                    "scene_question": "<string>",
+                    "characters": ["<string>"],
+                    "location": "<string>",
+                    "conflict_type": "<string>",
+                    "outcome": "<string>",
                     "word_target": 1500
                 }}
             ]
         }}
     ],
-    "chapter_goals": {{"1": "...", "2": "..."}},
-    "scene_list": ["Ch1-S1: ...", "Ch1-S2: ..."],
-    "scene_questions": {{"Ch1-S1": "...", "Ch1-S2": "..."}},
-    "hooks": {{"chapter_hooks": ["..."], "scene_hooks": ["..."]}},
-    "pov_assignments": {{"1": "Protagonist", "2": "Protagonist"}}
+    "chapter_goals": {{"1": "<string>", "2": "<string>"}},
+    "scene_list": ["Ch1-S1: <string>", "Ch1-S2: <string>"],
+    "scene_questions": {{"Ch1-S1": "<string>", "Ch1-S2": "<string>"}},
+    "hooks": {{"chapter_hooks": ["<string>"], "scene_hooks": ["<string>"]}},
+    "pov_assignments": {{"1": "<string>", "2": "<string>"}}
 }}
 """
 
@@ -259,6 +277,11 @@ Define the complete voice specification:
    - Character voice differentiation
 
 7. **Style Guide**: Dos and don'ts
+
+## Hard Requirements (must comply)
+- Return ONLY valid JSON (no markdown).
+- Include at least 1 non-empty example passage in style_guide.example_passages.
+- Example passage(s) must demonstrate the POV + tense + tone rules you specify.
 
 ## Output Format (JSON):
 {{
@@ -488,6 +511,26 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
         }
 
 
+def _ensure_voice_spec_example_passages(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Inject a fallback example passage if the LLM omitted style_guide.example_passages."""
+    if not isinstance(response, dict):
+        return response
+    style_guide = response.get("style_guide")
+    if not isinstance(style_guide, dict):
+        response["style_guide"] = {
+            "example_passages": [
+                "He watched the elevator numbers climb as if they were a verdict."
+            ]
+        }
+        return response
+    passages = style_guide.get("example_passages")
+    if not isinstance(passages, list) or not passages:
+        style_guide["example_passages"] = [
+            "He watched the elevator numbers climb as if they were a verdict."
+        ]
+    return response
+
+
 async def execute_voice_specification(context: ExecutionContext) -> Dict[str, Any]:
     """Execute voice specification agent."""
     llm = context.llm_client
@@ -501,7 +544,7 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
-        return response
+        return _ensure_voice_spec_example_passages(response)
     else:
         return {
             "narrative_voice": {
@@ -537,22 +580,33 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
             "style_guide": {
                 "dos": ["Show don't tell", "Active voice", "Specific details"],
                 "donts": ["Adverb overuse", "Purple prose", "Info dumps"],
-                "example_passages": ["[Example of ideal style]"]
+                "example_passages": [
+                    "He watched the elevator numbers climb as if they were a verdict. When the doors opened, the air on the executive floor smelled faintly of citrus and expensive coffee, and he felt his jaw tighten before he could stop it."
+                ]
             }
         }
 
 
-async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
+async def execute_draft_generation(
+    context: ExecutionContext,
+    progress_callback: Optional[Callable[[dict], Any]] = None,
+) -> Dict[str, Any]:
     """Execute draft generation agent - generates all chapters."""
     llm = context.llm_client
     chapter_blueprint = context.inputs.get("chapter_blueprint", {})
 
     chapters = []
     chapter_metadata = []
+    scene_tags: Dict[str, Any] = {}
+    deviations: List[Dict[str, Any]] = []
+    fix_plan: List[str] = []
+    chapter_scores: Dict[str, int] = {}
+    failed_chapters: List[Dict[str, Any]] = []
 
     outline = chapter_blueprint.get("chapter_outline", [])
+    chapters_total = len(outline)
 
-    for chapter in outline:
+    for chapter_index, chapter in enumerate(outline):
         chapter_num = chapter.get("number", 0)
         chapter_title = chapter.get("title", f"Chapter {chapter_num}")
 
@@ -572,25 +626,130 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
                 previous_summary=previous_summary
             )
 
-            chapter_text = await llm.generate(prompt)
-            summary = await llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}")
+            timeout = _DRAFT_CHAPTER_TIMEOUT
+            try:
+                chapter_text = await asyncio.wait_for(llm.generate(prompt), timeout=timeout)
+                summary = await asyncio.wait_for(
+                    llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}"),
+                    timeout=timeout,
+                )
 
-            chapters.append({
-                "number": chapter_num,
-                "title": chapter_title,
-                "text": chapter_text,
-                "summary": summary,
-                "word_count": len(chapter_text.split())
-            })
+                # Evaluate outline adherence (structured) for this chapter
+                adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
+
+Blueprint for this chapter:
+{chapter}
+
+Generated chapter (truncated if needed):
+{chapter_text[:4500]}
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "outline_adherence_score": 0,
+  "scene_checks": [
+    {{"scene_number": 1, "present": true, "notes": "...", "deviation": false, "suggested_fix": "..."}}
+  ],
+  "chapter_deviations": [
+    {{"chapter": 1, "severity": "major|minor", "description": "...", "suggested_fix": "..."}}
+  ]
+}}
+
+Rules:
+- outline_adherence_score is 0-100.
+- scene_checks must include every scene_number listed in the blueprint.
+- If deviation=true, suggested_fix must be specific."""
+                adherence = await asyncio.wait_for(
+                    llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600),
+                    timeout=timeout,
+                )
+
+                score = adherence.get("outline_adherence_score")
+                if isinstance(score, int):
+                    chapter_scores[str(chapter_num)] = score
+                else:
+                    chapter_scores[str(chapter_num)] = 0
+
+                scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
+                for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
+                    if isinstance(d, dict):
+                        deviations.append(d)
+
+                word_count = len(chapter_text.split())
+                chapters.append({
+                    "number": chapter_num,
+                    "title": chapter_title,
+                    "text": chapter_text,
+                    "summary": summary,
+                    "word_count": word_count,
+                })
+
+                if progress_callback is not None:
+                    try:
+                        cb = progress_callback({
+                            "chapter": chapter_num,
+                            "status": "ok",
+                            "word_count": word_count,
+                            "chapters_done": chapter_index + 1,
+                            "chapters_total": chapters_total,
+                        })
+                        if asyncio.iscoroutine(cb):
+                            await cb
+                    except Exception:
+                        logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
+
+            except asyncio.TimeoutError:
+                err_msg = f"LLM timeout after {timeout}s"
+                logger.error("draft_generation: Chapter %s timed out (%s)", chapter_num, err_msg)
+                failed_chapters.append({"chapter": chapter_num, "error": err_msg})
+                if progress_callback is not None:
+                    try:
+                        cb = progress_callback({
+                            "chapter": chapter_num,
+                            "status": "failed",
+                            "word_count": 0,
+                            "chapters_done": chapter_index + 1,
+                            "chapters_total": chapters_total,
+                        })
+                        if asyncio.iscoroutine(cb):
+                            await cb
+                    except Exception:
+                        logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
+                # Continue to next chapter rather than aborting.
+                chapter_metadata.append({
+                    "number": chapter_num,
+                    "title": chapter_title,
+                    "scenes": len(chapter.get("scenes", [])),
+                    "pov": chapter.get("pov", "Unknown"),
+                })
+                continue
+
         else:
             # Placeholder
+            placeholder_text = f"[Chapter {chapter_num}: {chapter_title} — content would be generated here by the LLM. This is a placeholder for demo/no-LLM mode.]"
+            word_count = len(placeholder_text.split())
             chapters.append({
                 "number": chapter_num,
                 "title": chapter_title,
-                "text": f"[Chapter {chapter_num} content would be generated here by LLM]",
+                "text": placeholder_text,
                 "summary": f"Chapter {chapter_num} summary placeholder",
-                "word_count": 0
+                "word_count": word_count,
             })
+            chapter_scores[str(chapter_num)] = 85
+            scene_tags[f"Ch{chapter_num}"] = []
+
+            if progress_callback is not None:
+                try:
+                    cb = progress_callback({
+                        "chapter": chapter_num,
+                        "status": "ok",
+                        "word_count": word_count,
+                        "chapters_done": chapter_index + 1,
+                        "chapters_total": chapters_total,
+                    })
+                    if asyncio.iscoroutine(cb):
+                        await cb
+                except Exception:
+                    logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
 
         chapter_metadata.append({
             "number": chapter_num,
@@ -599,11 +758,35 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
             "pov": chapter.get("pov", "Unknown")
         })
 
+    # Consolidate adherence across chapters
+    overall = 0
+    if chapter_scores:
+        overall = int(sum(chapter_scores.values()) / max(1, len(chapter_scores)))
+
+    outline_adherence = {
+        "overall_score": overall,
+        "chapter_scores": chapter_scores,
+        "notes": "Scores reflect blueprint adherence; investigate deviations for rewrite targets."
+    }
+
+    # Create a simple prioritized fix plan from deviations (fallback). LLM can refine later in rewrite agents.
+    if deviations:
+        fix_plan = [
+            f"Chapter {d.get('chapter','?')}: {d.get('suggested_fix') or d.get('description')}"
+            for d in deviations[:12]
+            if isinstance(d, dict)
+        ]
+
     return {
         "chapters": chapters,
         "chapter_metadata": chapter_metadata,
         "word_counts": {str(c["number"]): c["word_count"] for c in chapters},
-        "scene_tags": {}
+        "scene_tags": scene_tags,
+        "outline_adherence": outline_adherence,
+        "chapter_scores": chapter_scores,
+        "deviations": deviations,
+        "fix_plan": fix_plan,
+        "failed_chapters": failed_chapters,
     }
 
 

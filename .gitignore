@@ -13,3 +13,6 @@ __pycache__/
 
 # Vercel
 .vercel/
+
+# Runtime data directories (project/job state, not source)
+data/

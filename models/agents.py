@@ -251,7 +251,16 @@ DRAFT_GENERATION = AgentDefinition(
         "chapter_blueprint", "voice_specification", "character_architecture",
         "world_rules", "style_guide"
     ],
-    outputs=["chapters", "chapter_metadata", "word_counts", "scene_tags"],
+    outputs=[
+        "chapters",
+        "chapter_metadata",
+        "word_counts",
+        "scene_tags",
+        "outline_adherence",
+        "chapter_scores",
+        "deviations",
+        "fix_plan",
+    ],
     gate_criteria="Draft follows outline and voice spec",
     fail_condition="Off-outline drift or voice inconsistency",
     dependencies=["voice_specification"]
@@ -312,7 +321,8 @@ PLAGIARISM_AUDIT = AgentDefinition(
     layer=15,
     agent_type=AgentType.LEGAL,
     purpose="Assess legal risk from similarity to existing works",
-    inputs=["chapters", "originality_scan_results"],
+    # Use the producing agent id so orchestrator wiring is reliable.
+    inputs=["chapters", "originality_scan"],
     outputs=[
         "substantial_similarity_check", "character_likeness_check",
         "scene_replication_check", "protected_expression_check", "legal_risk_score"
@@ -328,7 +338,7 @@ TRANSFORMATIVE_VERIFICATION = AgentDefinition(
     layer=15,
     agent_type=AgentType.LEGAL,
     purpose="Verify legal defensibility of creative choices",
-    inputs=["plagiarism_audit_results", "chapters"],
+    inputs=["chapters", "plagiarism_audit"],
     outputs=["independent_creation_proof", "market_confusion_check", "transformative_distance"],
     gate_criteria="Sufficient transformative distance",
     fail_condition="Derivative exposure risk",
@@ -346,7 +356,8 @@ STRUCTURAL_REWRITE = AgentDefinition(
     layer=16,
     agent_type=AgentType.EDITING,
     purpose="Improve clarity, force, and resolve flagged issues",
-    inputs=["chapters", "continuity_report", "emotional_validation_results", "originality_flags"],
+    # Use producing agent ids so inputs are always discoverable.
+    inputs=["chapters", "continuity_audit", "emotional_validation", "originality_scan", "plagiarism_audit", "transformative_verification"],
     outputs=["revised_chapters", "revision_log", "resolved_flags"],
     gate_criteria="All flagged issues resolved",
     fail_condition="New inconsistencies introduced",
@@ -412,7 +423,42 @@ FINAL_VALIDATION = AgentDefinition(
     outputs=["concept_match_score", "theme_payoff_check", "promise_fulfillment", "release_recommendation"],
     gate_criteria="Release approved",
     fail_condition="Core promise not delivered",
+    dependencies=["human_editor_review"]
+)
+
+HUMAN_EDITOR_REVIEW = AgentDefinition(
+    agent_id="human_editor_review",
+    name="Human Editor Review (AI Simulation)",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Simulate a professional human editor's review with required changes and an editorial letter",
+    inputs=[
+        "edited_chapters",
+        "voice_specification",
+        "chapter_blueprint",
+        "market_intelligence",
+        "concept_definition",
+        "thematic_architecture",
+        "story_question",
+        "user_constraints",
+    ],
+    outputs=["approved", "confidence", "editorial_letter", "required_changes", "optional_suggestions"],
+    gate_criteria="approved=true and required_changes empty",
+    fail_condition="Editor requests required changes before publication",
     dependencies=["beta_simulation"]
+)
+
+PRODUCTION_READINESS = AgentDefinition(
+    agent_id="production_readiness",
+    name="Production Readiness Report",
+    layer=19,
+    agent_type=AgentType.VALIDATION,
+    purpose="Create a QA-style release checklist and blockers for publication",
+    inputs=["edited_chapters", "release_recommendation", "user_constraints"],
+    outputs=["quality_score", "release_blockers", "major_issues", "minor_issues", "recommended_actions"],
+    gate_criteria="No release blockers and quality_score >= 85",
+    fail_condition="Release blockers present or quality score below threshold",
+    dependencies=["final_validation"]
 )
 
 PUBLISHING_PACKAGE = AgentDefinition(
@@ -425,7 +471,33 @@ PUBLISHING_PACKAGE = AgentDefinition(
     outputs=["blurb", "synopsis", "metadata", "keywords", "series_hooks", "author_bio"],
     gate_criteria="Platform-ready package complete",
     fail_condition="Weak positioning or missing elements",
-    dependencies=["final_validation"]
+    dependencies=["final_validation", "production_readiness"]
+)
+
+KDP_READINESS = AgentDefinition(
+    agent_id="kdp_readiness",
+    name="Kindle / KDP Readiness",
+    layer=20,
+    agent_type=AgentType.VALIDATION,
+    purpose="Validate EPUB/DOCX exports and ensure front/back matter readiness for Kindle publishing",
+    inputs=["edited_chapters", "publishing_package", "user_constraints", "title", "author_name"],
+    outputs=["kindle_ready", "epub_report", "docx_report", "front_matter_report", "recommendations"],
+    gate_criteria="kindle_ready=true and no critical issues in export reports",
+    fail_condition="EPUB/DOCX export validation fails or front matter is missing",
+    dependencies=["publishing_package", "final_proof"]
+)
+
+FINAL_PROOF = AgentDefinition(
+    agent_id="final_proof",
+    name="Final Proof (Full Manuscript)",
+    layer=20,
+    agent_type=AgentType.EDITING,
+    purpose="Run a full-manuscript proof/copy check and consistency scan before Kindle release",
+    inputs=["edited_chapters", "style_guide", "voice_specification", "chapter_blueprint", "user_constraints"],
+    outputs=["approved", "overall_score", "critical_issues", "major_issues", "minor_issues", "per_chapter_issues", "consistency_findings", "recommended_actions"],
+    gate_criteria="approved=true and critical_issues=0",
+    fail_condition="Critical proof issues remain",
+    dependencies=["production_readiness"]
 )
 
 IP_CLEARANCE = AgentDefinition(
@@ -438,7 +510,7 @@ IP_CLEARANCE = AgentDefinition(
     outputs=["title_conflict_check", "series_naming_check", "character_naming_check", "clearance_status"],
     gate_criteria="All naming cleared",
     fail_condition="Rename required",
-    dependencies=["publishing_package"]
+    dependencies=["kdp_readiness"]
 )
 
 
@@ -481,7 +553,11 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     "beta_simulation": BETA_SIMULATION,
     # Layer 19-20: Final
     "final_validation": FINAL_VALIDATION,
+    "human_editor_review": HUMAN_EDITOR_REVIEW,
+    "production_readiness": PRODUCTION_READINESS,
     "publishing_package": PUBLISHING_PACKAGE,
+    "final_proof": FINAL_PROOF,
+    "kdp_readiness": KDP_READINESS,
     "ip_clearance": IP_CLEARANCE,
 }
 
