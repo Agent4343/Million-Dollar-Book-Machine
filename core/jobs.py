@@ -23,6 +23,11 @@ from typing import Any, Dict, List, Optional
 from core.storage import get_job_store, get_project_store
 from models.state import BookProject
 
+# Seconds between heartbeat events during long-running agents.  30 s keeps
+# job.updated_at fresh and gives the UI a liveness signal without flooding
+# the event log during a typical 20-40 min draft_generation run.
+HEARTBEAT_INTERVAL: int = 30
+
 
 class JobStatus(str, Enum):
     queued = "queued"
@@ -345,7 +350,46 @@ class JobManager:
                 agent_id = available[0]
                 self._append_event(job, "step", f"Executing agent {agent_id}", agent_id=agent_id)
 
-                output = await orchestrator.execute_agent(project, agent_id)
+                # For long-running agents run a heartbeat alongside execution so
+                # job.updated_at advances and the UI knows the job is alive.
+                async def _heartbeat(jid: str, aid: str, interval: int = HEARTBEAT_INTERVAL) -> None:
+                    while True:
+                        await asyncio.sleep(interval)
+                        async with self._lock:
+                            _job = self._jobs.get(jid)
+                            if _job is None:
+                                return
+                            _job.updated_at = datetime.now(timezone.utc).isoformat()
+                            self._append_event(_job, "heartbeat", f"Agent {aid} still running…")
+                            store.save_raw(_job.job_id, _job.to_dict())
+
+                # draft_progress callback emits per-chapter progress events.
+                async def _draft_progress_cb(data: dict) -> None:
+                    async with self._lock:
+                        _job = self._jobs.get(job_id)
+                        if _job is None:
+                            return
+                        self._append_event(
+                            _job,
+                            "draft_progress",
+                            f"Chapter {data.get('chapter')} {data.get('status')} "
+                            f"({data.get('word_count', 0)} words)",
+                            **data,
+                        )
+                        _job.progress["draft_generation"] = data
+                        _job.updated_at = datetime.now(timezone.utc).isoformat()
+                        store.save_raw(_job.job_id, _job.to_dict())
+
+                heartbeat_task = asyncio.create_task(_heartbeat(job_id, agent_id))
+                try:
+                    cb = _draft_progress_cb if agent_id == "draft_generation" else None
+                    output = await orchestrator.execute_agent(project, agent_id, progress_callback=cb)
+                finally:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
                 # Persist project after each step
                 pstore.save_raw(project.project_id, orchestrator.export_project_state(project))
 
