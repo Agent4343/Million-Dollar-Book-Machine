@@ -385,7 +385,7 @@ TEXT:
                     }
                 )
 
-        return {"revised_chapters": revised, "revision_log": revision_log, "resolved_flags": 0}
+        return {"revised_chapters": revised, "revision_log": revision_log, "resolved_flags": len(revision_log)}
 
     return {
         "revised_chapters": chapters.copy(),
@@ -709,6 +709,7 @@ Guidance:
 
 async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any]:
     """Create publishing-ready materials."""
+    llm = context.llm_client
     core_promise = context.inputs.get("core_promise") or context.inputs.get("concept_definition", {})
     reader_avatar = context.inputs.get("reader_avatar") or context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
     chapters = _best_available_chapters(context)
@@ -719,12 +720,47 @@ async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any
             if isinstance(wc, int):
                 word_count += wc
 
+    genre = context.inputs.get("user_constraints", {}).get("genre", "Fiction")
+
+    if llm:
+        prompt = f"""You are a professional book publicist creating a publishing package for a new novel.
+
+Title: {context.project.title}
+Genre: {genre}
+Word count: {word_count}
+Core promise: {core_promise}
+Target reader: {reader_avatar}
+
+Return ONLY valid JSON:
+{{
+  "blurb": "<compelling 150-word Amazon book description>",
+  "synopsis": "<2-paragraph synopsis for agents and publishers>",
+  "metadata": {{
+    "title": "{context.project.title}",
+    "genre": "{genre}",
+    "word_count": {word_count},
+    "audience": "Adult"
+  }},
+  "keywords": ["<keyword1>", "<keyword2>", "<keyword3>", "<keyword4>", "<keyword5>", "<keyword6>", "<keyword7>"],
+  "series_hooks": ["<hook1>", "<hook2>"],
+  "author_bio": "<professional 50-word author bio placeholder>"
+}}
+
+Requirements:
+- blurb: Open with a hook, introduce the protagonist and stakes, end with a question or cliffhanger. Under 150 words.
+- keywords: 7 search-optimized Amazon keywords for this specific book
+- series_hooks: 2 hooks that could support a sequel or series"""
+        result = await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=2000)
+        if isinstance(result, dict) and "metadata" in result:
+            result["metadata"]["word_count"] = word_count
+        return result
+
     return {
         "blurb": "[Compelling 150-word book description would be generated here]",
         "synopsis": "[2-page synopsis for agents/publishers]",
         "metadata": {
             "title": context.project.title,
-            "genre": context.inputs.get("user_constraints", {}).get("genre", "Fiction"),
+            "genre": genre,
             "word_count": word_count,
             "audience": "Adult"
         },

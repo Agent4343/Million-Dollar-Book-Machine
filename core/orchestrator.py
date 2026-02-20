@@ -8,7 +8,7 @@ complete book development pipeline.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 
@@ -253,7 +253,7 @@ class Orchestrator:
         layer = project.layers[agent_def.layer]
         if layer.status == LayerStatus.AVAILABLE:
             layer.status = LayerStatus.IN_PROGRESS
-            layer.started_at = datetime.utcnow().isoformat()
+            layer.started_at = datetime.now(timezone.utc).isoformat()
 
         # Gather inputs
         inputs = self.gather_inputs(project, agent_id)
@@ -464,7 +464,7 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
 
         if all_passed:
             layer.status = LayerStatus.COMPLETED
-            layer.completed_at = datetime.utcnow().isoformat()
+            layer.completed_at = datetime.now(timezone.utc).isoformat()
             project.current_layer = layer_id
 
             # Unlock next layer
@@ -472,8 +472,9 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
             if next_layer_id in project.layers:
                 project.layers[next_layer_id].status = LayerStatus.AVAILABLE
                 project.current_layer = next_layer_id
-
-            logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
+                logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
+            else:
+                logger.info(f"Layer {layer_id} completed (final layer)")
 
     def register_executor(self, agent_id: str, executor: Callable) -> None:
         """Register a custom executor for an agent."""
@@ -556,7 +557,7 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
 
         manuscript = {
             "title": project.title,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "chapters": [],
             "metadata": {}
         }

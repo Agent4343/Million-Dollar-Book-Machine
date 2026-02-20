@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import io
 import os
+import secrets
 import sys
 import time
 import json
@@ -76,7 +77,7 @@ app.add_middleware(
 # =============================================================================
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
 SESSION_DURATION = 60 * 60 * 24 * 7
 
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
@@ -164,7 +165,7 @@ def verify_session_token(token: str) -> bool:
             return False
         expected = create_session_token(timestamp)
         return hmac.compare_digest(token, expected)
-    except:
+    except Exception:
         return False
 
 
@@ -205,7 +206,7 @@ class AgentExecuteRequest(BaseModel):
 
 @app.post("/api/auth/login")
 async def login(request: LoginRequest, response: Response):
-    if request.password == APP_PASSWORD:
+    if hmac.compare_digest(request.password, APP_PASSWORD):
         token = create_session_token(int(time.time()))
         response.set_cookie(
             key="book_session",
