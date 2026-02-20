@@ -10,7 +10,7 @@ Generates professional book formats:
 import io
 import re
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _get_best_chapters(project, chapters_override: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
@@ -24,7 +24,7 @@ def _get_best_chapters(project, chapters_override: Optional[List[Dict[str, Any]]
 
 def _front_matter_defaults(project) -> Dict[str, Any]:
     c = project.user_constraints or {}
-    year = c.get("copyright_year") or datetime.utcnow().year
+    year = c.get("copyright_year") or datetime.now(timezone.utc).year
     return {
         "author_name": c.get("author_name") or c.get("pen_name") or "Author Name",
         "publisher_name": c.get("publisher_name") or "",
