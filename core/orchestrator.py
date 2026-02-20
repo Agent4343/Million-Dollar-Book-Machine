@@ -214,6 +214,8 @@ class Orchestrator:
                 for agent_state in layer.agents.values():
                     if agent_state.current_output:
                         content = agent_state.current_output.content
+                        if not isinstance(content, dict):
+                            continue
                         if input_name in content:
                             inputs[input_name] = content[input_name]
 
