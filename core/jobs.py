@@ -317,7 +317,7 @@ class JobManager:
                                 "Project blocked: no available agents. "
                                 f"{len(diagnostics['blocked_candidates'])} pending agent(s) have unmet dependencies. "
                                 "See 'blocked_reason' in progress for details or call "
-                                "GET /api/projects/{project_id}/debug/availability."
+                                f"GET /api/projects/{job.project_id}/debug/availability."
                             )
                             job.progress = {
                                 "iterations": iterations,

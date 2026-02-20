@@ -193,7 +193,9 @@ class ClaudeLLMClient:
                 if last_comma > 0:
                     content = content[:last_comma]
 
-        # Build nesting stack to determine correct closing order (respects actual JSON structure)
+        # Build nesting stack to determine correct closing order (respects actual JSON structure).
+        # escape_next handles backslash-escaped characters inside strings (e.g. \") so they
+        # don't accidentally toggle in_string state.
         stack = []
         in_string = False
         escape_next = False
