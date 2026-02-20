@@ -360,7 +360,7 @@ TEXT:
 {_chapter_text(ch)}
 """
             out = await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=6000)
-            new_text = out.get("text", "")
+            new_text = out.get("text") or _chapter_text(ch)
             num = _chapter_number(ch)
             revised_ch = {
                 "number": num,
@@ -454,7 +454,7 @@ Chapter text:
 {_chapter_text(ch)}
 """
             out = await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=6000)
-            new_text = out.get("text", "")
+            new_text = out.get("text") or _chapter_text(ch)
             edited.append(
                 {
                     "number": _chapter_number(ch),
@@ -709,6 +709,7 @@ Guidance:
 
 async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any]:
     """Create publishing-ready materials."""
+    llm = context.llm_client
     core_promise = context.inputs.get("core_promise") or context.inputs.get("concept_definition", {})
     reader_avatar = context.inputs.get("reader_avatar") or context.inputs.get("market_intelligence", {}).get("reader_avatar", {})
     chapters = _best_available_chapters(context)
@@ -719,12 +720,48 @@ async def execute_publishing_package(context: ExecutionContext) -> Dict[str, Any
             if isinstance(wc, int):
                 word_count += wc
 
+    title = context.project.title
+    constraints = context.inputs.get("user_constraints", {}) or {}
+    genre = constraints.get("genre", "Fiction") if isinstance(constraints, dict) else "Fiction"
+
+    if llm:
+        prompt = f"""You are a publishing marketing expert. Create a complete publishing package for this book.
+
+Title: {title}
+Genre: {genre}
+Word count: {word_count}
+Core promise: {core_promise}
+Reader avatar: {reader_avatar}
+
+Return ONLY valid JSON:
+{{
+  "blurb": "...",
+  "synopsis": "...",
+  "metadata": {{
+    "title": "{title}",
+    "genre": "{genre}",
+    "word_count": {word_count},
+    "audience": "..."
+  }},
+  "keywords": ["...", "...", "..."],
+  "series_hooks": ["...", "..."],
+  "author_bio": "..."
+}}
+
+Requirements:
+- blurb: A compelling 150-word book description for Amazon. Open with a hook, introduce the protagonist and stakes, hint at conflict without spoilers, end with a cliffhanger question.
+- synopsis: A 2-paragraph synopsis for agents/publishers (summary including ending).
+- keywords: 5-7 search-optimized keywords for the book's genre and themes.
+- series_hooks: 2-3 potential sequel hooks or series possibilities.
+- author_bio: A 50-word author bio placeholder appropriate for the genre."""
+        return await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=2000)
+
     return {
         "blurb": "[Compelling 150-word book description would be generated here]",
         "synopsis": "[2-page synopsis for agents/publishers]",
         "metadata": {
-            "title": context.project.title,
-            "genre": context.inputs.get("user_constraints", {}).get("genre", "Fiction"),
+            "title": title,
+            "genre": genre,
             "word_count": word_count,
             "audience": "Adult"
         },
