@@ -296,7 +296,15 @@ class JobManager:
 
                 available = orchestrator.get_available_agents(project)
                 if not available:
-                    # done or blocked
+                    # done or blocked — update project.status so the UI reflects reality
+                    from models.state import LayerStatus as _LS
+                    all_complete = all(
+                        layer.status == _LS.COMPLETED for layer in project.layers.values()
+                    )
+                    if all_complete:
+                        project.status = "completed"
+                    else:
+                        project.status = "blocked"
                     status = orchestrator.get_project_status(project)
                     async with self._lock:
                         job = self._jobs[job_id]
@@ -306,12 +314,12 @@ class JobManager:
                             "current_layer": status.get("current_layer"),
                             "current_agent": status.get("current_agent"),
                         }
-                        if status.get("status") == "completed":
+                        if project.status == "completed":
                             job.status = JobStatus.succeeded
                             self._append_event(job, "complete", "Project completed")
                         else:
-                            job.status = JobStatus.failed
-                            job.error = "Project blocked (no available agents)."
+                            job.status = JobStatus.interrupted
+                            job.error = "Project blocked (no available agents). Use Resume to continue when agents become available."
                             self._append_event(job, "blocked", "Project blocked: no available agents")
                         job.finished_at = datetime.now(timezone.utc).isoformat()
                         job.updated_at = datetime.now(timezone.utc).isoformat()
