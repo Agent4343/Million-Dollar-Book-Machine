@@ -750,9 +750,16 @@
                 status = 'Pipeline complete!';
                 document.getElementById('runFullPipelineBtn').textContent = 'Pipeline Complete';
                 document.getElementById('runFullPipelineBtn').disabled = true;
-            } else if (completed > 0) {
-                const currentLayer = projectData.current_layer || 0;
-                status = `Layer ${currentLayer} in progress`;
+            } else {
+                // Reset button to runnable state (guards against stale state from previous project)
+                if (!isRunningPipeline) {
+                    document.getElementById('runFullPipelineBtn').textContent = 'Run Full Pipeline (Background)';
+                    document.getElementById('runFullPipelineBtn').disabled = false;
+                }
+                if (completed > 0) {
+                    const currentLayer = projectData.current_layer || 0;
+                    status = `Layer ${currentLayer} in progress`;
+                }
             }
             document.getElementById('progressStatus').textContent = status;
 
@@ -826,14 +833,18 @@
                 return;
             }
 
-            const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
-            const data = await res.json();
-
-            for (const agent of data.available_agents) {
-                await fetch(`/api/projects/${currentProject}/execute/${agent.id}`, {
-                    method: 'POST',
-                    credentials: 'include'
-                });
+            // Loop: re-fetch available agents after each batch so newly-unlocked
+            // layers are also executed in the same click.
+            while (true) {
+                const res = await fetch(`/api/projects/${currentProject}/available-agents`, {credentials: 'include'});
+                const data = await res.json();
+                if (!data.available_agents || data.available_agents.length === 0) break;
+                for (const agent of data.available_agents) {
+                    await fetch(`/api/projects/${currentProject}/execute/${agent.id}`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                }
             }
             await loadProjectPipeline();
         }
