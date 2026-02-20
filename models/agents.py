@@ -454,7 +454,7 @@ PRODUCTION_READINESS = AgentDefinition(
     layer=19,
     agent_type=AgentType.VALIDATION,
     purpose="Create a QA-style release checklist and blockers for publication",
-    inputs=["edited_chapters", "release_recommendation", "metadata", "user_constraints"],
+    inputs=["edited_chapters", "release_recommendation", "user_constraints"],
     outputs=["quality_score", "release_blockers", "major_issues", "minor_issues", "recommended_actions"],
     gate_criteria="No release blockers and quality_score >= 85",
     fail_condition="Release blockers present or quality score below threshold",

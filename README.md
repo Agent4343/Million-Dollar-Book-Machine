@@ -4,7 +4,7 @@ AI-powered multi-agent system for developing books from concept to publication.
 
 ## System Overview
 
-This system uses **21 specialized agents** across **11 development layers** to take a book from initial concept through to publication-ready manuscript.
+This system uses **27 specialized agents** across **21 development layers** to take a book from initial concept through to publication-ready manuscript.
 
 ### Development Layers
 
@@ -29,8 +29,8 @@ This system uses **21 specialized agents** across **11 development layers** to t
 | 16 | Rewrite & Revalidation | structural_rewrite, post_rewrite_scan |
 | 17 | Line & Copy Edit | line_edit |
 | 18 | Beta Reader Simulation | beta_simulation |
-| 19 | Final Quality Validation | final_validation |
-| 20 | Publishing Package | publishing_package, ip_clearance |
+| 19 | Final Quality Validation | human_editor_review, final_validation, production_readiness |
+| 20 | Publishing Package | publishing_package, final_proof, kdp_readiness, ip_clearance |
 
 ### How It Works
 
@@ -62,7 +62,7 @@ uvicorn api.index:app --reload --port 3000
 vercel
 ```
 
-Password: `Blake2011@` (configurable via APP_PASSWORD env var)
+Password: Set the `APP_PASSWORD` environment variable before starting (an auto-generated password is printed to the log if unset).
 
 ## API Endpoints
 
@@ -140,10 +140,15 @@ Million-Dollar-Book-Machine/
 **Plagiarism Audit**: Legal risk assessment
 **Transformative Verification**: Legal defensibility check
 **Structural Rewrite**: Prose improvement, flag resolution
+**Post-Rewrite Scan**: Re-validates quality after rewrite
 **Line Edit**: Grammar, rhythm, editorial polish
 **Beta Simulation**: Simulated reader response, engagement analysis
+**Human Editor Review**: AI-simulated senior editor assessment with editorial letter
 **Final Validation**: Core promise fulfillment check
+**Production Readiness**: QA release checklist and blocker identification
 **Publishing Package**: Blurb, synopsis, metadata, keywords
+**Final Proof**: Full-manuscript copy check and consistency scan
+**KDP Readiness**: Validates EPUB/DOCX exports for Kindle publishing
 **IP Clearance**: Title and naming safety verification
 
 ## Claude API Configuration
@@ -155,7 +160,7 @@ The system uses the **Anthropic Claude API** for content generation.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key | Required for AI generation |
-| `APP_PASSWORD` | Login password | `Blake2011@` |
+| `APP_PASSWORD` | Login password | Auto-generated (printed to log) |
 | `SESSION_SECRET` | Session signing secret | Auto-generated |
 
 ### Local Development

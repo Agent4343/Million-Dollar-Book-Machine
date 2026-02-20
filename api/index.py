@@ -7,7 +7,9 @@ Multi-agent system for developing books from concept to publication.
 import hashlib
 import hmac
 import io
+import logging
 import os
+import secrets
 import sys
 import time
 import json
@@ -75,8 +77,17 @@ app.add_middleware(
 # Authentication (same as before)
 # =============================================================================
 
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
+_raw_password = os.environ.get("APP_PASSWORD")
+if not _raw_password:
+    _raw_password = secrets.token_urlsafe(16)
+    logging.getLogger(__name__).warning(
+        "APP_PASSWORD environment variable is not set. "
+        "Using auto-generated password for this session: %s",
+        _raw_password,
+    )
+APP_PASSWORD = _raw_password
+
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
 SESSION_DURATION = 60 * 60 * 24 * 7
 
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
