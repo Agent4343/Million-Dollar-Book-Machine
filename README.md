@@ -81,6 +81,7 @@ Password: `Blake2011@` (configurable via APP_PASSWORD env var)
 - `GET /api/projects` - List all projects
 - `GET /api/projects/{id}` - Get project details
 - `GET /api/projects/{id}/available-agents` - Get agents ready to run
+- `GET /api/projects/{id}/debug/availability` - Diagnose why a project is blocked (unmet deps, locked layers)
 - `POST /api/projects/{id}/execute/{agent}` - Run specific agent
 - `GET /api/projects/{id}/agent/{agent}/output` - Get agent output
 - `GET /api/projects/{id}/manuscript` - Export manuscript
@@ -198,3 +199,42 @@ After login, check `/api/system/llm-status` to verify Claude is configured:
 ## License
 
 MIT
+
+## Debugging a Blocked Project
+
+If a pipeline job ends with status `blocked`, the job record's `progress.blocked_reason` field contains a
+full diagnostic payload.  You can also query the debug endpoint directly:
+
+```bash
+# 1. Login and capture the session cookie
+curl -c cookies.txt -X POST https://your-app/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"password": "YOUR_APP_PASSWORD"}'
+
+# 2. List your projects
+curl -b cookies.txt https://your-app/api/projects
+
+# 3. Get project status
+curl -b cookies.txt https://your-app/api/projects/<project_id>
+
+# 4. See which agents are ready to run
+curl -b cookies.txt https://your-app/api/projects/<project_id>/available-agents
+
+# 5. Debug why the project is blocked (unmet dependencies, locked layers)
+curl -b cookies.txt https://your-app/api/projects/<project_id>/debug/availability
+```
+
+The debug endpoint returns:
+- **`available_agents`** – agents that can run right now (should be empty when blocked)
+- **`blocked_candidates`** – PENDING agents with at least one dependency not yet PASSED, including which dep and its current status
+- **`locked_layer_reasons`** – locked layers with the list of agents in the preceding layer that haven't passed yet
+- **`agent_status_counts`** – summary counts across all agents by status (pending, passed, failed, …)
+- **`layer_status_counts`** – summary counts across all layers by status (locked, available, in_progress, completed)
+
+A blocked job can be resumed once the underlying cause is resolved:
+
+```bash
+curl -b cookies.txt -X POST https://your-app/api/jobs/<job_id>/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"max_iterations": 200}'
+```

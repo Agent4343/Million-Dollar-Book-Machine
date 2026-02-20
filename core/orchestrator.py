@@ -136,6 +136,84 @@ class Orchestrator:
 
         return available
 
+    def get_blocked_agents_diagnostics(self, project: BookProject) -> Dict[str, Any]:
+        """
+        Return a structured diagnostic payload explaining why the project is blocked.
+
+        For every PENDING agent whose layer is AVAILABLE or IN_PROGRESS but whose
+        dependencies are not all PASSED, report which dependency is unmet and what
+        status it currently has.  Also summarises layer-level lock reasons.
+        """
+        blocked_candidates: List[Dict[str, Any]] = []
+        agent_status_counts: Dict[str, int] = {}
+        layer_status_counts: Dict[str, int] = {}
+
+        for layer_id, layer in project.layers.items():
+            ls = layer.status.value
+            layer_status_counts[ls] = layer_status_counts.get(ls, 0) + 1
+
+            for agent_id, agent_state in layer.agents.items():
+                ags = agent_state.status.value
+                agent_status_counts[ags] = agent_status_counts.get(ags, 0) + 1
+
+                # Only care about agents that could potentially run but are stuck
+                if agent_state.status.value != "pending":
+                    continue
+
+                unmet_deps: List[Dict[str, str]] = []
+                for dep_id in agent_state.dependencies:
+                    dep_state = self._find_agent_state(project, dep_id)
+                    if dep_state is None:
+                        unmet_deps.append({"dep_id": dep_id, "dep_status": "missing"})
+                    elif dep_state.status.value != "passed":
+                        unmet_deps.append({"dep_id": dep_id, "dep_status": dep_state.status.value})
+
+                if unmet_deps:
+                    blocked_candidates.append(
+                        {
+                            "agent_id": agent_id,
+                            "agent_name": agent_state.name,
+                            "layer": layer_id,
+                            "layer_name": layer.name,
+                            "layer_status": layer.status.value,
+                            "unmet_dependencies": unmet_deps,
+                        }
+                    )
+
+        # Explain why the *next* locked layer hasn't unlocked
+        locked_layer_reasons: List[Dict[str, Any]] = []
+        for layer_id, layer in project.layers.items():
+            if layer.status.value != "locked":
+                continue
+            prev_layer_id = layer_id - 1
+            if prev_layer_id not in project.layers:
+                continue
+            prev_layer = project.layers[prev_layer_id]
+            not_passed = [
+                {"agent_id": aid, "status": a.status.value}
+                for aid, a in prev_layer.agents.items()
+                if a.status.value != "passed"
+            ]
+            locked_layer_reasons.append(
+                {
+                    "locked_layer": layer_id,
+                    "locked_layer_name": layer.name,
+                    "blocking_layer": prev_layer_id,
+                    "blocking_layer_name": prev_layer.name,
+                    "blocking_layer_status": prev_layer.status.value,
+                    "agents_not_yet_passed": not_passed,
+                }
+            )
+
+        return {
+            "project_id": project.project_id,
+            "project_status": project.status,
+            "blocked_candidates": blocked_candidates,
+            "locked_layer_reasons": locked_layer_reasons,
+            "agent_status_counts": agent_status_counts,
+            "layer_status_counts": layer_status_counts,
+        }
+
     def _find_agent_state(self, project: BookProject, agent_id: str) -> Optional[AgentState]:
         """Find an agent's state across all layers."""
         for layer in project.layers.values():
