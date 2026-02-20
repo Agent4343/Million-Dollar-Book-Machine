@@ -29,6 +29,7 @@ class JobStatus(str, Enum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    blocked = "blocked"  # pipeline stalled due to dependency deadlock / locked layers
     cancelled = "cancelled"
     interrupted = "interrupted"  # process restart / task lost
 
@@ -154,7 +155,7 @@ class JobManager:
         prior = await self.get(job_id)
         if prior is None:
             raise KeyError(job_id)
-        if prior.status not in (JobStatus.interrupted, JobStatus.failed, JobStatus.cancelled):
+        if prior.status not in (JobStatus.interrupted, JobStatus.failed, JobStatus.blocked, JobStatus.cancelled):
             raise RuntimeError(f"Job {job_id} is not resumable (status={prior.status.value}).")
 
         # Load project from orchestrator
@@ -298,21 +299,42 @@ class JobManager:
                 if not available:
                     # done or blocked
                     status = orchestrator.get_project_status(project)
+                    diagnostics = orchestrator.get_blocked_agents_diagnostics(project)
                     async with self._lock:
                         job = self._jobs[job_id]
-                        job.progress = {
-                            "iterations": iterations,
-                            "project_status": status.get("status"),
-                            "current_layer": status.get("current_layer"),
-                            "current_agent": status.get("current_agent"),
-                        }
                         if status.get("status") == "completed":
                             job.status = JobStatus.succeeded
+                            job.progress = {
+                                "iterations": iterations,
+                                "project_status": status.get("status"),
+                                "current_layer": status.get("current_layer"),
+                                "current_agent": status.get("current_agent"),
+                            }
                             self._append_event(job, "complete", "Project completed")
                         else:
-                            job.status = JobStatus.failed
-                            job.error = "Project blocked (no available agents)."
-                            self._append_event(job, "blocked", "Project blocked: no available agents")
+                            job.status = JobStatus.blocked
+                            job.error = (
+                                "Project blocked: no available agents. "
+                                f"{len(diagnostics['blocked_candidates'])} pending agent(s) have unmet dependencies. "
+                                "See 'blocked_reason' in progress for details or call "
+                                "GET /api/projects/{project_id}/debug/availability."
+                            )
+                            job.progress = {
+                                "iterations": iterations,
+                                "project_status": status.get("status"),
+                                "current_layer": status.get("current_layer"),
+                                "current_agent": status.get("current_agent"),
+                                "blocked_reason": diagnostics,
+                            }
+                            self._append_event(
+                                job,
+                                "blocked",
+                                "Project blocked: no available agents",
+                                blocked_candidates_count=len(diagnostics["blocked_candidates"]),
+                                agent_status_counts=diagnostics["agent_status_counts"],
+                                layer_status_counts=diagnostics["layer_status_counts"],
+                                blocked_candidates=diagnostics["blocked_candidates"][:10],  # cap event payload; full list available in progress["blocked_reason"]
+                            )
                         job.finished_at = datetime.utcnow().isoformat()
                         job.updated_at = datetime.utcnow().isoformat()
                         store.save_raw(job.job_id, job.to_dict())

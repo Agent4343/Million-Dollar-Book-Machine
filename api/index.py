@@ -529,6 +529,50 @@ async def get_available_agents(project_id: str, auth: bool = Depends(require_aut
     return {"available_agents": agents}
 
 
+@app.get("/api/projects/{project_id}/debug/availability")
+async def debug_availability(project_id: str, auth: bool = Depends(require_auth)):
+    """
+    Debug endpoint: explains why the project may be blocked.
+
+    Returns:
+    - available_agents: agents currently ready to run
+    - blocked_candidates: PENDING agents with at least one unmet dependency,
+      including which dep is missing and its current status
+    - locked_layer_reasons: locked layers explaining which agents in the
+      previous layer are preventing unlock
+    - agent_status_counts: summary counts by agent status
+    - layer_status_counts: summary counts by layer status
+    """
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    available = orch.get_available_agents(project)
+    available_detail = []
+    for agent_id in available:
+        agent_def = AGENT_REGISTRY.get(agent_id)
+        if agent_def:
+            available_detail.append({
+                "agent_id": agent_id,
+                "name": agent_def.name,
+                "layer": agent_def.layer,
+                "layer_name": LAYERS.get(agent_def.layer, "Unknown"),
+            })
+
+    diagnostics = orch.get_blocked_agents_diagnostics(project)
+
+    return {
+        "project_id": project_id,
+        "project_status": project.status,
+        "available_agents": available_detail,
+        "blocked_candidates": diagnostics["blocked_candidates"],
+        "locked_layer_reasons": diagnostics["locked_layer_reasons"],
+        "agent_status_counts": diagnostics["agent_status_counts"],
+        "layer_status_counts": diagnostics["layer_status_counts"],
+    }
+
+
 @app.post("/api/projects/{project_id}/execute/{agent_id}")
 async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
     """Execute a specific agent."""
