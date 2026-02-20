@@ -7,6 +7,7 @@ Generates professional book formats:
 - Markdown
 """
 
+import html
 import io
 import re
 from typing import Dict, Any, List, Optional
@@ -383,11 +384,11 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     title_page = epub.EpubHtml(title='Title Page', file_name='title.xhtml', lang='en')
     title_page.content = f'''
     <html>
-    <head><title>{project.title}</title></head>
+    <head><title>{html.escape(project.title)}</title></head>
     <body>
         <div style="text-align: center; margin-top: 30%;">
-            <h1 style="font-size: 2.5em;">{project.title}</h1>
-            <p style="margin-top: 2em; font-style: italic;">{genre}</p>
+            <h1 style="font-size: 2.5em;">{html.escape(project.title)}</h1>
+            <p style="margin-top: 2em; font-style: italic;">{html.escape(genre)}</p>
         </div>
     </body>
     </html>
@@ -399,15 +400,15 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     copyright_page = epub.EpubHtml(title='Copyright', file_name='copyright.xhtml', lang='en')
     disclaimer_html = ""
     if fm.get("include_disclaimer"):
-        disclaimer_html = f"<p><strong>Disclaimer:</strong> {fm.get('disclaimer_text','')}</p>"
-    publisher_html = f"<p>Publisher: {fm.get('publisher_name')}</p>" if fm.get("publisher_name") else ""
-    isbn_html = f"<p>ISBN: {fm.get('isbn')}</p>" if fm.get("isbn") else ""
+        disclaimer_html = f"<p><strong>Disclaimer:</strong> {html.escape(fm.get('disclaimer_text', ''))}</p>"
+    publisher_html = f"<p>Publisher: {html.escape(fm.get('publisher_name', ''))}</p>" if fm.get("publisher_name") else ""
+    isbn_html = f"<p>ISBN: {html.escape(str(fm.get('isbn', '')))}</p>" if fm.get("isbn") else ""
     copyright_page.content = f"""
     <html>
     <head><title>Copyright</title></head>
     <body>
         <h1>Copyright</h1>
-        <p>© {fm['copyright_year']} {fm['author_name']}. {fm['rights_statement']}</p>
+        <p>© {fm['copyright_year']} {html.escape(fm['author_name'])}. {html.escape(fm['rights_statement'])}</p>
         {publisher_html}
         {isbn_html}
         {disclaimer_html}
@@ -420,7 +421,7 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     # Also By (optional)
     if sup["also_by"]:
         also_by_page = epub.EpubHtml(title="Also By", file_name="also_by.xhtml", lang="en")
-        items = "".join(f"<li>{t}</li>" for t in sup["also_by"])
+        items = "".join(f"<li>{html.escape(t)}</li>" for t in sup["also_by"])
         also_by_page.content = f"""
         <html>
         <head><title>Also By</title></head>
@@ -450,7 +451,7 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
             if text:
                 # Convert text to HTML paragraphs
                 paragraphs = text.split('\n\n')
-                html_content = f'<h1>Chapter {ch_num}: {ch_title}</h1>\n'
+                html_content = f'<h1>Chapter {ch_num}: {html.escape(ch_title)}</h1>\n'
 
                 for para in paragraphs:
                     para = para.strip()
@@ -464,7 +465,7 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
                             html_content += f'<p style="text-indent: 1.5em; margin: 0.5em 0;">{para}</p>\n'
             else:
                 html_content = f'''
-                <h1>Chapter {ch_num}: {ch_title}</h1>
+                <h1>Chapter {ch_num}: {html.escape(ch_title)}</h1>
                 <p><em>Chapter content not yet written.</em></p>
                 '''
 

@@ -193,14 +193,34 @@ class ClaudeLLMClient:
                 if last_comma > 0:
                     content = content[:last_comma]
 
-        # Count and close brackets
-        open_braces = content.count('{') - content.count('}')
-        open_brackets = content.count('[') - content.count(']')
+        # Build nesting stack to determine correct closing order (respects actual JSON structure).
+        # escape_next handles backslash-escaped characters inside strings (e.g. \") so they
+        # don't accidentally toggle in_string state.
+        stack = []
+        in_string = False
+        escape_next = False
+        for ch in content:
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                stack.append('}')
+            elif ch == '[':
+                stack.append(']')
+            elif ch in ('}', ']') and stack and stack[-1] == ch:
+                stack.pop()
 
         # Add closing brackets in reverse order of opening
         content = content.rstrip(',')  # Remove trailing comma
-        content += ']' * open_brackets
-        content += '}' * open_braces
+        content += ''.join(reversed(stack))
 
         return content
 

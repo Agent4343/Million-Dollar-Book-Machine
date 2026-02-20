@@ -20,7 +20,7 @@ vercel
 railway up
 ```
 
-**Default Password**: `Blake2011@` (configurable via `APP_PASSWORD` env var)
+**Default Password**: Auto-generated and printed to the server log if `APP_PASSWORD` env var is not set.
 
 ## Project Structure
 
@@ -138,7 +138,7 @@ class AgentOutput:
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `ANTHROPIC_API_KEY` | For AI | None | Claude API key |
-| `APP_PASSWORD` | No | `Blake2011@` | Login password |
+| `APP_PASSWORD` | No | Auto-generated | Login password |
 | `SESSION_SECRET` | No | Auto-generated | Session signing |
 
 ## Common Development Tasks
