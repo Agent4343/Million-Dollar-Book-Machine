@@ -6,6 +6,7 @@ handles state transitions, validates gates, and coordinates the
 complete book development pipeline.
 """
 
+import inspect
 import json
 import logging
 from datetime import datetime, timezone
@@ -236,7 +237,8 @@ class Orchestrator:
         self,
         project: BookProject,
         agent_id: str,
-        executor: Optional[Callable] = None
+        executor: Optional[Callable] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> AgentOutput:
         """
         Execute a single agent.
@@ -282,9 +284,24 @@ class Orchestrator:
         try:
             # Execute the agent
             if executor:
-                result = await executor(context)
+                fn = executor
             elif agent_id in self.agent_executors:
-                result = await self.agent_executors[agent_id](context)
+                fn = self.agent_executors[agent_id]
+            else:
+                fn = None
+
+            if fn is not None:
+                # Pass progress_callback only if the executor accepts it.
+                try:
+                    sig = inspect.signature(fn)
+                    supports_cb = "progress_callback" in sig.parameters
+                except (ValueError, TypeError):
+                    supports_cb = False
+
+                if supports_cb and progress_callback is not None:
+                    result = await fn(context, progress_callback=progress_callback)
+                else:
+                    result = await fn(context)
             else:
                 # Default executor that returns placeholder
                 result = self._default_executor(context)

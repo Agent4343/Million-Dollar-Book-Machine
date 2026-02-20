@@ -9,8 +9,16 @@ These agents design and execute the story structure:
 - Draft Generation
 """
 
-from typing import Dict, Any, List
+import asyncio
+import logging
+import os
+from typing import Callable, Dict, Any, List, Optional
 from core.orchestrator import ExecutionContext
+
+logger = logging.getLogger(__name__)
+
+# Per-chapter LLM call timeout in seconds; configurable via env var.
+_DRAFT_CHAPTER_TIMEOUT = int(os.environ.get("DRAFT_CHAPTER_TIMEOUT", "300") or "300")
 
 
 # =============================================================================
@@ -579,7 +587,10 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
         }
 
 
-async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
+async def execute_draft_generation(
+    context: ExecutionContext,
+    progress_callback: Optional[Callable[[dict], Any]] = None,
+) -> Dict[str, Any]:
     """Execute draft generation agent - generates all chapters."""
     llm = context.llm_client
     chapter_blueprint = context.inputs.get("chapter_blueprint", {})
@@ -590,10 +601,12 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
     deviations: List[Dict[str, Any]] = []
     fix_plan: List[str] = []
     chapter_scores: Dict[str, int] = {}
+    failed_chapters: List[Dict[str, Any]] = []
 
     outline = chapter_blueprint.get("chapter_outline", [])
+    chapters_total = len(outline)
 
-    for chapter in outline:
+    for chapter_index, chapter in enumerate(outline):
         chapter_num = chapter.get("number", 0)
         chapter_title = chapter.get("title", f"Chapter {chapter_num}")
 
@@ -613,11 +626,16 @@ async def execute_draft_generation(context: ExecutionContext) -> Dict[str, Any]:
                 previous_summary=previous_summary
             )
 
-            chapter_text = await llm.generate(prompt)
-            summary = await llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}")
+            timeout = _DRAFT_CHAPTER_TIMEOUT
+            try:
+                chapter_text = await asyncio.wait_for(llm.generate(prompt), timeout=timeout)
+                summary = await asyncio.wait_for(
+                    llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}"),
+                    timeout=timeout,
+                )
 
-            # Evaluate outline adherence (structured) for this chapter
-            adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
+                # Evaluate outline adherence (structured) for this chapter
+                adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
 
 Blueprint for this chapter:
 {chapter}
@@ -640,38 +658,98 @@ Rules:
 - outline_adherence_score is 0-100.
 - scene_checks must include every scene_number listed in the blueprint.
 - If deviation=true, suggested_fix must be specific."""
-            adherence = await llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600)
+                adherence = await asyncio.wait_for(
+                    llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600),
+                    timeout=timeout,
+                )
 
-            score = adherence.get("outline_adherence_score")
-            if isinstance(score, int):
-                chapter_scores[str(chapter_num)] = score
-            else:
-                chapter_scores[str(chapter_num)] = 0
+                score = adherence.get("outline_adherence_score")
+                if isinstance(score, int):
+                    chapter_scores[str(chapter_num)] = score
+                else:
+                    chapter_scores[str(chapter_num)] = 0
 
-            scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
-            for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
-                if isinstance(d, dict):
-                    deviations.append(d)
+                scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
+                for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
+                    if isinstance(d, dict):
+                        deviations.append(d)
 
-            chapters.append({
-                "number": chapter_num,
-                "title": chapter_title,
-                "text": chapter_text,
-                "summary": summary,
-                "word_count": len(chapter_text.split())
-            })
+                word_count = len(chapter_text.split())
+                chapters.append({
+                    "number": chapter_num,
+                    "title": chapter_title,
+                    "text": chapter_text,
+                    "summary": summary,
+                    "word_count": word_count,
+                })
+
+                if progress_callback is not None:
+                    try:
+                        cb = progress_callback({
+                            "chapter": chapter_num,
+                            "status": "ok",
+                            "word_count": word_count,
+                            "chapters_done": chapter_index + 1,
+                            "chapters_total": chapters_total,
+                        })
+                        if asyncio.iscoroutine(cb):
+                            await cb
+                    except Exception:
+                        logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
+
+            except asyncio.TimeoutError:
+                err_msg = f"LLM timeout after {timeout}s"
+                logger.error("draft_generation: Chapter %s timed out (%s)", chapter_num, err_msg)
+                failed_chapters.append({"chapter": chapter_num, "error": err_msg})
+                if progress_callback is not None:
+                    try:
+                        cb = progress_callback({
+                            "chapter": chapter_num,
+                            "status": "failed",
+                            "word_count": 0,
+                            "chapters_done": chapter_index + 1,
+                            "chapters_total": chapters_total,
+                        })
+                        if asyncio.iscoroutine(cb):
+                            await cb
+                    except Exception:
+                        logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
+                # Continue to next chapter rather than aborting.
+                chapter_metadata.append({
+                    "number": chapter_num,
+                    "title": chapter_title,
+                    "scenes": len(chapter.get("scenes", [])),
+                    "pov": chapter.get("pov", "Unknown"),
+                })
+                continue
+
         else:
             # Placeholder
             placeholder_text = f"[Chapter {chapter_num}: {chapter_title} — content would be generated here by the LLM. This is a placeholder for demo/no-LLM mode.]"
+            word_count = len(placeholder_text.split())
             chapters.append({
                 "number": chapter_num,
                 "title": chapter_title,
                 "text": placeholder_text,
                 "summary": f"Chapter {chapter_num} summary placeholder",
-                "word_count": len(placeholder_text.split())
+                "word_count": word_count,
             })
             chapter_scores[str(chapter_num)] = 85
             scene_tags[f"Ch{chapter_num}"] = []
+
+            if progress_callback is not None:
+                try:
+                    cb = progress_callback({
+                        "chapter": chapter_num,
+                        "status": "ok",
+                        "word_count": word_count,
+                        "chapters_done": chapter_index + 1,
+                        "chapters_total": chapters_total,
+                    })
+                    if asyncio.iscoroutine(cb):
+                        await cb
+                except Exception:
+                    logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
 
         chapter_metadata.append({
             "number": chapter_num,
@@ -707,7 +785,8 @@ Rules:
         "outline_adherence": outline_adherence,
         "chapter_scores": chapter_scores,
         "deviations": deviations,
-        "fix_plan": fix_plan
+        "fix_plan": fix_plan,
+        "failed_chapters": failed_chapters,
     }
 
 
