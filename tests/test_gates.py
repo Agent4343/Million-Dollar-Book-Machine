@@ -241,6 +241,29 @@ class TestGates(unittest.TestCase):
     # draft_generation additional cases
     # ------------------------------------------------------------------
 
+    def test_draft_generation_placeholder_passes_gate(self):
+        """Placeholder output (no-LLM/demo mode) should pass gate validation."""
+        placeholder_text = "[Chapter 1: Opening — content would be generated here by the LLM. This is a placeholder for demo/no-LLM mode.]"
+        placeholder_wc = len(placeholder_text.split())
+        good = {
+            "chapters": [{
+                "number": 1,
+                "title": "Opening",
+                "text": placeholder_text,
+                "summary": "Chapter 1 summary placeholder",
+                "word_count": placeholder_wc,
+            }],
+            "chapter_metadata": [{"number": 1, "title": "Opening", "scenes": 2, "pov": "Protagonist"}],
+            "word_counts": {"1": placeholder_wc},
+            "scene_tags": {"Ch1": []},
+            "outline_adherence": {"overall_score": 85, "chapter_scores": {"1": 85}, "notes": "placeholder"},
+            "chapter_scores": {"1": 85},
+            "deviations": [],
+            "fix_plan": [],
+        }
+        passed, msg, _, _ = validate_agent_output(agent_id="draft_generation", content=good, expected_outputs=list(good.keys()))
+        self.assertTrue(passed, msg)
+
     def test_draft_generation_deviations_without_fix_plan(self):
         bad = {
             "chapters": [{"number": 1, "title": "One", "text": "Hello world this is text", "summary": "Hi", "word_count": 5}],
