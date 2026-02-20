@@ -180,6 +180,58 @@ vercel
    - Go to Project Settings → Environment Variables
    - Add `ANTHROPIC_API_KEY` with your API key
 
+### Railway Deployment
+
+Railway supports long-running processes with persistent volumes, making it ideal for production use.
+
+#### Required Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key | `sk-ant-...` |
+| `APP_PASSWORD` | Login password | A strong password |
+| `SESSION_SECRET` | Session signing secret (random string) | `openssl rand -hex 32` output |
+
+#### Recommended Environment Variables
+
+| Variable | Description | Recommended Value |
+|----------|-------------|-------------------|
+| `CORS_ORIGINS` | Allowed origins for CORS | Your Railway URL, e.g. `https://your-app.railway.app` |
+| `COOKIE_SECURE` | Set Secure flag on session cookie | `true` |
+| `COOKIE_SAMESITE` | SameSite cookie policy | `lax` (same-origin) or `none` (cross-origin, requires `COOKIE_SECURE=true`) |
+| `PROJECT_STORAGE_DIR` | Directory for project files | `/data/projects` |
+| `JOB_STORAGE_DIR` | Directory for job state files | `/data/jobs` |
+| `MAX_CONCURRENT_JOBS` | Max simultaneous background jobs | `1` |
+
+#### CORS Configuration
+
+Cookie-based authentication requires explicit CORS origins when the frontend and backend are on different domains.
+
+- **Same origin (frontend served by FastAPI)**: No `CORS_ORIGINS` needed; requests are same-origin.
+- **Cross-origin (separate frontend)**: Set `CORS_ORIGINS=https://your-frontend.railway.app`.
+- **⚠️ Do NOT use `CORS_ORIGINS=*`**: Wildcard CORS disables `allow_credentials`, which breaks session cookies. The server logs a startup warning when `*` is detected.
+
+#### Persistent Volume (Recommended)
+
+Add a Railway volume mounted at `/data` and set:
+
+```
+PROJECT_STORAGE_DIR=/data/projects
+JOB_STORAGE_DIR=/data/jobs
+```
+
+This preserves project state and background job status across redeploys and restarts.
+
+#### Chapter Writing on Railway
+
+Chapter generation can take several minutes per chapter. The system uses a **background job approach** to avoid HTTP timeouts:
+
+1. The UI calls `POST /api/projects/{id}/write-chapters-job` which starts a background job and returns immediately.
+2. The UI polls `GET /api/jobs/{job_id}` every 4 seconds to display progress.
+3. No HTTP timeout issues — the generation runs server-side and the client just polls.
+
+This is handled automatically by the UI's "Write All Chapters" flow.
+
 ### Demo Mode
 
 Without an API key, the system runs in **demo mode** with placeholder responses. This lets you explore the UI and pipeline without API costs.

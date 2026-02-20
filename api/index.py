@@ -7,11 +7,14 @@ Multi-agent system for developing books from concept to publication.
 import hashlib
 import hmac
 import io
+import logging
 import os
 import sys
 import time
 import json
 from typing import Optional, List, Any, Dict
+
+logger = logging.getLogger(__name__)
 
 # Load .env file before accessing environment variables
 from dotenv import load_dotenv
@@ -63,9 +66,24 @@ def _parse_cors_origins() -> List[str]:
 _cors_origins = _parse_cors_origins()
 _cors_all = "*" in _cors_origins
 
+if _cors_all:
+    # CORS wildcard '*' is incompatible with allow_credentials=True (which is
+    # required for cookie-based auth).  Browsers will reject credentialed
+    # requests to a wildcard CORS origin.  Log a prominent startup warning so
+    # operators know to switch to an explicit origin list on Railway/production.
+    logger.warning(
+        "CORS_ORIGINS contains '*' which disables allow_credentials. "
+        "Session cookies will NOT work for cross-origin requests. "
+        "Set CORS_ORIGINS to your explicit frontend origin(s) (e.g. "
+        "https://your-app.railway.app) so that cookie auth works correctly."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if _cors_all else _cors_origins,
+    # allow_credentials MUST be False when allow_origins=['*']; the browser
+    # enforces this.  When explicit origins are listed, we enable credentials
+    # so the session cookie is sent/received correctly.
     allow_credentials=False if _cors_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -901,6 +919,74 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
         "completed_count": len(all_written),
         "should_continue": len(remaining) > 0,
         "elapsed_seconds": time.time() - start_time
+    }
+
+
+@app.post("/api/projects/{project_id}/write-chapters-job")
+async def write_chapters_background_job(project_id: str, auth: bool = Depends(require_auth)):
+    """
+    Start a background job that writes all remaining chapters.
+
+    Returns a job_id that can be polled via GET /api/jobs/{job_id}.
+    This is the recommended approach for Railway/production where HTTP requests
+    may time out before chapter generation completes.
+    """
+    from core.orchestrator import ExecutionContext
+
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get chapter blueprint
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise HTTPException(status_code=422, detail="Chapter blueprint not yet generated. Run the pipeline through Layer 10 first.")
+
+    chapter_outline = chapter_blueprint.get("chapter_outline", [])
+    if not chapter_outline:
+        raise HTTPException(status_code=422, detail="No chapters in blueprint.")
+
+    existing_chapter_numbers = {ch.get("number") for ch in project.manuscript.get("chapters", [])}
+    remaining = [ch for ch in chapter_outline if ch.get("number") not in existing_chapter_numbers]
+    if not remaining:
+        return {"success": True, "message": "All chapters already written.", "job_id": None}
+
+    # Build inputs for chapter writing (same as write_chapters_batch)
+    inputs: Dict[str, Any] = {"chapter_blueprint": chapter_blueprint}
+    for layer in project.layers.values():
+        for aid, agent_state in layer.agents.items():
+            if agent_state.current_output:
+                inputs[aid] = agent_state.current_output.content
+    # Store helpers so the job worker can persist state
+    orch = get_orchestrator()
+    inputs["_llm_client"] = get_llm_client()
+    inputs["_export_fn"] = orch.export_project_state
+
+    jm = await get_job_manager()
+    try:
+        job = await jm.create_write_chapters_job(
+            project=project,
+            chapter_writer=execute_chapter_writer,
+            context_inputs=inputs,
+            chapter_outline=chapter_outline,
+            existing_chapter_numbers=existing_chapter_numbers,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return {
+        "success": True,
+        "job_id": job.job_id,
+        "status": job.status.value,
+        "chapters_to_write": len(remaining),
+        "total_chapters": len(chapter_outline),
     }
 
 
