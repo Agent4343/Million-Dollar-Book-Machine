@@ -16,7 +16,7 @@ import os
 import traceback
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -38,8 +38,8 @@ class JobRecord:
     job_id: str
     project_id: str
     status: JobStatus = JobStatus.queued
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     error: Optional[str] = None
@@ -70,8 +70,8 @@ class JobRecord:
             job_id=str(data.get("job_id")),
             project_id=str(data.get("project_id")),
             status=JobStatus(str(data.get("status", JobStatus.queued.value))),
-            created_at=str(data.get("created_at", datetime.utcnow().isoformat())),
-            updated_at=str(data.get("updated_at", datetime.utcnow().isoformat())),
+            created_at=str(data.get("created_at", datetime.now(timezone.utc).isoformat())),
+            updated_at=str(data.get("updated_at", datetime.now(timezone.utc).isoformat())),
             started_at=data.get("started_at"),
             finished_at=data.get("finished_at"),
             error=data.get("error"),
@@ -106,7 +106,7 @@ class JobManager:
                 if job.status == JobStatus.running:
                     job.status = JobStatus.interrupted
                     job.error = "Job was interrupted (process restart). Start a new job to resume."
-                    job.finished_at = datetime.utcnow().isoformat()
+                    job.finished_at = datetime.now(timezone.utc).isoformat()
                 self._jobs[job.job_id] = job
                 store.save_raw(job.job_id, job.to_dict())
 
@@ -132,8 +132,8 @@ class JobManager:
         # Mark as running immediately so clients don't see a long "queued" period
         # before the async task gets CPU time.
         job.status = JobStatus.running
-        job.started_at = datetime.utcnow().isoformat()
-        job.updated_at = datetime.utcnow().isoformat()
+        job.started_at = datetime.now(timezone.utc).isoformat()
+        job.updated_at = datetime.now(timezone.utc).isoformat()
         self._append_event(job, "start", "Job scheduled")
         store.save_raw(job.job_id, job.to_dict())
 
@@ -169,8 +169,8 @@ class JobManager:
         job = JobRecord(job_id=str(uuid.uuid4()), project_id=project.project_id, resumed_from_job_id=prior.job_id)
         store = get_job_store()
         job.status = JobStatus.running
-        job.started_at = datetime.utcnow().isoformat()
-        job.updated_at = datetime.utcnow().isoformat()
+        job.started_at = datetime.now(timezone.utc).isoformat()
+        job.updated_at = datetime.now(timezone.utc).isoformat()
         self._append_event(job, "start", "Job scheduled (resume)", resumed_from=prior.job_id)
         store.save_raw(job.job_id, job.to_dict())
         async with self._lock:
@@ -193,7 +193,7 @@ class JobManager:
             if not job:
                 raise KeyError(job_id)
             job.cancel_requested = True
-            job.updated_at = datetime.utcnow().isoformat()
+            job.updated_at = datetime.now(timezone.utc).isoformat()
             store.save_raw(job.job_id, job.to_dict())
             return job
 
@@ -230,7 +230,7 @@ class JobManager:
     def _append_event(self, job: JobRecord, kind: str, message: str, **extra: Any) -> None:
         job.events.append(
             {
-                "ts": datetime.utcnow().isoformat(),
+                "ts": datetime.now(timezone.utc).isoformat(),
                 "kind": kind,
                 "message": message,
                 **extra,
@@ -247,8 +247,8 @@ class JobManager:
         async with self._lock:
             job = self._jobs[job_id]
             job.status = JobStatus.running
-            job.started_at = datetime.utcnow().isoformat()
-            job.updated_at = datetime.utcnow().isoformat()
+            job.started_at = datetime.now(timezone.utc).isoformat()
+            job.updated_at = datetime.now(timezone.utc).isoformat()
             self._append_event(job, "start", "Job started")
             store.save_raw(job.job_id, job.to_dict())
 
@@ -263,8 +263,8 @@ class JobManager:
                 job = self._jobs[job_id]
                 job.status = JobStatus.failed
                 job.error = "Could not acquire job slot (MAX_CONCURRENT_JOBS limit). Try again or increase MAX_CONCURRENT_JOBS."
-                job.finished_at = datetime.utcnow().isoformat()
-                job.updated_at = datetime.utcnow().isoformat()
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+                job.updated_at = datetime.now(timezone.utc).isoformat()
                 self._append_event(job, "error", job.error)
                 store.save_raw(job.job_id, job.to_dict())
             return
@@ -283,8 +283,8 @@ class JobManager:
                     job = self._jobs[job_id]
                     if job.cancel_requested:
                         job.status = JobStatus.cancelled
-                        job.finished_at = datetime.utcnow().isoformat()
-                        job.updated_at = datetime.utcnow().isoformat()
+                        job.finished_at = datetime.now(timezone.utc).isoformat()
+                        job.updated_at = datetime.now(timezone.utc).isoformat()
                         self._append_event(job, "cancel", "Cancellation requested; stopping.")
                         store.save_raw(job.job_id, job.to_dict())
                         return
@@ -313,8 +313,8 @@ class JobManager:
                             job.status = JobStatus.failed
                             job.error = "Project blocked (no available agents)."
                             self._append_event(job, "blocked", "Project blocked: no available agents")
-                        job.finished_at = datetime.utcnow().isoformat()
-                        job.updated_at = datetime.utcnow().isoformat()
+                        job.finished_at = datetime.now(timezone.utc).isoformat()
+                        job.updated_at = datetime.now(timezone.utc).isoformat()
                         store.save_raw(job.job_id, job.to_dict())
                     # Persist project state snapshot too
                     pstore.save_raw(project.project_id, orchestrator.export_project_state(project))
@@ -341,7 +341,7 @@ class JobManager:
                         "current_agent": status.get("current_agent"),
                         "available_agents_count": len(status.get("available_agents") or []),
                     }
-                    job.updated_at = datetime.utcnow().isoformat()
+                    job.updated_at = datetime.now(timezone.utc).isoformat()
                     store.save_raw(job.job_id, job.to_dict())
 
                 iterations += 1
@@ -351,8 +351,8 @@ class JobManager:
                 job = self._jobs[job_id]
                 job.status = JobStatus.failed
                 job.error = f"Max iterations reached ({max_iterations})."
-                job.finished_at = datetime.utcnow().isoformat()
-                job.updated_at = datetime.utcnow().isoformat()
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+                job.updated_at = datetime.now(timezone.utc).isoformat()
                 self._append_event(job, "error", job.error)
                 store.save_raw(job.job_id, job.to_dict())
 
@@ -361,8 +361,8 @@ class JobManager:
                 job = self._jobs[job_id]
                 job.status = JobStatus.failed
                 job.error = f"{e}\n{traceback.format_exc()}"
-                job.finished_at = datetime.utcnow().isoformat()
-                job.updated_at = datetime.utcnow().isoformat()
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+                job.updated_at = datetime.now(timezone.utc).isoformat()
                 self._append_event(job, "exception", "Job failed with exception", error=str(e))
                 store.save_raw(job.job_id, job.to_dict())
 

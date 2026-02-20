@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import io
 import os
+import secrets
 import sys
 import time
 import json
@@ -75,8 +76,26 @@ app.add_middleware(
 # Authentication (same as before)
 # =============================================================================
 
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "Blake2011@")
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "book-machine-secret")
+APP_PASSWORD = os.environ.get("APP_PASSWORD") or ""
+if not APP_PASSWORD:
+    import warnings
+    warnings.warn(
+        "APP_PASSWORD environment variable is not set. "
+        "Authentication is disabled until a password is configured.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+_session_secret_env = os.environ.get("SESSION_SECRET") or ""
+if not _session_secret_env:
+    import warnings
+    warnings.warn(
+        "SESSION_SECRET environment variable is not set. "
+        "A random secret will be generated, which means all sessions will be "
+        "invalidated on server restart. Set SESSION_SECRET to a stable value in production.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+SESSION_SECRET = _session_secret_env or secrets.token_hex(32)
 SESSION_DURATION = 60 * 60 * 24 * 7
 
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
@@ -146,10 +165,10 @@ ALL_EXECUTORS = {
 }
 
 
-def create_session_token(timestamp: int) -> str:
-    message = f"{timestamp}:{hashlib.sha256(APP_PASSWORD.encode()).hexdigest()}"
+def create_session_token(timestamp: int, nonce: str) -> str:
+    message = f"{timestamp}:{nonce}:{hashlib.sha256(APP_PASSWORD.encode()).hexdigest()}"
     signature = hmac.new(SESSION_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
-    return f"{timestamp}:{signature}"
+    return f"{timestamp}:{nonce}:{signature}"
 
 
 def verify_session_token(token: str) -> bool:
@@ -157,12 +176,13 @@ def verify_session_token(token: str) -> bool:
         return False
     try:
         parts = token.split(":")
-        if len(parts) != 2:
+        if len(parts) != 3:
             return False
         timestamp = int(parts[0])
+        nonce = parts[1]
         if time.time() - timestamp > SESSION_DURATION:
             return False
-        expected = create_session_token(timestamp)
+        expected = create_session_token(timestamp, nonce)
         return hmac.compare_digest(token, expected)
     except:
         return False
@@ -205,8 +225,10 @@ class AgentExecuteRequest(BaseModel):
 
 @app.post("/api/auth/login")
 async def login(request: LoginRequest, response: Response):
+    if not APP_PASSWORD:
+        raise HTTPException(status_code=500, detail="Server configuration error: APP_PASSWORD is not set.")
     if request.password == APP_PASSWORD:
-        token = create_session_token(int(time.time()))
+        token = create_session_token(int(time.time()), secrets.token_hex(16))
         response.set_cookie(
             key="book_session",
             value=token,

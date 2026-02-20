@@ -5,7 +5,7 @@ Tracks the complete state of a book project through all development layers.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Any
 import json
@@ -37,7 +37,7 @@ class GateResult:
     passed: bool
     message: str
     details: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
@@ -47,7 +47,7 @@ class AgentOutput:
     content: Dict[str, Any]
     gate_result: Optional[GateResult] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 1
 
 
@@ -104,8 +104,8 @@ class BookProject:
     """Complete state of a book development project."""
     project_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     title: str = "Untitled Project"
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     # User constraints and inputs
     user_constraints: Dict[str, Any] = field(default_factory=dict)
@@ -146,7 +146,7 @@ class BookProject:
         """Save current state as a checkpoint."""
         self.checkpoints.append({
             "name": name,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "layer": self.current_layer,
             "agent": self.current_agent,
             "state_snapshot": self.to_dict()
@@ -154,7 +154,7 @@ class BookProject:
 
     def update_timestamp(self) -> None:
         """Update the last modified timestamp."""
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = datetime.now(timezone.utc).isoformat()
 
 
 # Layer definitions
