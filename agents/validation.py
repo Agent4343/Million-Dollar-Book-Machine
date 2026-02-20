@@ -385,7 +385,7 @@ TEXT:
                     }
                 )
 
-        return {"revised_chapters": revised, "revision_log": revision_log, "resolved_flags": 0}
+        return {"revised_chapters": revised, "revision_log": revision_log, "resolved_flags": len(revision_log)}
 
     return {
         "revised_chapters": chapters.copy(),

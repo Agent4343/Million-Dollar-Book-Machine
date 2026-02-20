@@ -503,6 +503,26 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
         }
 
 
+def _ensure_voice_spec_example_passages(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Inject a fallback example passage if the LLM omitted style_guide.example_passages."""
+    if not isinstance(response, dict):
+        return response
+    style_guide = response.get("style_guide")
+    if not isinstance(style_guide, dict):
+        response["style_guide"] = {
+            "example_passages": [
+                "He watched the elevator numbers climb as if they were a verdict."
+            ]
+        }
+        return response
+    passages = style_guide.get("example_passages")
+    if not isinstance(passages, list) or not passages:
+        style_guide["example_passages"] = [
+            "He watched the elevator numbers climb as if they were a verdict."
+        ]
+    return response
+
+
 async def execute_voice_specification(context: ExecutionContext) -> Dict[str, Any]:
     """Execute voice specification agent."""
     llm = context.llm_client
@@ -516,7 +536,7 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
-        return response
+        return _ensure_voice_spec_example_passages(response)
     else:
         return {
             "narrative_voice": {

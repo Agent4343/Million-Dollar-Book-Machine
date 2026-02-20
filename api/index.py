@@ -7,6 +7,7 @@ Multi-agent system for developing books from concept to publication.
 import hashlib
 import hmac
 import io
+import logging
 import os
 import secrets
 import sys
@@ -76,26 +77,19 @@ app.add_middleware(
 # Authentication (same as before)
 # =============================================================================
 
-APP_PASSWORD = os.environ.get("APP_PASSWORD") or ""
-if not APP_PASSWORD:
-    import warnings
-    warnings.warn(
+logger = logging.getLogger(__name__)
+
+_raw_password = os.environ.get("APP_PASSWORD")
+if not _raw_password:
+    _raw_password = secrets.token_urlsafe(16)
+    logger.warning(
         "APP_PASSWORD environment variable is not set. "
-        "Authentication is disabled until a password is configured.",
-        RuntimeWarning,
-        stacklevel=1,
+        "Using auto-generated password for this session: %s",
+        _raw_password,
     )
-_session_secret_env = os.environ.get("SESSION_SECRET") or ""
-if not _session_secret_env:
-    import warnings
-    warnings.warn(
-        "SESSION_SECRET environment variable is not set. "
-        "A random secret will be generated, which means all sessions will be "
-        "invalidated on server restart. Set SESSION_SECRET to a stable value in production.",
-        RuntimeWarning,
-        stacklevel=1,
-    )
-SESSION_SECRET = _session_secret_env or secrets.token_hex(32)
+APP_PASSWORD = _raw_password
+
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
 SESSION_DURATION = 60 * 60 * 24 * 7
 
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
@@ -184,7 +178,7 @@ def verify_session_token(token: str) -> bool:
             return False
         expected = create_session_token(timestamp, nonce)
         return hmac.compare_digest(token, expected)
-    except:
+    except Exception:
         return False
 
 
@@ -227,7 +221,7 @@ class AgentExecuteRequest(BaseModel):
 async def login(request: LoginRequest, response: Response):
     if not APP_PASSWORD:
         raise HTTPException(status_code=500, detail="Server configuration error: APP_PASSWORD is not set.")
-    if request.password == APP_PASSWORD:
+    if hmac.compare_digest(request.password, APP_PASSWORD):
         token = create_session_token(int(time.time()), secrets.token_hex(16))
         response.set_cookie(
             key="book_session",
@@ -551,6 +545,50 @@ async def get_available_agents(project_id: str, auth: bool = Depends(require_aut
     return {"available_agents": agents}
 
 
+@app.get("/api/projects/{project_id}/debug/availability")
+async def debug_availability(project_id: str, auth: bool = Depends(require_auth)):
+    """
+    Debug endpoint: explains why the project may be blocked.
+
+    Returns:
+    - available_agents: agents currently ready to run
+    - blocked_candidates: PENDING agents with at least one unmet dependency,
+      including which dep is missing and its current status
+    - locked_layer_reasons: locked layers explaining which agents in the
+      previous layer are preventing unlock
+    - agent_status_counts: summary counts by agent status
+    - layer_status_counts: summary counts by layer status
+    """
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    available = orch.get_available_agents(project)
+    available_detail = []
+    for agent_id in available:
+        agent_def = AGENT_REGISTRY.get(agent_id)
+        if agent_def:
+            available_detail.append({
+                "agent_id": agent_id,
+                "name": agent_def.name,
+                "layer": agent_def.layer,
+                "layer_name": LAYERS.get(agent_def.layer, "Unknown"),
+            })
+
+    diagnostics = orch.get_blocked_agents_diagnostics(project)
+
+    return {
+        "project_id": project_id,
+        "project_status": project.status,
+        "available_agents": available_detail,
+        "blocked_candidates": diagnostics["blocked_candidates"],
+        "locked_layer_reasons": diagnostics["locked_layer_reasons"],
+        "agent_status_counts": diagnostics["agent_status_counts"],
+        "layer_status_counts": diagnostics["layer_status_counts"],
+    }
+
+
 @app.post("/api/projects/{project_id}/execute/{agent_id}")
 async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
     """Execute a specific agent."""
@@ -640,6 +678,38 @@ async def get_agent_output(project_id: str, agent_id: str, auth: bool = Depends(
                 }
 
     raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+
+@app.post("/api/projects/{project_id}/agents/{agent_id}/reset")
+async def reset_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
+    """
+    Reset a failed agent back to PENDING so it can be retried.
+
+    This unblocks downstream layers that were deadlocked because the agent
+    exhausted its retry attempts.
+    """
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        agent_state = orch.reset_agent(project, agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    store = get_project_store()
+    try:
+        store.save_raw(project.project_id, orch.export_project_state(project))
+    except Exception as e:
+        logger.warning(f"Failed to persist project after agent reset: {e}")
+
+    return {
+        "agent_id": agent_id,
+        "status": agent_state.status.value,
+        "attempts": agent_state.attempts,
+        "message": f"Agent {agent_id} reset to PENDING and ready for retry",
+    }
 
 
 @app.get("/api/projects/{project_id}/manuscript")
@@ -926,9 +996,89 @@ async def write_chapters_batch(project_id: str, request: BatchWriteRequest, auth
     }
 
 
+class WriteChaptersJobRequest(BaseModel):
+    """Request model for the background chapter-writing job."""
+    quick_mode: bool = False
+
+
+@app.post("/api/projects/{project_id}/write-chapters-job")
+async def write_chapters_background_job(
+    project_id: str,
+    request: Optional[WriteChaptersJobRequest] = None,
+    auth: bool = Depends(require_auth),
+):
+    """
+    Start a background job that writes all remaining chapters in order.
+
+    Returns a job_id immediately; poll GET /api/jobs/{job_id} for progress.
+    Recommended for Railway/production where HTTP requests may time out.
+    """
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Locate chapter blueprint.
+    chapter_blueprint = None
+    for layer in project.layers.values():
+        if "chapter_blueprint" in layer.agents:
+            agent_state = layer.agents["chapter_blueprint"]
+            if agent_state.current_output:
+                chapter_blueprint = agent_state.current_output.content
+                break
+
+    if not chapter_blueprint:
+        raise HTTPException(
+            status_code=422,
+            detail="Chapter blueprint not yet generated. Run the pipeline through Layer 10 first.",
+        )
+
+    chapter_outline = chapter_blueprint.get("chapter_outline", [])
+    if not chapter_outline:
+        raise HTTPException(status_code=422, detail="No chapters in blueprint.")
+
+    existing_chapter_numbers = {ch.get("number") for ch in project.manuscript.get("chapters", [])}
+    remaining = [ch for ch in chapter_outline if ch.get("number") not in existing_chapter_numbers]
+    if not remaining:
+        return {"success": True, "message": "All chapters already written.", "job_id": None}
+
+    quick_mode = request.quick_mode if request else False
+
+    # Factory callables: only lightweight references, not stored in persisted job record.
+    def _get_project(pid: str):
+        return get_orchestrator().get_project(pid)
+
+    def _save_project(proj):
+        get_project_store().save_raw(
+            proj.project_id,
+            get_orchestrator().export_project_state(proj),
+        )
+
+    jm = await get_job_manager()
+    try:
+        job = await jm.create_write_chapters_job(
+            project_id=project_id,
+            chapter_outline=chapter_outline,
+            existing_chapter_numbers=existing_chapter_numbers,
+            quick_mode=quick_mode,
+            get_project_fn=_get_project,
+            get_llm_fn=get_llm_client,
+            save_project_fn=_save_project,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return {
+        "success": True,
+        "job_id": job.job_id,
+        "status": job.status.value,
+        "project_id": project_id,
+        "total_chapters": len(chapter_outline),
+        "chapters_to_write": len(remaining),
+    }
+
+
 @app.get("/api/projects/{project_id}/chapters")
 async def list_chapters(project_id: str, auth: bool = Depends(require_auth)):
-    """List all written chapters for a project."""
     project = get_orchestrator().get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")

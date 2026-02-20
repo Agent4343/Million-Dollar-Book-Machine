@@ -21,6 +21,9 @@ from core.gates import validate_agent_output
 
 logger = logging.getLogger(__name__)
 
+# Default retry limit used when an agent definition is not found in the registry.
+DEFAULT_RETRY_LIMIT = 3
+
 
 @dataclass
 class ExecutionContext:
@@ -167,6 +170,20 @@ class Orchestrator:
             if dep_state and dep_state.current_output:
                 inputs[dep_id] = dep_state.current_output.content
 
+        # Build an output-name index once so lookups are O(1) instead of O(agents × inputs).
+        # project.layers is a plain dict with integer keys inserted in ascending order (0-20),
+        # so iteration is in layer-dependency order and earlier layers take precedence.
+        output_index: Dict[str, Any] = {}
+        for layer in project.layers.values():
+            for agent_state in layer.agents.values():
+                if agent_state.current_output:
+                    content = agent_state.current_output.content
+                    if isinstance(content, dict):
+                        for k, v in content.items():
+                            # First writer wins — earlier layers take precedence
+                            if k not in output_index:
+                                output_index[k] = v
+
         # Also search for specific named inputs
         for input_name in agent_def.inputs:
             if input_name in project.user_constraints:
@@ -209,15 +226,9 @@ class Orchestrator:
                 if deduped:
                     inputs["character_names"] = deduped
 
-            # Search all completed agents for this output
-            for layer in project.layers.values():
-                for agent_state in layer.agents.values():
-                    if agent_state.current_output:
-                        content = agent_state.current_output.content
-                        if not isinstance(content, dict):
-                            continue
-                        if input_name in content:
-                            inputs[input_name] = content[input_name]
+            # O(1) lookup via pre-built index
+            if input_name in output_index:
+                inputs[input_name] = output_index[input_name]
 
         return inputs
 
@@ -458,13 +469,21 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         """Check if a layer is complete and unlock the next one."""
         layer = project.layers[layer_id]
 
-        # Check if all agents in this layer have passed
-        all_passed = all(
-            agent.status == AgentStatus.PASSED
-            for agent in layer.agents.values()
-        )
+        # A layer is "done" when every agent has either passed or terminally failed
+        # (exhausted all retries with FAILED status).  Permanently-failed agents are
+        # not retried automatically but can be reset by the user via reset_agent().
+        def _is_terminal(agent: AgentState) -> bool:
+            if agent.status == AgentStatus.PASSED:
+                return True
+            if agent.status == AgentStatus.FAILED:
+                agent_def = AGENT_REGISTRY.get(agent.agent_id)
+                retry_limit = agent_def.retry_limit if agent_def else DEFAULT_RETRY_LIMIT
+                return agent.attempts >= retry_limit
+            return False
 
-        if all_passed:
+        all_terminal = all(_is_terminal(agent) for agent in layer.agents.values())
+
+        if all_terminal:
             layer.status = LayerStatus.COMPLETED
             layer.completed_at = datetime.now(timezone.utc).isoformat()
             project.current_layer = layer_id
@@ -474,12 +493,133 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
             if next_layer_id in project.layers:
                 project.layers[next_layer_id].status = LayerStatus.AVAILABLE
                 project.current_layer = next_layer_id
-
-            logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
+                logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
+            else:
+                logger.info(f"Layer {layer_id} completed (final layer)")
 
     def register_executor(self, agent_id: str, executor: Callable) -> None:
         """Register a custom executor for an agent."""
         self.agent_executors[agent_id] = executor
+
+    def reset_agent(self, project: BookProject, agent_id: str) -> AgentState:
+        """
+        Reset a FAILED agent back to PENDING so it can be retried.
+
+        This also re-evaluates the layer status so that previously locked
+        downstream layers can be re-locked if they depended on this agent.
+
+        Args:
+            project: The book project
+            agent_id: Agent to reset
+
+        Returns:
+            The updated AgentState
+
+        Raises:
+            ValueError: If the agent doesn't exist or is not in FAILED status
+        """
+        agent_state = self._find_agent_state(project, agent_id)
+        if not agent_state:
+            raise ValueError(f"Agent not found in project: {agent_id}")
+        if agent_state.status != AgentStatus.FAILED:
+            raise ValueError(f"Agent {agent_id} is not in FAILED status (current: {agent_state.status.value})")
+
+        agent_def = AGENT_REGISTRY.get(agent_id)
+        if not agent_def:
+            raise ValueError(f"Unknown agent: {agent_id}")
+
+        # Reset the agent
+        agent_state.status = AgentStatus.PENDING
+        agent_state.attempts = 0
+        agent_state.last_error = None
+
+        # Ensure the agent's layer is available so it can be picked up
+        layer = project.layers[agent_def.layer]
+        if layer.status == LayerStatus.COMPLETED:
+            layer.status = LayerStatus.IN_PROGRESS
+            layer.completed_at = None
+
+        project.update_timestamp()
+        logger.info(f"Agent {agent_id} reset to PENDING")
+        return agent_state
+
+    def get_blocked_agents_diagnostics(self, project: BookProject) -> Dict[str, Any]:
+        """
+        Return a structured diagnostic payload explaining why the project is blocked.
+
+        For every PENDING agent whose layer is AVAILABLE or IN_PROGRESS but whose
+        dependencies are not all PASSED, report which dependency is unmet and what
+        status it currently has.  Also summarises layer-level lock reasons.
+        """
+        blocked_candidates: List[Dict[str, Any]] = []
+        agent_status_counts: Dict[str, int] = {}
+        layer_status_counts: Dict[str, int] = {}
+
+        for layer_id, layer in project.layers.items():
+            ls = layer.status.value
+            layer_status_counts[ls] = layer_status_counts.get(ls, 0) + 1
+
+            for agent_id, agent_state in layer.agents.items():
+                ags = agent_state.status.value
+                agent_status_counts[ags] = agent_status_counts.get(ags, 0) + 1
+
+                # Only care about agents that could potentially run but are stuck
+                if agent_state.status.value != "pending":
+                    continue
+
+                unmet_deps: List[Dict[str, str]] = []
+                for dep_id in agent_state.dependencies:
+                    dep_state = self._find_agent_state(project, dep_id)
+                    if dep_state is None:
+                        unmet_deps.append({"dep_id": dep_id, "dep_status": "missing"})
+                    elif dep_state.status.value != "passed":
+                        unmet_deps.append({"dep_id": dep_id, "dep_status": dep_state.status.value})
+
+                if unmet_deps:
+                    blocked_candidates.append(
+                        {
+                            "agent_id": agent_id,
+                            "agent_name": agent_state.name,
+                            "layer": layer_id,
+                            "layer_name": layer.name,
+                            "layer_status": layer.status.value,
+                            "unmet_dependencies": unmet_deps,
+                        }
+                    )
+
+        # Explain why the *next* locked layer hasn't unlocked
+        locked_layer_reasons: List[Dict[str, Any]] = []
+        for layer_id, layer in project.layers.items():
+            if layer.status.value != "locked":
+                continue
+            prev_layer_id = layer_id - 1
+            if prev_layer_id not in project.layers:
+                continue
+            prev_layer = project.layers[prev_layer_id]
+            not_passed = [
+                {"agent_id": aid, "status": a.status.value}
+                for aid, a in prev_layer.agents.items()
+                if a.status.value != "passed"
+            ]
+            locked_layer_reasons.append(
+                {
+                    "locked_layer": layer_id,
+                    "locked_layer_name": layer.name,
+                    "blocking_layer": prev_layer_id,
+                    "blocking_layer_name": prev_layer.name,
+                    "blocking_layer_status": prev_layer.status.value,
+                    "agents_not_yet_passed": not_passed,
+                }
+            )
+
+        return {
+            "project_id": project.project_id,
+            "project_status": project.status,
+            "blocked_candidates": blocked_candidates,
+            "locked_layer_reasons": locked_layer_reasons,
+            "agent_status_counts": agent_status_counts,
+            "layer_status_counts": layer_status_counts,
+        }
 
     def get_project_status(self, project: BookProject) -> Dict[str, Any]:
         """Get comprehensive status of a project."""

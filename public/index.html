@@ -565,6 +565,35 @@
         let projectData = null;
 
         // =================================================================
+        // API helpers
+        // =================================================================
+
+        async function apiFetch(url, options = {}) {
+            const defaults = { credentials: 'include' };
+            const merged = { ...defaults, ...options };
+            const res = await fetch(url, merged);
+            let data;
+            try {
+                data = await res.json();
+            } catch (_) {
+                data = { detail: res.statusText || `HTTP ${res.status}` };
+            }
+            return { ok: res.ok, status: res.status, data };
+        }
+
+        function showApiError(msg, { detail, endpoint, status } = {}) {
+            const parts = [msg];
+            if (status) parts.push(`(HTTP ${status})`);
+            if (detail && detail !== msg) parts.push(`— ${detail}`);
+            if (endpoint) parts.push(`[${endpoint}]`);
+            const full = parts.join(' ');
+            console.error('API error:', full);
+            const statusEl = document.getElementById('progressStatus');
+            if (statusEl) statusEl.textContent = full;
+            return full;
+        }
+
+        // =================================================================
         // Auto-restore helper for stateless serverless
         // =================================================================
 
@@ -1527,12 +1556,10 @@
         }
 
         let isWritingAllChapters = false;
-        let chapterWriteRetries = 0;
-        const MAX_CHAPTER_RETRIES = 50; // Allow many retries for 20 chapters
 
-        // Auto-write chapters with timeout-aware batch processing and auto-resume
+        // Auto-write chapters using background job (polls for completion)
         async function autoWriteAllChapters() {
-            if (!currentProject) return;
+            if (!currentProject || isWritingAllChapters) return;
 
             // Refresh chapter writer data
             await updateChapterWriter();
@@ -1543,116 +1570,95 @@
             }
 
             const totalChapters = chapterBlueprint.chapter_outline.length;
-            console.log(`Starting auto-write for ${totalChapters} chapters...`);
-            document.getElementById('progressStatus').textContent = `Writing chapters...`;
+            console.log(`Starting background chapter-writing job for ${totalChapters} chapters...`);
+            document.getElementById('progressStatus').textContent = `Starting chapter writing job...`;
 
             const btn = document.getElementById('runFullPipelineBtn');
             btn.innerHTML = '<span class="running-indicator"></span>Writing Chapters...';
 
             isWritingAllChapters = true;
-            chapterWriteRetries = 0;
 
+            const endpoint = `/api/projects/${currentProject}/write-chapters-job`;
             try {
-                let shouldContinue = true;
-                let consecutiveFailures = 0;
+                const { ok, status, data } = await apiFetch(endpoint, { method: 'POST' });
 
-                while (shouldContinue && chapterWriteRetries < MAX_CHAPTER_RETRIES) {
-                    chapterWriteRetries++;
+                if (!ok) {
+                    if (status === 422) {
+                        console.log('Chapter writing skipped:', data.detail);
+                        return;
+                    }
+                    showApiError('Failed to start chapter writing job', {
+                        detail: data.detail, endpoint, status
+                    });
+                    return;
+                }
 
-                    document.getElementById('progressStatus').textContent =
-                        `Writing chapters... (batch ${chapterWriteRetries})`;
+                if (data.job_id === null) {
+                    document.getElementById('progressStatus').textContent = 'All chapters already written!';
+                    document.getElementById('chapterWriteProgress').textContent =
+                        `All ${totalChapters} chapters written!`;
+                    await updateChapterWriter();
+                    return;
+                }
 
-                    try {
-                        // Call batch endpoint - writes one chapter at a time to stay under timeout
-                        // quick_mode: true writes ~500 word preview chapters (faster, works on Vercel)
-                        // quick_mode: false writes full ~3000 word chapters (requires longer timeout)
-                        const res = await fetch(`/api/projects/${currentProject}/write-chapters-batch`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'include',
-                            body: JSON.stringify({
-                                timeout_seconds: 55,  // Use most of 60s limit
-                                max_chapters: 1,      // One chapter per request
-                                quick_mode: true      // Preview mode for Vercel (faster generation)
-                            })
-                        });
+                const jobId = data.job_id;
+                currentJobId = jobId;
+                _saveLastJob(jobId);
+                document.getElementById('jobOutput').textContent =
+                    `Chapter writing job started: ${jobId}\nChapters to write: ${data.chapters_to_write}/${data.total_chapters}`;
+                _setJobButtons({ cancelEnabled: true, resumeEnabled: false });
 
-                        if (res.ok) {
-                            const data = await res.json();
-                            consecutiveFailures = 0; // Reset on success
-
-                            if (data.chapters_written && data.chapters_written.length > 0) {
-                                console.log(`Batch ${chapterWriteRetries}: Wrote chapters ${data.chapters_written.join(', ')}`);
-                                document.getElementById('chapterWriteProgress').textContent =
-                                    `Completed ${data.completed_count} of ${data.total_chapters} chapters`;
+                // Poll job status until completion
+                await new Promise((resolve) => {
+                    const timer = setInterval(async () => {
+                        try {
+                            const { ok: jok, status: jstatus, data: job } = await apiFetch(`/api/jobs/${jobId}`);
+                            if (!jok) {
+                                if (jstatus === 404) { clearInterval(timer); resolve(); return; }
+                                return;
                             }
-
-                            if (data.chapters_failed && data.chapters_failed.length > 0) {
-                                console.warn('Some chapters failed:', data.chapters_failed);
-                            }
-
-                            shouldContinue = data.should_continue;
-
-                            if (!shouldContinue) {
-                                console.log('All chapters written!');
-                                document.getElementById('progressStatus').textContent = 'Book Complete!';
-                                document.getElementById('chapterWriteProgress').textContent =
-                                    `All ${data.total_chapters} chapters written!`;
-                            }
-
-                            // Update UI after each batch
-                            await updateChapterWriter();
-
-                        } else {
-                            consecutiveFailures++;
-                            console.error(`Batch ${chapterWriteRetries} failed with status ${res.status}`);
-
-                            // If server error, wait and retry
-                            if (res.status >= 500 && consecutiveFailures < 5) {
-                                const waitTime = Math.min(consecutiveFailures * 2000, 10000);
-                                console.log(`Waiting ${waitTime}ms before retry...`);
-                                document.getElementById('progressStatus').textContent =
-                                    `Server busy, retrying in ${waitTime/1000}s...`;
-                                await new Promise(r => setTimeout(r, waitTime));
-                            } else if (consecutiveFailures >= 5) {
-                                console.error('Too many consecutive failures, stopping');
-                                shouldContinue = false;
-                            }
-                        }
-
-                    } catch (err) {
-                        consecutiveFailures++;
-                        console.error(`Batch ${chapterWriteRetries} error:`, err);
-
-                        // Network error - wait and retry
-                        if (consecutiveFailures < 5) {
-                            const waitTime = Math.min(consecutiveFailures * 2000, 10000);
-                            console.log(`Network error, waiting ${waitTime}ms before retry...`);
+                            const prog = job.progress || {};
+                            const written = (prog.written || []).length;
+                            const total = prog.total || totalChapters;
+                            document.getElementById('chapterWriteProgress').textContent =
+                                `Written ${written} of ${total} chapters`;
                             document.getElementById('progressStatus').textContent =
-                                `Connection issue, retrying in ${waitTime/1000}s...`;
-                            await new Promise(r => setTimeout(r, waitTime));
-                        } else {
-                            console.error('Too many consecutive failures, stopping');
-                            shouldContinue = false;
+                                `Chapter writing job: ${job.status}`;
+                            document.getElementById('jobOutput').textContent = [
+                                `Job: ${job.job_id}`,
+                                `Status: ${job.status}`,
+                                `Written: ${written}/${total}`,
+                                job.error ? `Error: ${job.error}` : '',
+                                '',
+                                'Recent events:',
+                                ...(job.events || []).slice(-8).map(ev => `[${ev.ts}] ${ev.kind}: ${ev.message}`),
+                            ].filter(Boolean).join('\n');
+
+                            const terminal = ['succeeded','failed','cancelled','interrupted','blocked'].includes(job.status);
+                            if (terminal) {
+                                clearInterval(timer);
+                                if (job.status === 'succeeded') {
+                                    document.getElementById('progressStatus').textContent = 'All chapters written!';
+                                    document.getElementById('chapterWriteProgress').textContent =
+                                        `All ${total} chapters written!`;
+                                } else {
+                                    const failed = (prog.failed || []);
+                                    showApiError(`Chapter writing job ended: ${job.status}`, {
+                                        detail: job.error || (failed.length ? `${failed.length} chapter(s) failed` : undefined)
+                                    });
+                                }
+                                await updateChapterWriter();
+                                await loadProjectPipeline();
+                                resolve();
+                            }
+                        } catch (e) {
+                            console.error('Chapter job poll error:', e);
                         }
-                    }
-
-                    // Small delay between batches to be nice to the server
-                    if (shouldContinue) {
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
-                }
-
-                if (chapterWriteRetries >= MAX_CHAPTER_RETRIES) {
-                    console.warn('Reached max retries');
-                    document.getElementById('progressStatus').textContent = 'Writing paused - refresh to continue';
-                }
-
-                // Final update
-                await loadProjectPipeline();
+                    }, 4000);
+                });
 
             } catch (error) {
-                console.error('Auto-write chapters error:', error);
+                showApiError('Auto-write chapters failed (network error)', { detail: error.message, endpoint });
             } finally {
                 isWritingAllChapters = false;
             }
