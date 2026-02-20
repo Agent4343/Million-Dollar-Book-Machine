@@ -620,6 +620,37 @@ async def get_agent_output(project_id: str, agent_id: str, auth: bool = Depends(
     raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
 
+@app.post("/api/projects/{project_id}/agents/{agent_id}/reset")
+async def reset_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
+    """
+    Reset a failed agent back to PENDING so it can be retried.
+
+    This unblocks downstream layers that were deadlocked because the agent
+    exhausted its retry attempts.
+    """
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        agent_state = get_orchestrator().reset_agent(project, agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    store = get_project_store()
+    try:
+        store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+    except Exception as e:
+        logger.warning(f"Failed to persist project after agent reset: {e}")
+
+    return {
+        "agent_id": agent_id,
+        "status": agent_state.status.value,
+        "attempts": agent_state.attempts,
+        "message": f"Agent {agent_id} reset to PENDING and ready for retry",
+    }
+
+
 @app.get("/api/projects/{project_id}/manuscript")
 async def get_manuscript(project_id: str, auth: bool = Depends(require_auth)):
     """Export the manuscript."""
