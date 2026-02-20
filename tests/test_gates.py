@@ -161,6 +161,155 @@ class TestGates(unittest.TestCase):
         self.assertFalse(passed)
         self.assertTrue("errors" in details or "schema_errors" in details)
 
+    # ------------------------------------------------------------------
+    # Shared helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_blueprint_chapter(num: int) -> dict:
+        return {
+            "number": num,
+            "title": f"Chapter {num}",
+            "act": 1,
+            "chapter_goal": "Advance the plot here",
+            "pov": "Protagonist",
+            "opening_hook": "A compelling opening hook",
+            "closing_hook": "A cliffhanger ending here",
+            "word_target": 1000,
+            "scenes": [{"scene_number": 1, "scene_question": "What happens next here?", "characters": ["Protagonist"], "location": "The city", "conflict_type": "external", "outcome": "shift", "word_target": 1000}],
+        }
+
+    # ------------------------------------------------------------------
+    # chapter_blueprint additional cases
+    # ------------------------------------------------------------------
+
+    def test_chapter_blueprint_empty_outline(self):
+        bad = {
+            "chapter_outline": [],
+            "chapter_goals": {},
+            "scene_list": [],
+            "scene_questions": {},
+            "hooks": {"chapter_hooks": [], "scene_hooks": []},
+            "pov_assignments": {},
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="chapter_blueprint", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
+    def test_chapter_blueprint_non_contiguous_chapters(self):
+        bad = {
+            "chapter_outline": [self._make_blueprint_chapter(1), self._make_blueprint_chapter(3), self._make_blueprint_chapter(4)],
+            "chapter_goals": {"1": "goal one", "3": "goal three", "4": "goal four"},
+            "scene_list": [],
+            "scene_questions": {},
+            "hooks": {"chapter_hooks": [], "scene_hooks": []},
+            "pov_assignments": {},
+        }
+        passed, _, details, _ = validate_agent_output(agent_id="chapter_blueprint", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+        errors = details.get("errors", details.get("schema_errors", []))
+        msgs = [e.get("msg", "") for e in errors]
+        self.assertTrue(any("non_contiguous" in m for m in msgs))
+
+    def test_chapter_blueprint_duplicate_chapters(self):
+        bad = {
+            "chapter_outline": [self._make_blueprint_chapter(1), self._make_blueprint_chapter(1), self._make_blueprint_chapter(2)],
+            "chapter_goals": {"1": "goal one", "2": "goal two"},
+            "scene_list": [],
+            "scene_questions": {},
+            "hooks": {"chapter_hooks": [], "scene_hooks": []},
+            "pov_assignments": {},
+        }
+        passed, _, details, _ = validate_agent_output(agent_id="chapter_blueprint", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+        errors = details.get("errors", details.get("schema_errors", []))
+        msgs = [e.get("msg", "") for e in errors]
+        self.assertTrue(any("duplicate" in m for m in msgs))
+
+    def test_chapter_blueprint_valid_passes(self):
+        good = {
+            "chapter_outline": [self._make_blueprint_chapter(1), self._make_blueprint_chapter(2), self._make_blueprint_chapter(3)],
+            "chapter_goals": {"1": "goal one", "2": "goal two", "3": "goal three"},
+            "scene_list": [],
+            "scene_questions": {},
+            "hooks": {"chapter_hooks": [], "scene_hooks": []},
+            "pov_assignments": {"1": "Protagonist", "2": "Protagonist", "3": "Protagonist"},
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="chapter_blueprint", content=good, expected_outputs=list(good.keys()))
+        self.assertTrue(passed)
+
+    # ------------------------------------------------------------------
+    # draft_generation additional cases
+    # ------------------------------------------------------------------
+
+    def test_draft_generation_deviations_without_fix_plan(self):
+        bad = {
+            "chapters": [{"number": 1, "title": "One", "text": "Hello world this is text", "summary": "Hi", "word_count": 5}],
+            "chapter_metadata": [{"number": 1, "title": "One", "scenes": 1, "pov": "Protagonist"}],
+            "word_counts": {"1": 5},
+            "scene_tags": {"Ch1": []},
+            "outline_adherence": {"overall_score": 90, "chapter_scores": {"1": 90}, "notes": "ok"},
+            "chapter_scores": {"1": 90},
+            "deviations": [{"chapter": 1, "description": "minor deviation"}],
+            "fix_plan": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
+    # ------------------------------------------------------------------
+    # production_readiness additional cases
+    # ------------------------------------------------------------------
+
+    def test_production_readiness_low_score_no_blockers(self):
+        bad = {
+            "quality_score": 70,
+            "release_blockers": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="production_readiness", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
+    # ------------------------------------------------------------------
+    # final_proof additional cases
+    # ------------------------------------------------------------------
+
+    def test_final_proof_approved_with_critical_issues(self):
+        bad = {
+            "approved": True,
+            "overall_score": 95,
+            "critical_issues": 3,
+            "major_issues": 0,
+            "minor_issues": 0,
+            "per_chapter_issues": [],
+            "consistency_findings": [],
+            "recommended_actions": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="final_proof", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
+    def test_final_proof_not_approved_without_actions(self):
+        bad = {
+            "approved": False,
+            "overall_score": 60,
+            "critical_issues": 0,
+            "major_issues": 2,
+            "minor_issues": 5,
+            "per_chapter_issues": [],
+            "consistency_findings": [],
+            "recommended_actions": [],
+        }
+        passed, _, _, _ = validate_agent_output(agent_id="final_proof", content=bad, expected_outputs=list(bad.keys()))
+        self.assertFalse(passed)
+
+    # ------------------------------------------------------------------
+    # validate_non_dict_output
+    # ------------------------------------------------------------------
+
+    def test_validate_non_dict_output(self):
+        passed, _, details, _ = validate_agent_output(agent_id="orchestrator", content="not a dict", expected_outputs=None)  # type: ignore[arg-type]
+        self.assertFalse(passed)
+        errors = details.get("errors", [])
+        msgs = [e.get("msg", "") for e in errors]
+        self.assertTrue(any("not_a_dict" in m for m in msgs))
+
     def test_gather_inputs_includes_agent_id_inputs(self):
         orch = Orchestrator(llm_client=None)
         project = orch.create_project("Test", {"genre": "Fiction"})
