@@ -1,0 +1,74 @@
+{
+  "job_id": "6b989938-e3a2-40b6-81bc-d657169d19d0",
+  "project_id": "p-order",
+  "status": "succeeded",
+  "created_at": "2026-02-20T05:46:25.915886",
+  "updated_at": "2026-02-20T05:46:25.917926",
+  "started_at": "2026-02-20T05:46:25.915998",
+  "finished_at": "2026-02-20T05:46:25.917918",
+  "error": null,
+  "progress": {
+    "total": 3,
+    "written": [
+      1,
+      2,
+      3
+    ],
+    "remaining": [],
+    "failed": [],
+    "quick_mode": false
+  },
+  "events": [
+    {
+      "ts": "2026-02-20T05:46:25.916010",
+      "kind": "start",
+      "message": "Chapter writing job started; 3 chapter(s) to write"
+    },
+    {
+      "ts": "2026-02-20T05:46:25.916305",
+      "kind": "step",
+      "message": "Writing chapter 1",
+      "chapter": 1
+    },
+    {
+      "ts": "2026-02-20T05:46:25.916497",
+      "kind": "chapter_success",
+      "message": "Chapter 1 written (1 words)",
+      "chapter": 1,
+      "word_count": 1
+    },
+    {
+      "ts": "2026-02-20T05:46:25.917009",
+      "kind": "step",
+      "message": "Writing chapter 2",
+      "chapter": 2
+    },
+    {
+      "ts": "2026-02-20T05:46:25.917212",
+      "kind": "chapter_success",
+      "message": "Chapter 2 written (1 words)",
+      "chapter": 2,
+      "word_count": 1
+    },
+    {
+      "ts": "2026-02-20T05:46:25.917473",
+      "kind": "step",
+      "message": "Writing chapter 3",
+      "chapter": 3
+    },
+    {
+      "ts": "2026-02-20T05:46:25.917692",
+      "kind": "chapter_success",
+      "message": "Chapter 3 written (1 words)",
+      "chapter": 3,
+      "word_count": 1
+    },
+    {
+      "ts": "2026-02-20T05:46:25.917909",
+      "kind": "complete",
+      "message": "All 3 chapter(s) written successfully."
+    }
+  ],
+  "cancel_requested": false,
+  "resumed_from_job_id": null
+}

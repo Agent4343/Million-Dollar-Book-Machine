@@ -1,0 +1,69 @@
+{
+  "job_id": "337ad69c-6101-4d36-8233-c359e40b995e",
+  "project_id": "test-proj",
+  "status": "failed",
+  "created_at": "2026-02-20T05:46:26.418731",
+  "updated_at": "2026-02-20T05:46:26.420890",
+  "started_at": "2026-02-20T05:46:26.418751",
+  "finished_at": "2026-02-20T05:46:26.420883",
+  "error": "2 chapter(s) failed, 2 chapter(s) remaining.",
+  "progress": {
+    "total": 2,
+    "written": [],
+    "remaining": [
+      1,
+      2
+    ],
+    "failed": [
+      {
+        "number": 1,
+        "error": "Project test-proj not found"
+      },
+      {
+        "number": 2,
+        "error": "Project test-proj not found"
+      }
+    ],
+    "quick_mode": false
+  },
+  "events": [
+    {
+      "ts": "2026-02-20T05:46:26.418761",
+      "kind": "start",
+      "message": "Chapter writing job started; 2 chapter(s) to write"
+    },
+    {
+      "ts": "2026-02-20T05:46:26.419083",
+      "kind": "step",
+      "message": "Writing chapter 1",
+      "chapter": 1
+    },
+    {
+      "ts": "2026-02-20T05:46:26.419607",
+      "kind": "chapter_fail",
+      "message": "Chapter 1 failed: Project test-proj not found",
+      "chapter": 1,
+      "error": "Project test-proj not found\nTraceback (most recent call last):\n  File \"/home/runner/work/Million-Dollar-Book-Machine/Million-Dollar-Book-Machine/core/jobs.py\", line 517, in _run_write_chapters\n    raise RuntimeError(f\"Project {project_id} not found\")\nRuntimeError: Project test-proj not found\n"
+    },
+    {
+      "ts": "2026-02-20T05:46:26.420031",
+      "kind": "step",
+      "message": "Writing chapter 2",
+      "chapter": 2
+    },
+    {
+      "ts": "2026-02-20T05:46:26.420610",
+      "kind": "chapter_fail",
+      "message": "Chapter 2 failed: Project test-proj not found",
+      "chapter": 2,
+      "error": "Project test-proj not found\nTraceback (most recent call last):\n  File \"/home/runner/work/Million-Dollar-Book-Machine/Million-Dollar-Book-Machine/core/jobs.py\", line 517, in _run_write_chapters\n    raise RuntimeError(f\"Project {project_id} not found\")\nRuntimeError: Project test-proj not found\n"
+    },
+    {
+      "ts": "2026-02-20T05:46:26.420872",
+      "kind": "error",
+      "message": "2 chapter(s) failed, 2 chapter(s) remaining."
+    }
+  ],
+  "cancel_requested": false,
+  "resumed_from_job_id": null
+}

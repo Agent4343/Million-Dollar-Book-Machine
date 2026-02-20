@@ -372,3 +372,281 @@ class JobManager:
             if acquired:
                 self._semaphore.release()
 
+    async def create_write_chapters_job(
+        self,
+        *,
+        project_id: str,
+        chapter_outline: List[Dict[str, Any]],
+        existing_chapter_numbers: set,
+        quick_mode: bool = False,
+        get_project_fn: Any,
+        get_llm_fn: Any,
+        save_project_fn: Any,
+    ) -> "JobRecord":
+        """
+        Start a background job that writes all remaining chapters in order.
+
+        get_project_fn(project_id) -> BookProject  (callable, not persisted)
+        get_llm_fn() -> LLM client                (callable, not persisted)
+        save_project_fn(project) -> None           (callable, not persisted)
+
+        Only serializable values are stored in the job record.
+        """
+        active = await self.find_active_job_for_project(project_id)
+        if active is not None:
+            raise RuntimeError(f"Project already has an active job: {active.job_id}")
+
+        # Sort chapters by number to guarantee in-order writing.
+        ordered = sorted(chapter_outline, key=lambda c: c.get("number", 0))
+        chapters_to_write = [c for c in ordered if c.get("number") not in existing_chapter_numbers]
+
+        job = JobRecord(job_id=str(uuid.uuid4()), project_id=project_id)
+        store = get_job_store()
+        job.status = JobStatus.running
+        job.started_at = datetime.utcnow().isoformat()
+        job.updated_at = datetime.utcnow().isoformat()
+        job.progress = {
+            "total": len(chapter_outline),
+            "remaining": [c.get("number") for c in chapters_to_write],
+            "written": sorted(existing_chapter_numbers),
+            "failed": [],
+            "quick_mode": quick_mode,
+        }
+        self._append_event(
+            job, "start",
+            f"Chapter writing job started; {len(chapters_to_write)} chapter(s) to write",
+        )
+        store.save_raw(job.job_id, job.to_dict())
+
+        async with self._lock:
+            self._jobs[job.job_id] = job
+            task = asyncio.create_task(
+                self._run_write_chapters(
+                    job_id=job.job_id,
+                    project_id=project_id,
+                    chapter_outline=ordered,
+                    existing_chapter_numbers=set(existing_chapter_numbers),
+                    quick_mode=quick_mode,
+                    get_project_fn=get_project_fn,
+                    get_llm_fn=get_llm_fn,
+                    save_project_fn=save_project_fn,
+                )
+            )
+            self._tasks[job.job_id] = task
+
+        return job
+
+    async def _run_write_chapters(
+        self,
+        *,
+        job_id: str,
+        project_id: str,
+        chapter_outline: List[Dict[str, Any]],
+        existing_chapter_numbers: set,
+        quick_mode: bool,
+        get_project_fn: Any,
+        get_llm_fn: Any,
+        save_project_fn: Any,
+    ) -> None:
+        from core.orchestrator import ExecutionContext
+        from agents.chapter_writer import execute_chapter_writer
+
+        store = get_job_store()
+        written: List[int] = sorted(existing_chapter_numbers)
+        failed: List[Dict[str, Any]] = []
+
+        # Acquire concurrency slot with short timeout to avoid waiting forever.
+        acquired = False
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=10.0)
+            acquired = True
+        except Exception:
+            async with self._lock:
+                job = self._jobs[job_id]
+                job.status = JobStatus.failed
+                job.error = (
+                    "Could not acquire job slot (MAX_CONCURRENT_JOBS limit). "
+                    "Try again or increase MAX_CONCURRENT_JOBS."
+                )
+                job.finished_at = datetime.utcnow().isoformat()
+                job.updated_at = datetime.utcnow().isoformat()
+                self._append_event(job, "error", job.error)
+                store.save_raw(job.job_id, job.to_dict())
+            return
+
+        try:
+            # Chapters to write in ascending order, skipping already-written ones.
+            chapters_to_write = [
+                c for c in chapter_outline
+                if c.get("number") not in existing_chapter_numbers
+            ]
+
+            for ch in chapters_to_write:
+                # Check cancellation before each chapter.
+                raw = store.load_raw(job_id)
+                if isinstance(raw, dict) and raw.get("cancel_requested"):
+                    async with self._lock:
+                        job = self._jobs[job_id]
+                        job.cancel_requested = True
+
+                async with self._lock:
+                    job = self._jobs[job_id]
+                    if job.cancel_requested:
+                        job.status = JobStatus.cancelled
+                        job.finished_at = datetime.utcnow().isoformat()
+                        job.updated_at = datetime.utcnow().isoformat()
+                        self._append_event(job, "cancel", "Cancellation requested; stopping.")
+                        store.save_raw(job.job_id, job.to_dict())
+                        return
+
+                chapter_num = ch.get("number")
+
+                async with self._lock:
+                    self._append_event(
+                        self._jobs[job_id], "step",
+                        f"Writing chapter {chapter_num}",
+                        chapter=chapter_num,
+                    )
+                    store.save_raw(job_id, self._jobs[job_id].to_dict())
+
+                try:
+                    # Rebuild project and LLM client fresh for each chapter so
+                    # transient objects are not stored in persisted job state.
+                    project = get_project_fn(project_id)
+                    if project is None:
+                        raise RuntimeError(f"Project {project_id} not found")
+
+                    llm_client = get_llm_fn()
+
+                    # Gather all agent outputs as inputs for the chapter writer.
+                    inputs: Dict[str, Any] = {}
+                    for layer in project.layers.values():
+                        for aid, agent_state in layer.agents.items():
+                            if agent_state.current_output:
+                                inputs[aid] = agent_state.current_output.content
+
+                    context = ExecutionContext(
+                        project=project,
+                        inputs=inputs,
+                        llm_client=llm_client,
+                    )
+
+                    result = await execute_chapter_writer(context, chapter_num, quick_mode=quick_mode)
+
+                    if result.get("text") is not None and not result.get("error"):
+                        # Persist chapter into manuscript.
+                        if "chapters" not in project.manuscript:
+                            project.manuscript["chapters"] = []
+                        chapter_exists = False
+                        for idx, existing_ch in enumerate(project.manuscript["chapters"]):
+                            if existing_ch.get("number") == chapter_num:
+                                project.manuscript["chapters"][idx] = result
+                                chapter_exists = True
+                                break
+                        if not chapter_exists:
+                            project.manuscript["chapters"].append(result)
+                        project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+                        written.append(chapter_num)
+                        save_project_fn(project)
+
+                        async with self._lock:
+                            self._append_event(
+                                self._jobs[job_id], "chapter_success",
+                                f"Chapter {chapter_num} written ({result.get('word_count', 0)} words)",
+                                chapter=chapter_num,
+                                word_count=result.get("word_count", 0),
+                            )
+                    else:
+                        err_msg = result.get("error") or "No text returned"
+                        failed.append({"number": chapter_num, "error": err_msg})
+                        async with self._lock:
+                            self._append_event(
+                                self._jobs[job_id], "chapter_fail",
+                                f"Chapter {chapter_num} failed: {err_msg}",
+                                chapter=chapter_num,
+                                error=err_msg,
+                            )
+
+                except Exception as exc:
+                    err_detail = f"{exc}\n{traceback.format_exc()}"
+                    failed.append({"number": chapter_num, "error": str(exc)})
+                    async with self._lock:
+                        self._append_event(
+                            self._jobs[job_id], "chapter_fail",
+                            f"Chapter {chapter_num} failed: {exc}",
+                            chapter=chapter_num,
+                            error=err_detail,
+                        )
+
+                # Update progress after each chapter attempt.
+                async with self._lock:
+                    job = self._jobs[job_id]
+                    remaining = [
+                        c.get("number") for c in chapter_outline
+                        if c.get("number") not in set(written)
+                    ]
+                    job.progress = {
+                        "total": len(chapter_outline),
+                        "written": sorted(written),
+                        "remaining": remaining,
+                        "failed": failed,
+                        "quick_mode": quick_mode,
+                    }
+                    job.updated_at = datetime.utcnow().isoformat()
+                    store.save_raw(job.job_id, job.to_dict())
+
+            # All chapters attempted; compute final state.
+            async with self._lock:
+                job = self._jobs[job_id]
+                remaining = [
+                    c.get("number") for c in chapter_outline
+                    if c.get("number") not in set(written)
+                ]
+                job.progress = {
+                    "total": len(chapter_outline),
+                    "written": sorted(written),
+                    "remaining": remaining,
+                    "failed": failed,
+                    "quick_mode": quick_mode,
+                }
+                if not remaining and not failed:
+                    job.status = JobStatus.succeeded
+                    self._append_event(
+                        job, "complete",
+                        f"All {len(written)} chapter(s) written successfully.",
+                    )
+                elif not remaining and failed:
+                    # All planned chapters attempted; some failed.
+                    job.status = JobStatus.failed
+                    job.error = (
+                        f"{len(failed)} chapter(s) failed: "
+                        + ", ".join(str(f['number']) for f in failed)
+                    )
+                    self._append_event(job, "complete", job.error)
+                else:
+                    job.status = JobStatus.failed
+                    job.error = (
+                        f"{len(failed)} chapter(s) failed, "
+                        f"{len(remaining)} chapter(s) remaining."
+                    )
+                    self._append_event(job, "error", job.error)
+                job.finished_at = datetime.utcnow().isoformat()
+                job.updated_at = datetime.utcnow().isoformat()
+                store.save_raw(job.job_id, job.to_dict())
+
+        except Exception as e:
+            async with self._lock:
+                job = self._jobs[job_id]
+                job.status = JobStatus.failed
+                job.error = f"{e}\n{traceback.format_exc()}"
+                job.finished_at = datetime.utcnow().isoformat()
+                job.updated_at = datetime.utcnow().isoformat()
+                self._append_event(job, "exception", "Job failed with exception", error=str(e))
+                store.save_raw(job.job_id, job.to_dict())
+
+        finally:
+            async with self._lock:
+                self._tasks.pop(job_id, None)
+            if acquired:
+                self._semaphore.release()
+
