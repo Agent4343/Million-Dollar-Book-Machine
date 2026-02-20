@@ -642,12 +642,13 @@ Rules:
             })
         else:
             # Placeholder
+            placeholder_text = f"[Chapter {chapter_num}: {chapter_title} — content would be generated here by the LLM. This is a placeholder for demo/no-LLM mode.]"
             chapters.append({
                 "number": chapter_num,
                 "title": chapter_title,
-                "text": f"[Chapter {chapter_num} content would be generated here by LLM]",
+                "text": placeholder_text,
                 "summary": f"Chapter {chapter_num} summary placeholder",
-                "word_count": 0
+                "word_count": len(placeholder_text.split())
             })
             chapter_scores[str(chapter_num)] = 85
             scene_tags[f"Ch{chapter_num}"] = []
