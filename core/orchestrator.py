@@ -937,6 +937,31 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
                             gate_result=gate_result,
                         )
 
+        # Apply failure cascade for any terminally-failed agents whose
+        # dependents are still stuck as PENDING (projects persisted before
+        # the cascade fix would have this gap).
+        self._apply_import_cascade(project)
+
         # Register in orchestrator
         self.projects[project.project_id] = project
         return project
+
+    def _apply_import_cascade(self, project: BookProject) -> None:
+        """Cascade terminal failures that were missed in persisted state.
+
+        Scans all layers for terminally-failed agents and cascades FAILED
+        status to their PENDING dependents, exactly as _check_layer_completion
+        would do during live execution.
+        """
+        failed_ids: set = set()
+        for layer in project.layers.values():
+            for agent_state in layer.agents.values():
+                if agent_state.status != AgentStatus.FAILED:
+                    continue
+                agent_def = AGENT_REGISTRY.get(agent_state.agent_id)
+                retry_limit = agent_def.retry_limit if agent_def else DEFAULT_RETRY_LIMIT
+                if agent_state.attempts >= retry_limit:
+                    failed_ids.add(agent_state.agent_id)
+
+        if failed_ids:
+            self._cascade_failures(project, failed_ids)

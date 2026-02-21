@@ -302,20 +302,64 @@ class JobManager:
 
                 available = orchestrator.get_available_agents(project)
                 if not available:
-                    # done or blocked
+                    # done, failed, or blocked
                     status = orchestrator.get_project_status(project)
                     diagnostics = orchestrator.get_blocked_agents_diagnostics(project)
+
+                    # Determine the real terminal state by inspecting layers
+                    # rather than relying on project.status (which may not have
+                    # been updated).
+                    from models.state import LayerStatus as _LS
+                    all_layers_complete = all(
+                        layer.status == _LS.COMPLETED
+                        for layer in project.layers.values()
+                    )
+                    has_failed_agents = diagnostics["agent_status_counts"].get("failed", 0) > 0
+
                     async with self._lock:
                         job = self._jobs[job_id]
-                        if status.get("status") == "completed":
+                        if all_layers_complete and not has_failed_agents:
+                            # All agents passed
+                            project.status = "completed"
                             job.status = JobStatus.succeeded
                             job.progress = {
                                 "iterations": iterations,
-                                "project_status": status.get("status"),
+                                "project_status": "completed",
                                 "current_layer": status.get("current_layer"),
                                 "current_agent": status.get("current_agent"),
                             }
                             self._append_event(job, "complete", "Project completed")
+                        elif all_layers_complete and has_failed_agents:
+                            # All layers done but some agents failed terminally.
+                            # Identify the root cause agent(s).
+                            root_failures = [
+                                aid
+                                for layer in project.layers.values()
+                                for aid, a in layer.agents.items()
+                                if a.status.value == "failed"
+                                and not (a.last_error or "").startswith("Cascade:")
+                            ]
+                            project.status = "failed"
+                            job.status = JobStatus.failed
+                            job.error = (
+                                f"Pipeline failed: agent(s) {', '.join(root_failures)} "
+                                "failed after exhausting retries. "
+                                f"Use POST /api/projects/{job.project_id}/reset-agent "
+                                "to reset and retry."
+                            )
+                            job.progress = {
+                                "iterations": iterations,
+                                "project_status": "failed",
+                                "current_layer": status.get("current_layer"),
+                                "current_agent": status.get("current_agent"),
+                                "root_failures": root_failures,
+                                "blocked_reason": diagnostics,
+                            }
+                            self._append_event(
+                                job, "failed",
+                                f"Pipeline failed: root cause agent(s): {', '.join(root_failures)}",
+                                root_failures=root_failures,
+                            )
                         else:
                             job.status = JobStatus.blocked
                             job.error = (

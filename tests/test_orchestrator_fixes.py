@@ -162,6 +162,96 @@ class TestFailedAgentRecovery(unittest.TestCase):
         self.assertEqual(layer0.status, LayerStatus.IN_PROGRESS)
 
 
+class TestCascadeFailures(unittest.TestCase):
+    """Cascade terminal failures to transitive dependents."""
+
+    def test_cascade_on_layer_completion(self):
+        """When an agent fails terminally, all transitive dependents should be FAILED."""
+        orch = Orchestrator(llm_client=None)
+        project = orch.create_project("Cascade Test", {"genre": "SciFi"})
+
+        # Fail the orchestrator terminally (layer 0)
+        agent = project.layers[0].agents["orchestrator"]
+        agent.status = AgentStatus.FAILED
+        agent.attempts = 3
+
+        orch._check_layer_completion(project, 0)
+
+        # Layer 0 completed, layer 1 unlocked
+        self.assertEqual(project.layers[0].status, LayerStatus.COMPLETED)
+        self.assertEqual(project.layers[1].status, LayerStatus.AVAILABLE)
+
+        # market_intelligence depends on orchestrator → cascade-failed
+        mi = orch._find_agent_state(project, "market_intelligence")
+        self.assertEqual(mi.status, AgentStatus.FAILED)
+        self.assertIn("Cascade:", mi.last_error)
+
+        # draft_generation is a transitive dependent → also cascade-failed
+        dg = orch._find_agent_state(project, "draft_generation")
+        self.assertEqual(dg.status, AgentStatus.FAILED)
+
+    def test_cascade_on_import(self):
+        """Importing a persisted project with terminal failures should cascade."""
+        orch = Orchestrator(llm_client=None)
+        project = orch.create_project("Import Cascade", {"genre": "Thriller"})
+
+        # Simulate a persisted state: orchestrator FAILED, dependents still PENDING
+        exported = orch.export_project_state(project)
+        exported["layers"]["0"]["agents"]["orchestrator"]["status"] = "failed"
+        exported["layers"]["0"]["agents"]["orchestrator"]["attempts"] = 3
+        exported["layers"]["0"]["status"] = "completed"
+        exported["layers"]["1"]["status"] = "available"
+
+        # Import — cascade should apply
+        orch2 = Orchestrator(llm_client=None)
+        imported = orch2.import_project_state(exported)
+
+        mi = orch2._find_agent_state(imported, "market_intelligence")
+        self.assertEqual(mi.status, AgentStatus.FAILED)
+        self.assertIn("Cascade:", mi.last_error)
+
+        # No agents should be available
+        available = orch2.get_available_agents(imported)
+        self.assertEqual(available, [])
+
+    def test_reset_uncascades(self):
+        """Resetting a root-failed agent should uncascade its dependents."""
+        orch = Orchestrator(llm_client=None)
+        project = orch.create_project("Uncascade Test", {"genre": "Fantasy"})
+
+        agent = project.layers[0].agents["orchestrator"]
+        agent.status = AgentStatus.FAILED
+        agent.attempts = 3
+        orch._check_layer_completion(project, 0)
+
+        # Verify cascade happened
+        mi = orch._find_agent_state(project, "market_intelligence")
+        self.assertEqual(mi.status, AgentStatus.FAILED)
+
+        # Reset the root agent
+        orch.reset_agent(project, "orchestrator")
+
+        # Orchestrator back to PENDING
+        self.assertEqual(agent.status, AgentStatus.PENDING)
+        # Dependents uncascaded back to PENDING
+        mi = orch._find_agent_state(project, "market_intelligence")
+        self.assertEqual(mi.status, AgentStatus.PENDING)
+
+    def test_no_available_agents_returns_empty(self):
+        """get_available_agents returns [] when all agents are terminal."""
+        orch = Orchestrator(llm_client=None)
+        project = orch.create_project("Dead Pipeline", {"genre": "Horror"})
+
+        # Fail orchestrator terminally and cascade
+        agent = project.layers[0].agents["orchestrator"]
+        agent.status = AgentStatus.FAILED
+        agent.attempts = 3
+        orch._check_layer_completion(project, 0)
+
+        available = orch.get_available_agents(project)
+        self.assertEqual(available, [])
+
+
 class TestGatherInputsPerformance(unittest.TestCase):
     """gather_inputs should use indexed lookup (no nested loop over all agents per input)."""
 
