@@ -89,6 +89,10 @@ class JobRecord:
 
 
 class JobManager:
+    # Retry parameters for chapter writing.  Override in tests for speed.
+    chapter_max_retries: int = 3
+    chapter_retry_backoff_base: float = 2.0  # seconds
+
     def __init__(self):
         self._lock = asyncio.Lock()
         self._tasks: Dict[str, asyncio.Task] = {}
@@ -561,6 +565,9 @@ class JobManager:
     ) -> None:
         from agents.chapter_writer import execute_chapter_writer
 
+        MAX_CHAPTER_RETRIES = self.chapter_max_retries
+        RETRY_BACKOFF_BASE = self.chapter_retry_backoff_base
+
         store = get_job_store()
         written: List[int] = sorted(existing_chapter_numbers)
         failed: List[Dict[str, Any]] = []
@@ -619,80 +626,113 @@ class JobManager:
                     )
                     store.save_raw(job_id, self._jobs[job_id].to_dict())
 
-                try:
-                    # Rebuild project and LLM client fresh for each chapter so
-                    # transient objects are not stored in persisted job state.
-                    project = get_project_fn(project_id)
-                    if project is None:
-                        raise RuntimeError(f"Project {project_id} not found")
+                # ── Retry loop: attempt each chapter up to MAX_CHAPTER_RETRIES ──
+                chapter_succeeded = False
+                last_error = ""
+                for attempt in range(1, MAX_CHAPTER_RETRIES + 1):
+                    try:
+                        # Rebuild project and LLM client fresh for each attempt so
+                        # transient objects are not stored in persisted job state.
+                        project = get_project_fn(project_id)
+                        if project is None:
+                            raise RuntimeError(f"Project {project_id} not found")
 
-                    llm_client = get_llm_fn()
+                        llm_client = get_llm_fn()
 
-                    # Gather all agent outputs as inputs for the chapter writer.
-                    inputs: Dict[str, Any] = {}
-                    for layer in project.layers.values():
-                        for aid, agent_state in layer.agents.items():
-                            if agent_state.current_output:
-                                inputs[aid] = agent_state.current_output.content
+                        # Gather all agent outputs as inputs for the chapter writer.
+                        inputs: Dict[str, Any] = {}
+                        for layer in project.layers.values():
+                            for aid, agent_state in layer.agents.items():
+                                if agent_state.current_output:
+                                    inputs[aid] = agent_state.current_output.content
 
-                    from core.orchestrator import ExecutionContext
-                    context = ExecutionContext(
-                        project=project,
-                        inputs=inputs,
-                        llm_client=llm_client,
-                    )
+                        from core.orchestrator import ExecutionContext
+                        context = ExecutionContext(
+                            project=project,
+                            inputs=inputs,
+                            llm_client=llm_client,
+                        )
 
-                    result = await execute_chapter_writer(context, chapter_num, quick_mode=quick_mode)
+                        result = await execute_chapter_writer(context, chapter_num, quick_mode=quick_mode)
 
-                    if result.get("text") is not None and not result.get("error"):
-                        # Persist chapter into manuscript.
-                        if "chapters" not in project.manuscript:
-                            project.manuscript["chapters"] = []
-                        chapter_exists = False
-                        for idx, existing_ch in enumerate(project.manuscript["chapters"]):
-                            if existing_ch.get("number") == chapter_num:
-                                project.manuscript["chapters"][idx] = result
-                                chapter_exists = True
-                                break
-                        if not chapter_exists:
-                            project.manuscript["chapters"].append(result)
-                        project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
-                        written.append(chapter_num)
-                        save_project_fn(project)
+                        if result.get("text") is not None and not result.get("error"):
+                            # ✓ Chapter written successfully — persist and move on.
+                            if "chapters" not in project.manuscript:
+                                project.manuscript["chapters"] = []
+                            chapter_exists = False
+                            for idx, existing_ch in enumerate(project.manuscript["chapters"]):
+                                if existing_ch.get("number") == chapter_num:
+                                    project.manuscript["chapters"][idx] = result
+                                    chapter_exists = True
+                                    break
+                            if not chapter_exists:
+                                project.manuscript["chapters"].append(result)
+                            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+                            written.append(chapter_num)
+                            save_project_fn(project)
 
+                            async with self._lock:
+                                self._append_event(
+                                    self._jobs[job_id],
+                                    "chapter_success",
+                                    f"Chapter {chapter_num} written ({result.get('word_count', 0)} words)"
+                                    + (f" on attempt {attempt}" if attempt > 1 else ""),
+                                    chapter=chapter_num,
+                                    word_count=result.get("word_count", 0),
+                                    attempt=attempt,
+                                )
+                            chapter_succeeded = True
+                            break  # exit retry loop, proceed to next chapter
+                        else:
+                            last_error = result.get("error", "Unknown error")
+
+                    except Exception as chapter_exc:
+                        last_error = f"{chapter_exc}"
+
+                    # ── Attempt failed — decide whether to retry ──
+                    if attempt < MAX_CHAPTER_RETRIES:
+                        backoff = RETRY_BACKOFF_BASE ** attempt
                         async with self._lock:
                             self._append_event(
                                 self._jobs[job_id],
-                                "chapter_success",
-                                f"Chapter {chapter_num} written ({result.get('word_count', 0)} words)",
+                                "chapter_retry",
+                                f"Chapter {chapter_num} attempt {attempt} failed: {last_error}. "
+                                f"Retrying in {backoff}s (attempt {attempt + 1}/{MAX_CHAPTER_RETRIES})",
                                 chapter=chapter_num,
-                                word_count=result.get("word_count", 0),
+                                attempt=attempt,
+                                error=last_error,
+                                backoff=backoff,
                             )
-                    else:
-                        err_detail = result.get("error", "Unknown error")
-                        failed.append({"number": chapter_num, "error": err_detail})
-                        async with self._lock:
-                            self._append_event(
-                                self._jobs[job_id],
-                                "chapter_fail",
-                                f"Chapter {chapter_num} failed: {err_detail}",
-                                chapter=chapter_num,
-                                error=err_detail,
-                            )
+                            store.save_raw(job_id, self._jobs[job_id].to_dict())
+                        await asyncio.sleep(backoff)
+                    # else: final attempt failed — will be handled below
 
-                except Exception as chapter_exc:
-                    err_detail = f"{chapter_exc}\n{traceback.format_exc()}"
-                    failed.append({"number": chapter_num, "error": str(chapter_exc)})
+                if not chapter_succeeded:
+                    # All retries exhausted for this chapter.
+                    failed.append({"number": chapter_num, "error": last_error, "attempts": MAX_CHAPTER_RETRIES})
                     async with self._lock:
                         self._append_event(
                             self._jobs[job_id],
                             "chapter_fail",
-                            f"Chapter {chapter_num} failed with exception",
+                            f"Chapter {chapter_num} failed after {MAX_CHAPTER_RETRIES} attempt(s): {last_error}",
                             chapter=chapter_num,
-                            error=err_detail,
+                            error=last_error,
+                            attempts=MAX_CHAPTER_RETRIES,
                         )
 
-                # Update progress after each chapter attempt.
+                    # Stop writing subsequent chapters — they depend on this
+                    # chapter's summary for narrative continuity.
+                    async with self._lock:
+                        self._append_event(
+                            self._jobs[job_id],
+                            "stop",
+                            f"Stopping: chapter {chapter_num} failed after all retries. "
+                            "Subsequent chapters depend on it.",
+                            chapter=chapter_num,
+                        )
+                    break  # exit the chapters_to_write loop
+
+                # Update progress after each chapter.
                 async with self._lock:
                     job = self._jobs[job_id]
                     remaining = [
@@ -729,19 +769,17 @@ class JobManager:
                         job, "complete",
                         f"All {len(written)} chapter(s) written successfully.",
                     )
-                elif not remaining and failed:
+                elif failed:
                     job.status = JobStatus.failed
+                    failed_nums = ", ".join(str(f["number"]) for f in failed)
                     job.error = (
-                        f"{len(failed)} chapter(s) failed: "
-                        + ", ".join(str(f['number']) for f in failed)
+                        f"Chapter(s) {failed_nums} failed after retries. "
+                        f"{len(remaining)} chapter(s) remaining, {len(written)} written."
                     )
-                    self._append_event(job, "complete", job.error)
+                    self._append_event(job, "error", job.error)
                 else:
                     job.status = JobStatus.failed
-                    job.error = (
-                        f"{len(failed)} chapter(s) failed, "
-                        f"{len(remaining)} chapter(s) remaining."
-                    )
+                    job.error = f"{len(remaining)} chapter(s) remaining."
                     self._append_event(job, "error", job.error)
                 job.finished_at = datetime.now(timezone.utc).isoformat()
                 job.updated_at = datetime.now(timezone.utc).isoformat()

@@ -63,6 +63,8 @@ class TestJobs(unittest.TestCase):
 
             jm = JobManager()
             jm._semaphore = asyncio.Semaphore(1)
+            jm.chapter_max_retries = 1  # no retries for this test
+            jm.chapter_retry_backoff_base = 0.01
 
             def get_proj(pid):
                 return None  # simulate project not found
@@ -154,6 +156,178 @@ class TestJobs(unittest.TestCase):
                 cw_mod.execute_chapter_writer = original
 
             self.assertEqual(order, [1, 2, 3], f"Expected chapters in order 1,2,3 but got {order}")
+
+        asyncio.run(run())
+
+
+class TestChapterRetry(unittest.TestCase):
+    """Chapter writing should retry on error before moving to the next chapter."""
+
+    def _make_fake_project(self):
+        """Create a minimal fake project for chapter writing tests."""
+        class FakeLayerAgents:
+            def items(self):
+                return []
+
+        class FakeLayer:
+            agents = FakeLayerAgents()
+
+        class FakeProject:
+            project_id = "p-retry"
+            manuscript = {"chapters": []}
+            layers = {"L0": FakeLayer()}
+
+        return FakeProject()
+
+    def test_retry_then_succeed(self):
+        """A chapter that fails once then succeeds should produce one retry event."""
+        from core.jobs import JobManager, JobStatus
+
+        async def run():
+            jm = JobManager()
+            jm._semaphore = asyncio.Semaphore(1)
+            jm.chapter_max_retries = 3
+            jm.chapter_retry_backoff_base = 0.01  # fast for tests
+
+            call_count = 0
+            fake_project = self._make_fake_project()
+
+            async def flaky_writer(context, chapter_num, quick_mode=False):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise RuntimeError("Transient LLM error")
+                return {"text": "Chapter content", "word_count": 100, "chapter_number": chapter_num}
+
+            import agents.chapter_writer as cw_mod
+            original = cw_mod.execute_chapter_writer
+            cw_mod.execute_chapter_writer = flaky_writer
+            try:
+                job = await jm.create_write_chapters_job(
+                    project_id="p-retry",
+                    chapter_outline=[{"number": 1, "title": "Ch 1"}],
+                    existing_chapter_numbers=set(),
+                    quick_mode=False,
+                    get_project_fn=lambda pid: fake_project,
+                    get_llm_fn=lambda: None,
+                    save_project_fn=lambda p: None,
+                )
+                await asyncio.sleep(0.5)
+            finally:
+                cw_mod.execute_chapter_writer = original
+
+            async with jm._lock:
+                final_job = jm._jobs[job.job_id]
+
+            self.assertEqual(final_job.status, JobStatus.succeeded)
+            self.assertEqual(call_count, 2, "Expected 2 calls: 1 fail + 1 succeed")
+
+            # Should have a retry event
+            retry_events = [e for e in final_job.events if e.get("kind") == "chapter_retry"]
+            self.assertEqual(len(retry_events), 1)
+
+            # Should have a success event
+            success_events = [e for e in final_job.events if e.get("kind") == "chapter_success"]
+            self.assertEqual(len(success_events), 1)
+
+        asyncio.run(run())
+
+    def test_all_retries_exhausted_stops_pipeline(self):
+        """If a chapter fails all retries, the job should stop and not write subsequent chapters."""
+        from core.jobs import JobManager, JobStatus
+
+        async def run():
+            jm = JobManager()
+            jm._semaphore = asyncio.Semaphore(1)
+            jm.chapter_max_retries = 3
+            jm.chapter_retry_backoff_base = 0.01  # fast for tests
+
+            chapters_attempted = []
+            fake_project = self._make_fake_project()
+
+            async def always_fail_writer(context, chapter_num, quick_mode=False):
+                chapters_attempted.append(chapter_num)
+                raise RuntimeError("Persistent error")
+
+            import agents.chapter_writer as cw_mod
+            original = cw_mod.execute_chapter_writer
+            cw_mod.execute_chapter_writer = always_fail_writer
+            try:
+                job = await jm.create_write_chapters_job(
+                    project_id="p-retry",
+                    chapter_outline=[
+                        {"number": 1, "title": "Ch 1"},
+                        {"number": 2, "title": "Ch 2"},
+                    ],
+                    existing_chapter_numbers=set(),
+                    quick_mode=False,
+                    get_project_fn=lambda pid: fake_project,
+                    get_llm_fn=lambda: None,
+                    save_project_fn=lambda p: None,
+                )
+                await asyncio.sleep(0.5)
+            finally:
+                cw_mod.execute_chapter_writer = original
+
+            async with jm._lock:
+                final_job = jm._jobs[job.job_id]
+
+            self.assertEqual(final_job.status, JobStatus.failed)
+
+            # Chapter 1 should have been attempted 3 times (MAX_CHAPTER_RETRIES)
+            self.assertEqual(chapters_attempted.count(1), 3)
+
+            # Chapter 2 should NOT have been attempted (stopped after ch 1 failed)
+            self.assertNotIn(2, chapters_attempted)
+
+            # Should have a stop event
+            stop_events = [e for e in final_job.events if e.get("kind") == "stop"]
+            self.assertEqual(len(stop_events), 1)
+
+        asyncio.run(run())
+
+    def test_error_result_triggers_retry(self):
+        """A chapter returning an error dict (not exception) should also retry."""
+        from core.jobs import JobManager, JobStatus
+
+        async def run():
+            jm = JobManager()
+            jm._semaphore = asyncio.Semaphore(1)
+            jm.chapter_max_retries = 3
+            jm.chapter_retry_backoff_base = 0.01  # fast for tests
+
+            call_count = 0
+            fake_project = self._make_fake_project()
+
+            async def error_then_ok_writer(context, chapter_num, quick_mode=False):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return {"error": "Chapter 1 not found in blueprint", "chapter_number": 1, "text": None}
+                return {"text": "Chapter content", "word_count": 100, "chapter_number": chapter_num}
+
+            import agents.chapter_writer as cw_mod
+            original = cw_mod.execute_chapter_writer
+            cw_mod.execute_chapter_writer = error_then_ok_writer
+            try:
+                job = await jm.create_write_chapters_job(
+                    project_id="p-retry",
+                    chapter_outline=[{"number": 1, "title": "Ch 1"}],
+                    existing_chapter_numbers=set(),
+                    quick_mode=False,
+                    get_project_fn=lambda pid: fake_project,
+                    get_llm_fn=lambda: None,
+                    save_project_fn=lambda p: None,
+                )
+                await asyncio.sleep(0.5)
+            finally:
+                cw_mod.execute_chapter_writer = original
+
+            async with jm._lock:
+                final_job = jm._jobs[job.job_id]
+
+            self.assertEqual(final_job.status, JobStatus.succeeded)
+            self.assertEqual(call_count, 2)
 
         asyncio.run(run())
 
