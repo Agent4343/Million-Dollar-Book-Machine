@@ -769,6 +769,21 @@ Rules:
         "notes": "Scores reflect blueprint adherence; investigate deviations for rewrite targets."
     }
 
+    # Ensure deviations list is consistent with scores.
+    # The per-chapter LLM adherence call may return a low score without
+    # populating chapter_deviations, which causes the gate to reject the
+    # output (catch-22: low score requires non-empty deviations).  Synthesize
+    # deviation entries from any chapter that scored below the gate threshold.
+    if overall < 80 and not deviations:
+        for ch_num_str, ch_score in chapter_scores.items():
+            if isinstance(ch_score, int) and ch_score < 80:
+                deviations.append({
+                    "chapter": int(ch_num_str) if ch_num_str.isdigit() else ch_num_str,
+                    "severity": "major" if ch_score < 60 else "minor",
+                    "description": f"Chapter {ch_num_str} scored {ch_score}/100 on outline adherence",
+                    "suggested_fix": f"Review chapter {ch_num_str} against its blueprint and revise deviating scenes",
+                })
+
     # Create a simple prioritized fix plan from deviations (fallback). LLM can refine later in rewrite agents.
     if deviations:
         fix_plan = [

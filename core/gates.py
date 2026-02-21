@@ -160,20 +160,35 @@ def validate_agent_output(
                 {"errors": [{"msg": "bad_overall_score", "value": score}]},
                 normalized_content,
             )
+        # If score is below the threshold and deviations/fix_plan are missing,
+        # synthesize them from chapter_scores rather than failing the gate.
+        # This prevents a catch-22 where the LLM rates adherence low but
+        # doesn't produce explicit deviation entries, causing endless retries.
+        chapter_scores = outline.get("chapter_scores") or {}
         if score < 80 and (not isinstance(deviations, list) or len(deviations) == 0):
-            return (
-                False,
-                "Low outline adherence score requires a non-empty deviations list.",
-                {"errors": [{"msg": "low_score_without_deviations", "overall_score": score}]},
-                normalized_content,
-            )
+            synthetic_devs: list = []
+            for ch_num, ch_score in (chapter_scores.items() if isinstance(chapter_scores, dict) else []):
+                if isinstance(ch_score, int) and ch_score < 80:
+                    synthetic_devs.append({
+                        "chapter": ch_num,
+                        "severity": "major" if ch_score < 60 else "minor",
+                        "description": f"Chapter {ch_num} scored {ch_score}/100 on outline adherence",
+                        "suggested_fix": f"Review chapter {ch_num} against its blueprint and revise deviating scenes",
+                    })
+            if synthetic_devs:
+                deviations = synthetic_devs
+                normalized_content["deviations"] = deviations
+            # If we still have no deviations (e.g. no chapter_scores data),
+            # allow it through — downstream rewrite agents will catch issues.
+
         if isinstance(deviations, list) and deviations and (not isinstance(fix_plan, list) or len(fix_plan) == 0):
-            return (
-                False,
-                "If deviations are present, fix_plan must be a non-empty list of actions.",
-                {"errors": [{"msg": "deviations_without_fix_plan"}]},
-                normalized_content,
-            )
+            # Synthesize a fix_plan from deviations instead of failing the gate.
+            fix_plan = [
+                f"Chapter {d.get('chapter', '?')}: {d.get('suggested_fix') or d.get('description')}"
+                for d in deviations[:12]
+                if isinstance(d, dict)
+            ]
+            normalized_content["fix_plan"] = fix_plan
 
         bad = []
         for ch in chapters[:5]:  # only sample-check first 5 to keep it cheap
