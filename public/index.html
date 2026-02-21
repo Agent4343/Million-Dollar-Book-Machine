@@ -1508,51 +1508,74 @@
                 chapterItem.classList.remove('written');
             }
 
-            document.getElementById('chapterWriteProgress').textContent = `Writing Chapter ${chapterNumber}...`;
+            const MAX_RETRIES = 3;
+            let lastError = null;
 
-            try {
-                const res = await fetch(`/api/projects/${currentProject}/write-chapter/${chapterNumber}`, {
-                    method: 'POST',
-                    credentials: 'include'
-                });
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                document.getElementById('chapterWriteProgress').textContent =
+                    `Writing Chapter ${chapterNumber}...` + (attempt > 1 ? ` (retry ${attempt}/${MAX_RETRIES})` : '');
 
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Failed to write chapter');
-                }
+                try {
+                    const res = await fetch(`/api/projects/${currentProject}/write-chapter/${chapterNumber}`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
 
-                const data = await res.json();
-
-                if (data.success && data.chapter) {
-                    writtenChapters[chapterNumber] = data.chapter;
-
-                    // Update UI
-                    if (chapterItem) {
-                        chapterItem.classList.remove('writing');
-                        chapterItem.classList.add('written');
-                        chapterItem.innerHTML = `✓ Ch ${chapterNumber}`;
+                    if (!res.ok) {
+                        let errMsg = 'Failed to write chapter';
+                        try { const err = await res.json(); errMsg = err.detail || errMsg; } catch (_) {}
+                        throw new Error(errMsg);
                     }
 
-                    // Show chapter preview
-                    document.getElementById('chapterPreview').classList.remove('hidden');
-                    document.getElementById('chapterText').textContent =
-                        `Chapter ${chapterNumber}: ${data.chapter.title}\n` +
-                        `Words: ${data.chapter.word_count}\n\n` +
-                        (data.chapter.text || 'No text generated');
+                    const data = await res.json();
 
-                    document.getElementById('chapterWriteProgress').textContent = `Chapter ${chapterNumber} complete!`;
+                    if (data.success && data.chapter && data.chapter.text) {
+                        writtenChapters[chapterNumber] = data.chapter;
+
+                        // Update UI
+                        if (chapterItem) {
+                            chapterItem.classList.remove('writing');
+                            chapterItem.classList.add('written');
+                            chapterItem.innerHTML = `✓ Ch ${chapterNumber}`;
+                        }
+
+                        // Show chapter preview
+                        document.getElementById('chapterPreview').classList.remove('hidden');
+                        document.getElementById('chapterText').textContent =
+                            `Chapter ${chapterNumber}: ${data.chapter.title}\n` +
+                            `Words: ${data.chapter.word_count}\n\n` +
+                            (data.chapter.text || 'No text generated');
+
+                        document.getElementById('chapterWriteProgress').textContent = `Chapter ${chapterNumber} complete!`;
+                        await updateChapterWriter();
+                        return; // success — exit retry loop
+                    } else {
+                        // Server returned an error result (chapter has no text)
+                        lastError = (data.chapter && data.chapter.error) || data.error || 'No text generated';
+                        throw new Error(lastError);
+                    }
+
+                } catch (error) {
+                    lastError = error.message || 'Unknown error';
+                    console.warn(`Write chapter ${chapterNumber} attempt ${attempt} failed:`, lastError);
+
+                    if (attempt < MAX_RETRIES) {
+                        const backoff = Math.pow(2, attempt) * 1000;
+                        document.getElementById('chapterWriteProgress').textContent =
+                            `Chapter ${chapterNumber} failed, retrying in ${backoff/1000}s...`;
+                        await new Promise(r => setTimeout(r, backoff));
+                    }
                 }
-
-                await updateChapterWriter();
-            } catch (error) {
-                console.error('Write chapter error:', error);
-                alert('Failed to write chapter: ' + error.message);
-
-                if (chapterItem) {
-                    chapterItem.classList.remove('writing');
-                }
-                document.getElementById('chapterWriteProgress').textContent = 'Error writing chapter';
             }
+
+            // All retries exhausted
+            console.error(`Write chapter ${chapterNumber} failed after ${MAX_RETRIES} attempts:`, lastError);
+            alert(`Failed to write chapter ${chapterNumber} after ${MAX_RETRIES} attempts: ${lastError}`);
+
+            if (chapterItem) {
+                chapterItem.classList.remove('writing');
+            }
+            document.getElementById('chapterWriteProgress').textContent = `Chapter ${chapterNumber} failed`;
         }
 
         let isWritingAllChapters = false;
@@ -1665,52 +1688,9 @@
         }
 
         async function writeAllChapters() {
-            if (!currentProject || isWritingAllChapters) return;
-
-            if (!chapterBlueprint || !chapterBlueprint.chapter_outline) {
-                alert('Chapter blueprint not available');
-                return;
-            }
-
-            const chapters = chapterBlueprint.chapter_outline;
-            const unwritten = chapters.filter(ch => !writtenChapters[ch.number]);
-
-            if (unwritten.length === 0) {
-                alert('All chapters have already been written!');
-                return;
-            }
-
-            if (!confirm(`This will write ${unwritten.length} chapters. This may take several minutes. Continue?`)) {
-                return;
-            }
-
-            isWritingAllChapters = true;
-            const btn = document.getElementById('writeAllChaptersBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="running-indicator"></span>Writing...';
-
-            try {
-                for (let i = 0; i < unwritten.length; i++) {
-                    const ch = unwritten[i];
-                    document.getElementById('chapterWriteProgress').textContent =
-                        `Writing chapter ${ch.number} (${i + 1}/${unwritten.length})...`;
-
-                    await writeChapter(ch.number);
-
-                    // Small delay between chapters
-                    await new Promise(r => setTimeout(r, 1000));
-                }
-
-                document.getElementById('chapterWriteProgress').textContent = 'All chapters complete!';
-                alert('All chapters have been written!');
-            } catch (error) {
-                console.error('Write all chapters error:', error);
-                alert('Error during chapter writing: ' + error.message);
-            } finally {
-                isWritingAllChapters = false;
-                btn.disabled = false;
-                btn.innerHTML = 'Write All Chapters';
-            }
+            // Delegate to the background job approach which handles retries,
+            // persistence, and doesn't suffer from HTTP connection timeouts.
+            await autoWriteAllChapters();
         }
 
         async function viewWrittenChapter(chapterNumber) {

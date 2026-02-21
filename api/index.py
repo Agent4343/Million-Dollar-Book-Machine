@@ -790,6 +790,7 @@ async def write_chapter(
     auth: bool = Depends(require_auth)
 ):
     """Write a specific chapter using the chapter writer agent."""
+    import asyncio
     from core.orchestrator import ExecutionContext
 
     quick_mode = request.quick_mode if request else False
@@ -822,43 +823,63 @@ async def write_chapter(
             if agent_state.current_output:
                 inputs[agent_id] = agent_state.current_output.content
 
-    context = ExecutionContext(
-        project=project,
-        inputs=inputs,
-        llm_client=get_llm_client()
-    )
+    MAX_RETRIES = 3
+    RETRY_BACKOFF = 2.0  # seconds
 
-    try:
-        result = await execute_chapter_writer(context, chapter_number, quick_mode=quick_mode)
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            context = ExecutionContext(
+                project=project,
+                inputs=inputs,
+                llm_client=get_llm_client()
+            )
 
-        # Store chapter in manuscript
-        if result.get("text") and not result.get("error"):
-            if "chapters" not in project.manuscript:
-                project.manuscript["chapters"] = []
+            result = await execute_chapter_writer(context, chapter_number, quick_mode=quick_mode)
 
-            # Update or add chapter
-            chapter_exists = False
-            for i, ch in enumerate(project.manuscript["chapters"]):
-                if ch.get("number") == chapter_number:
-                    project.manuscript["chapters"][i] = result
-                    chapter_exists = True
-                    break
+            if result.get("error") and not result.get("text"):
+                # Chapter writer returned an error (e.g. chapter not in blueprint).
+                # Retry in case the error is transient.
+                last_error = result.get("error", "Unknown error")
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_BACKOFF ** attempt)
+                    continue
+                # Final attempt failed — return the error result as-is.
+                return {"success": False, "chapter": result, "error": last_error}
 
-            if not chapter_exists:
-                project.manuscript["chapters"].append(result)
+            # Store chapter in manuscript
+            if result.get("text") and not result.get("error"):
+                if "chapters" not in project.manuscript:
+                    project.manuscript["chapters"] = []
 
-            # Sort chapters by number
-            project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
-            # Persist
-            store = get_project_store()
-            store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+                # Update or add chapter
+                chapter_exists = False
+                for i, ch in enumerate(project.manuscript["chapters"]):
+                    if ch.get("number") == chapter_number:
+                        project.manuscript["chapters"][i] = result
+                        chapter_exists = True
+                        break
 
-        return {
-            "success": True,
-            "chapter": result
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                if not chapter_exists:
+                    project.manuscript["chapters"].append(result)
+
+                # Sort chapters by number
+                project.manuscript["chapters"].sort(key=lambda x: x.get("number", 0))
+                # Persist
+                store = get_project_store()
+                store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+
+            return {
+                "success": True,
+                "chapter": result
+            }
+
+        except Exception as e:
+            last_error = str(e)
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_BACKOFF ** attempt)
+                continue
+            raise HTTPException(status_code=500, detail=f"Failed after {MAX_RETRIES} attempts: {last_error}")
 
 
 class BatchWriteRequest(BaseModel):
