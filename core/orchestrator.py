@@ -516,6 +516,19 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
             layer.completed_at = datetime.now(timezone.utc).isoformat()
             project.current_layer = layer_id
 
+            # Collect agent IDs that failed terminally in this layer.
+            failed_ids = {
+                a.agent_id
+                for a in layer.agents.values()
+                if a.status == AgentStatus.FAILED
+            }
+
+            # Cascade failure: mark any downstream PENDING agent whose
+            # dependency chain includes a terminally-failed agent as FAILED
+            # too, so the pipeline doesn't get stuck with unexecutable agents.
+            if failed_ids:
+                self._cascade_failures(project, failed_ids)
+
             # Unlock next layer
             next_layer_id = layer_id + 1
             if next_layer_id in project.layers:
@@ -524,6 +537,33 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
                 logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
             else:
                 logger.info(f"Layer {layer_id} completed (final layer)")
+
+    def _cascade_failures(self, project: BookProject, failed_ids: set) -> None:
+        """Mark PENDING agents as FAILED if any dependency is in *failed_ids*.
+
+        Walks the full agent graph so transitive dependents are also cascaded.
+        """
+        changed = True
+        while changed:
+            changed = False
+            for layer in project.layers.values():
+                for agent_state in layer.agents.values():
+                    if agent_state.status != AgentStatus.PENDING:
+                        continue
+                    for dep_id in agent_state.dependencies:
+                        if dep_id in failed_ids:
+                            agent_state.status = AgentStatus.FAILED
+                            agent_state.last_error = (
+                                f"Cascade: dependency '{dep_id}' failed terminally"
+                            )
+                            failed_ids.add(agent_state.agent_id)
+                            changed = True
+                            logger.warning(
+                                "Agent %s cascade-failed (dependency %s failed)",
+                                agent_state.agent_id,
+                                dep_id,
+                            )
+                            break
 
     def register_executor(self, agent_id: str, executor: Callable) -> None:
         """Register a custom executor for an agent."""
@@ -567,9 +607,46 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
             layer.status = LayerStatus.IN_PROGRESS
             layer.completed_at = None
 
+        # Also reset any agents that were cascade-failed due to this agent.
+        self._uncascade_failures(project, agent_id)
+
         project.update_timestamp()
         logger.info(f"Agent {agent_id} reset to PENDING")
         return agent_state
+
+    def _uncascade_failures(self, project: BookProject, reset_agent_id: str) -> None:
+        """Reset cascade-failed dependents back to PENDING.
+
+        When an agent is reset, any downstream agent that was only failed
+        because of a cascade from this agent should also be reset.
+        """
+        changed = True
+        reset_ids = {reset_agent_id}
+        while changed:
+            changed = False
+            for layer in project.layers.values():
+                for agent_state in layer.agents.values():
+                    if agent_state.status != AgentStatus.FAILED:
+                        continue
+                    err = agent_state.last_error or ""
+                    if not err.startswith("Cascade: dependency '"):
+                        continue
+                    # Check if the cascade was from an agent we're resetting
+                    for rid in reset_ids:
+                        if f"'{rid}'" in err:
+                            agent_state.status = AgentStatus.PENDING
+                            agent_state.attempts = 0
+                            agent_state.last_error = None
+                            reset_ids.add(agent_state.agent_id)
+                            # Re-open the layer if needed
+                            agent_def = AGENT_REGISTRY.get(agent_state.agent_id)
+                            if agent_def and agent_def.layer in project.layers:
+                                lyr = project.layers[agent_def.layer]
+                                if lyr.status == LayerStatus.COMPLETED:
+                                    lyr.status = LayerStatus.IN_PROGRESS
+                                    lyr.completed_at = None
+                            changed = True
+                            break
 
     def get_blocked_agents_diagnostics(self, project: BookProject) -> Dict[str, Any]:
         """
