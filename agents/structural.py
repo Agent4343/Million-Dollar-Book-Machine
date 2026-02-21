@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # Per-chapter LLM call timeout in seconds; configurable via env var.
 _DRAFT_CHAPTER_TIMEOUT = int(os.environ.get("DRAFT_CHAPTER_TIMEOUT", "300") or "300")
 
+# Retry settings for chapter generation within draft_generation agent.
+_DRAFT_CHAPTER_MAX_RETRIES = int(os.environ.get("DRAFT_CHAPTER_MAX_RETRIES", "3") or "3")
+_DRAFT_CHAPTER_RETRY_BACKOFF = float(os.environ.get("DRAFT_CHAPTER_RETRY_BACKOFF", "2.0") or "2.0")
+
 
 # =============================================================================
 # PROMPTS
@@ -611,31 +615,36 @@ async def execute_draft_generation(
         chapter_title = chapter.get("title", f"Chapter {chapter_num}")
 
         if llm:
-            # Generate each chapter with LLM
-            previous_summary = ""
-            if chapters:
-                previous_summary = f"Previous chapter ended with: {chapters[-1].get('summary', '')}"
+            # ── Retry loop: attempt each chapter up to _DRAFT_CHAPTER_MAX_RETRIES times ──
+            chapter_succeeded = False
+            last_error = ""
 
-            prompt = DRAFT_GENERATION_PROMPT.format(
-                chapter_number=chapter_num,
-                chapter_title=chapter_title,
-                voice_specification=context.inputs.get("voice_specification", {}),
-                chapter_blueprint=chapter,
-                character_architecture=context.inputs.get("character_architecture", {}),
-                world_rules=context.inputs.get("world_rules", {}),
-                previous_summary=previous_summary
-            )
+            for attempt in range(1, _DRAFT_CHAPTER_MAX_RETRIES + 1):
+                try:
+                    # Build prompt fresh each attempt so previous_summary stays current.
+                    previous_summary = ""
+                    if chapters:
+                        previous_summary = f"Previous chapter ended with: {chapters[-1].get('summary', '')}"
 
-            timeout = _DRAFT_CHAPTER_TIMEOUT
-            try:
-                chapter_text = await asyncio.wait_for(llm.generate(prompt), timeout=timeout)
-                summary = await asyncio.wait_for(
-                    llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}"),
-                    timeout=timeout,
-                )
+                    prompt = DRAFT_GENERATION_PROMPT.format(
+                        chapter_number=chapter_num,
+                        chapter_title=chapter_title,
+                        voice_specification=context.inputs.get("voice_specification", {}),
+                        chapter_blueprint=chapter,
+                        character_architecture=context.inputs.get("character_architecture", {}),
+                        world_rules=context.inputs.get("world_rules", {}),
+                        previous_summary=previous_summary
+                    )
 
-                # Evaluate outline adherence (structured) for this chapter
-                adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
+                    timeout = _DRAFT_CHAPTER_TIMEOUT
+                    chapter_text = await asyncio.wait_for(llm.generate(prompt), timeout=timeout)
+                    summary = await asyncio.wait_for(
+                        llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}"),
+                        timeout=timeout,
+                    )
+
+                    # Evaluate outline adherence (structured) for this chapter
+                    adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
 
 Blueprint for this chapter:
 {chapter}
@@ -658,70 +667,103 @@ Rules:
 - outline_adherence_score is 0-100.
 - scene_checks must include every scene_number listed in the blueprint.
 - If deviation=true, suggested_fix must be specific."""
-                adherence = await asyncio.wait_for(
-                    llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600),
-                    timeout=timeout,
-                )
+                    adherence = await asyncio.wait_for(
+                        llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600),
+                        timeout=timeout,
+                    )
 
-                score = adherence.get("outline_adherence_score")
-                if isinstance(score, int):
-                    chapter_scores[str(chapter_num)] = score
-                else:
-                    chapter_scores[str(chapter_num)] = 0
+                    score = adherence.get("outline_adherence_score")
+                    if isinstance(score, int):
+                        chapter_scores[str(chapter_num)] = score
+                    else:
+                        chapter_scores[str(chapter_num)] = 0
 
-                scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
-                for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
-                    if isinstance(d, dict):
-                        deviations.append(d)
+                    scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
+                    for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
+                        if isinstance(d, dict):
+                            deviations.append(d)
 
-                word_count = len(chapter_text.split())
-                chapters.append({
-                    "number": chapter_num,
-                    "title": chapter_title,
-                    "text": chapter_text,
-                    "summary": summary,
-                    "word_count": word_count,
-                })
+                    word_count = len(chapter_text.split())
+                    chapters.append({
+                        "number": chapter_num,
+                        "title": chapter_title,
+                        "text": chapter_text,
+                        "summary": summary,
+                        "word_count": word_count,
+                    })
 
-                if progress_callback is not None:
-                    try:
-                        cb = progress_callback({
-                            "chapter": chapter_num,
-                            "status": "ok",
-                            "word_count": word_count,
-                            "chapters_done": chapter_index + 1,
-                            "chapters_total": chapters_total,
-                        })
-                        if asyncio.iscoroutine(cb):
-                            await cb
-                    except Exception:
-                        logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
+                    if progress_callback is not None:
+                        try:
+                            cb = progress_callback({
+                                "chapter": chapter_num,
+                                "status": "ok",
+                                "word_count": word_count,
+                                "chapters_done": chapter_index + 1,
+                                "chapters_total": chapters_total,
+                                "attempt": attempt,
+                            })
+                            if asyncio.iscoroutine(cb):
+                                await cb
+                        except Exception:
+                            logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
 
-            except asyncio.TimeoutError:
-                err_msg = f"LLM timeout after {timeout}s"
-                logger.error("draft_generation: Chapter %s timed out (%s)", chapter_num, err_msg)
-                failed_chapters.append({"chapter": chapter_num, "error": err_msg})
+                    chapter_succeeded = True
+                    break  # success — exit retry loop, proceed to next chapter
+
+                except (asyncio.TimeoutError, Exception) as exc:
+                    last_error = f"LLM timeout after {timeout}s" if isinstance(exc, asyncio.TimeoutError) else str(exc)
+                    logger.warning(
+                        "draft_generation: Chapter %s attempt %d/%d failed: %s",
+                        chapter_num, attempt, _DRAFT_CHAPTER_MAX_RETRIES, last_error,
+                    )
+
+                    if attempt < _DRAFT_CHAPTER_MAX_RETRIES:
+                        backoff = _DRAFT_CHAPTER_RETRY_BACKOFF ** attempt
+                        logger.info("draft_generation: Retrying chapter %s in %.1fs", chapter_num, backoff)
+                        if progress_callback is not None:
+                            try:
+                                cb = progress_callback({
+                                    "chapter": chapter_num,
+                                    "status": "retrying",
+                                    "word_count": 0,
+                                    "chapters_done": chapter_index,
+                                    "chapters_total": chapters_total,
+                                    "attempt": attempt,
+                                    "error": last_error,
+                                })
+                                if asyncio.iscoroutine(cb):
+                                    await cb
+                            except Exception:
+                                logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
+                        await asyncio.sleep(backoff)
+                    # else: final attempt — handled below
+
+            if not chapter_succeeded:
+                # All retries exhausted for this chapter.
+                failed_chapters.append({"chapter": chapter_num, "error": last_error})
                 if progress_callback is not None:
                     try:
                         cb = progress_callback({
                             "chapter": chapter_num,
                             "status": "failed",
                             "word_count": 0,
-                            "chapters_done": chapter_index + 1,
+                            "chapters_done": chapter_index,
                             "chapters_total": chapters_total,
+                            "attempts": _DRAFT_CHAPTER_MAX_RETRIES,
+                            "error": last_error,
                         })
                         if asyncio.iscoroutine(cb):
                             await cb
                     except Exception:
                         logger.debug("draft_generation: progress_callback raised for chapter %s", chapter_num, exc_info=True)
-                # Continue to next chapter rather than aborting.
-                chapter_metadata.append({
-                    "number": chapter_num,
-                    "title": chapter_title,
-                    "scenes": len(chapter.get("scenes", [])),
-                    "pov": chapter.get("pov", "Unknown"),
-                })
-                continue
+
+                # Stop writing — subsequent chapters depend on this one's summary.
+                logger.error(
+                    "draft_generation: Chapter %s failed after %d attempts. "
+                    "Stopping to preserve narrative continuity.",
+                    chapter_num, _DRAFT_CHAPTER_MAX_RETRIES,
+                )
+                break  # exit the chapter loop
 
         else:
             # Placeholder

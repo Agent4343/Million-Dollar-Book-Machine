@@ -57,20 +57,23 @@ def _make_context(llm):
 
 
 # ---------------------------------------------------------------------------
-# Test 1 – timeout on chapter 2 → chapter 2 in failed_chapters, others ok
+# Test 1 – timeout on chapter 2 → retries exhausted → stops pipeline
 # ---------------------------------------------------------------------------
 
 class TestDraftGenerationTimeoutContinues(unittest.IsolatedAsyncioTestCase):
-    """Chapter-level timeout should be skipped, not abort the whole agent."""
+    """Chapter-level timeout should retry, then stop (not skip to next chapter)."""
 
     async def test_timeout_chapter_in_failed_chapters_others_generated(self):
         from agents.structural import execute_draft_generation
+
+        call_counts: dict = {}
 
         # For chapter 2, raise TimeoutError on the text-generation call;
         # detect chapter 2 from the prompt content.
         async def fake_generate(prompt, **kwargs):
             prompt_str = str(prompt)
             if "Write Chapter 2:" in prompt_str:
+                call_counts["ch2"] = call_counts.get("ch2", 0) + 1
                 raise asyncio.TimeoutError()
             if kwargs.get("response_format") == "json":
                 return {
@@ -87,7 +90,11 @@ class TestDraftGenerationTimeoutContinues(unittest.IsolatedAsyncioTestCase):
         async def passthrough_wait_for(coro, timeout):
             return await coro
 
-        with patch("agents.structural.asyncio.wait_for", new=passthrough_wait_for):
+        with (
+            patch("agents.structural.asyncio.wait_for", new=passthrough_wait_for),
+            patch("agents.structural._DRAFT_CHAPTER_MAX_RETRIES", 2),
+            patch("agents.structural._DRAFT_CHAPTER_RETRY_BACKOFF", 0.01),
+        ):
             result = await execute_draft_generation(_make_context(llm))
 
         chapters = result["chapters"]
@@ -95,12 +102,67 @@ class TestDraftGenerationTimeoutContinues(unittest.IsolatedAsyncioTestCase):
 
         chapter_nums = [c["number"] for c in chapters]
         self.assertIn(1, chapter_nums, "Chapter 1 should be generated")
-        self.assertIn(3, chapter_nums, "Chapter 3 should be generated")
+        # Chapter 3 NOT generated: pipeline stops after chapter 2 fails all retries
+        self.assertNotIn(3, chapter_nums, "Chapter 3 must not appear (pipeline stopped)")
         self.assertNotIn(2, chapter_nums, "Chapter 2 timed out and must not appear in chapters")
 
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0]["chapter"], 2)
         self.assertIn("timeout", failed[0]["error"].lower())
+
+        # Chapter 2 should have been attempted 2 times (our patched max)
+        self.assertEqual(call_counts.get("ch2"), 2)
+
+
+# ---------------------------------------------------------------------------
+# Test 1b – retry succeeds on second attempt
+# ---------------------------------------------------------------------------
+
+class TestDraftGenerationRetrySucceeds(unittest.IsolatedAsyncioTestCase):
+    """A chapter that fails once then succeeds should still produce all chapters."""
+
+    async def test_retry_then_succeed_produces_all_chapters(self):
+        from agents.structural import execute_draft_generation
+
+        ch2_attempts = {"n": 0}
+
+        async def fake_generate(prompt, **kwargs):
+            prompt_str = str(prompt)
+            if "Write Chapter 2:" in prompt_str:
+                ch2_attempts["n"] += 1
+                if ch2_attempts["n"] == 1:
+                    raise asyncio.TimeoutError()
+                return "Chapter 2 text written on retry"
+            if kwargs.get("response_format") == "json":
+                return {
+                    "outline_adherence_score": 90,
+                    "scene_checks": [],
+                    "chapter_deviations": [],
+                }
+            return "Chapter text with several words"
+
+        llm = MagicMock()
+        llm.generate = fake_generate
+
+        async def passthrough_wait_for(coro, timeout):
+            return await coro
+
+        with (
+            patch("agents.structural.asyncio.wait_for", new=passthrough_wait_for),
+            patch("agents.structural._DRAFT_CHAPTER_MAX_RETRIES", 3),
+            patch("agents.structural._DRAFT_CHAPTER_RETRY_BACKOFF", 0.01),
+        ):
+            result = await execute_draft_generation(_make_context(llm))
+
+        chapters = result["chapters"]
+        failed = result["failed_chapters"]
+
+        chapter_nums = [c["number"] for c in chapters]
+        self.assertIn(1, chapter_nums, "Chapter 1 should be generated")
+        self.assertIn(2, chapter_nums, "Chapter 2 should succeed on retry")
+        self.assertIn(3, chapter_nums, "Chapter 3 should be generated after ch 2 succeeds")
+        self.assertEqual(len(failed), 0, "No chapters should be in failed list")
+        self.assertEqual(ch2_attempts["n"], 2, "Chapter 2 should be attempted twice")
 
 
 # ---------------------------------------------------------------------------
