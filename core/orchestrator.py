@@ -311,11 +311,22 @@ class Orchestrator:
             repair_rounds = 0
             max_repairs = 2
             gate_result, normalized = self._validate_and_normalize_gate(agent_def, result)
+
+            # Skip repair for agents whose output is too large to fit in a
+            # repair prompt (e.g. draft_generation contains full chapter text).
+            # Serialising the output for repair would exceed the LLM context
+            # and the 8 000-token response can't reproduce the manuscript.
+            _output_too_large = (
+                isinstance(result, dict)
+                and len(json.dumps(result, ensure_ascii=False, default=str)) > 50_000
+            )
+
             while (
                 not gate_result.passed
                 and self.llm_client is not None
                 and isinstance(result, dict)
                 and repair_rounds < max_repairs
+                and not _output_too_large
             ):
                 repaired = await self._repair_output(
                     agent_def=agent_def,
