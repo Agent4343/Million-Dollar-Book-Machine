@@ -33,8 +33,9 @@ class TestGates(unittest.TestCase):
         passed, _, _, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
         self.assertFalse(passed)
 
-    def test_draft_generation_low_score_requires_deviations(self):
-        bad = {
+    def test_draft_generation_low_score_synthesizes_deviations(self):
+        """Low adherence score with empty deviations should auto-synthesize deviations and pass."""
+        content = {
             "chapters": [{"number": 1, "title": "One", "text": "Hello", "summary": "Hi", "word_count": 1}],
             "chapter_metadata": [{"number": 1, "title": "One", "scenes": 1, "pov": "Protagonist"}],
             "word_counts": {"1": 1},
@@ -44,9 +45,11 @@ class TestGates(unittest.TestCase):
             "deviations": [],
             "fix_plan": [],
         }
-        passed, _, details, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
-        self.assertFalse(passed)
-        self.assertTrue("errors" in details)
+        passed, msg, _, normalized = validate_agent_output(agent_id="draft_generation", content=content, expected_outputs=list(content.keys()))
+        self.assertTrue(passed, msg)
+        # Gate should have synthesized deviations and fix_plan from chapter_scores
+        self.assertTrue(len(normalized.get("deviations", [])) > 0)
+        self.assertTrue(len(normalized.get("fix_plan", [])) > 0)
 
     def test_human_editor_review_not_approved_requires_required_changes(self):
         bad = {
@@ -264,8 +267,9 @@ class TestGates(unittest.TestCase):
         passed, msg, _, _ = validate_agent_output(agent_id="draft_generation", content=good, expected_outputs=list(good.keys()))
         self.assertTrue(passed, msg)
 
-    def test_draft_generation_deviations_without_fix_plan(self):
-        bad = {
+    def test_draft_generation_deviations_without_fix_plan_synthesizes(self):
+        """Deviations with empty fix_plan should auto-synthesize fix_plan and pass."""
+        content = {
             "chapters": [{"number": 1, "title": "One", "text": "Hello world this is text", "summary": "Hi", "word_count": 5}],
             "chapter_metadata": [{"number": 1, "title": "One", "scenes": 1, "pov": "Protagonist"}],
             "word_counts": {"1": 5},
@@ -275,8 +279,10 @@ class TestGates(unittest.TestCase):
             "deviations": [{"chapter": 1, "description": "minor deviation"}],
             "fix_plan": [],
         }
-        passed, _, _, _ = validate_agent_output(agent_id="draft_generation", content=bad, expected_outputs=list(bad.keys()))
-        self.assertFalse(passed)
+        passed, msg, _, normalized = validate_agent_output(agent_id="draft_generation", content=content, expected_outputs=list(content.keys()))
+        self.assertTrue(passed, msg)
+        # Gate should have synthesized fix_plan from deviations
+        self.assertTrue(len(normalized.get("fix_plan", [])) > 0)
 
     # ------------------------------------------------------------------
     # production_readiness additional cases
