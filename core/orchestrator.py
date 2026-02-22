@@ -937,6 +937,10 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
                             gate_result=gate_result,
                         )
 
+        # Normalize chapter keys: old code stored "chapter_number" but the
+        # rest of the system expects "number".  Fix persisted data on load.
+        self._normalize_manuscript_chapters(project)
+
         # Apply failure cascade for any terminally-failed agents whose
         # dependents are still stuck as PENDING (projects persisted before
         # the cascade fix would have this gap).
@@ -945,6 +949,36 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         # Register in orchestrator
         self.projects[project.project_id] = project
         return project
+
+    @staticmethod
+    def _normalize_manuscript_chapters(project: BookProject) -> None:
+        """Normalize chapter dicts so 'number' key is always present.
+
+        The chapter_writer historically used 'chapter_number' as the key,
+        while every other part of the system expects 'number'.  This method
+        patches persisted manuscripts so dedup / lookup / TOC all work.
+        """
+        chapters = project.manuscript.get("chapters")
+        if not isinstance(chapters, list):
+            return
+        seen_numbers: set = set()
+        deduped: list = []
+        for ch in chapters:
+            if not isinstance(ch, dict):
+                continue
+            # Ensure 'number' key exists
+            if "number" not in ch and "chapter_number" in ch:
+                ch["number"] = ch["chapter_number"]
+            num = ch.get("number")
+            # Deduplicate: keep the latest version (last in list)
+            if num in seen_numbers:
+                # Replace the earlier entry
+                deduped = [c for c in deduped if c.get("number") != num]
+            seen_numbers.add(num)
+            deduped.append(ch)
+        # Sort by number
+        deduped.sort(key=lambda c: c.get("number", 0))
+        project.manuscript["chapters"] = deduped
 
     def _apply_import_cascade(self, project: BookProject) -> None:
         """Cascade terminal failures that were missed in persisted state.

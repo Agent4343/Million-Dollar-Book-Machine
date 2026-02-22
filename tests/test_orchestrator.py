@@ -102,5 +102,67 @@ class TestOrchestrator(unittest.TestCase):
         self.assertEqual(inputs["character_names"], ["Alice", "Bob", "Carol"])
 
 
+    # ------------------------------------------------------------------
+    # test_import_normalizes_chapter_number_key
+    # ------------------------------------------------------------------
+    def test_import_normalizes_chapter_number_key(self):
+        """Importing a project with 'chapter_number' in chapters should normalize to 'number'."""
+        project = self.orch.create_project("Key Test", {"genre": "romance"})
+        export = self.orch.export_project_state(project)
+
+        # Simulate old-format chapters with 'chapter_number' instead of 'number'
+        export["manuscript"] = {
+            "chapters": [
+                {"chapter_number": 1, "title": "Ch 1", "text": "A", "word_count": 1},
+                {"chapter_number": 2, "title": "Ch 2", "text": "B", "word_count": 1},
+                {"chapter_number": 1, "title": "Ch 1 dup", "text": "C", "word_count": 1},  # duplicate
+            ]
+        }
+
+        new_orch = Orchestrator(llm_client=None)
+        imported = new_orch.import_project_state(export)
+        chapters = imported.manuscript.get("chapters", [])
+
+        # All chapters should have 'number' key
+        for ch in chapters:
+            self.assertIn("number", ch, f"Chapter missing 'number' key: {ch}")
+
+        # Duplicates should be removed (keep latest)
+        chapter_nums = [ch["number"] for ch in chapters]
+        self.assertEqual(sorted(chapter_nums), [1, 2], "Should have exactly chapters 1 and 2")
+
+        # The duplicate ch1 ("C") should win (last entry)
+        ch1 = [ch for ch in chapters if ch["number"] == 1][0]
+        self.assertEqual(ch1["text"], "C", "Latest duplicate should be kept")
+
+    # ------------------------------------------------------------------
+    # test_chapter_writer_returns_number_key
+    # ------------------------------------------------------------------
+    def test_chapter_writer_returns_number_key(self):
+        """execute_chapter_writer should return 'number', not 'chapter_number'."""
+        from agents.chapter_writer import execute_chapter_writer
+        from core.orchestrator import ExecutionContext
+        from unittest.mock import MagicMock
+
+        project = MagicMock()
+        project.manuscript = {"chapters": []}
+        inputs = {
+            "chapter_blueprint": {
+                "chapter_outline": [
+                    {"number": 1, "title": "Test", "scenes": [], "word_target": 100}
+                ]
+            },
+            "voice_specification": {},
+            "character_architecture": {},
+            "world_rules": {},
+        }
+        context = ExecutionContext(project=project, inputs=inputs, llm_client=None)
+
+        result = asyncio.run(execute_chapter_writer(context, 1))
+        self.assertIn("number", result, "Chapter writer should return 'number' key")
+        self.assertEqual(result["number"], 1)
+        self.assertNotIn("chapter_number", result, "Should NOT have 'chapter_number' key")
+
+
 if __name__ == "__main__":
     unittest.main()

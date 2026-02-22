@@ -88,7 +88,7 @@ async def execute_chapter_writer(
     if not chapter_data:
         return {
             "error": f"Chapter {chapter_number} not found in blueprint",
-            "chapter_number": chapter_number,
+            "number": chapter_number,
             "text": None
         }
 
@@ -128,7 +128,8 @@ async def execute_chapter_writer(
         manuscript = context.project.manuscript
         prev_chapters = manuscript.get("chapters", [])
         for prev_ch in prev_chapters:
-            if prev_ch.get("number") == chapter_number - 1:
+            prev_num = prev_ch.get("number") or prev_ch.get("chapter_number")
+            if prev_num == chapter_number - 1:
                 previous_summary = prev_ch.get("summary", "Previous chapter completed.")
                 break
 
@@ -193,7 +194,7 @@ Summary:"""
         word_count = len(chapter_text.split())
 
         return {
-            "chapter_number": chapter_number,
+            "number": chapter_number,
             "title": chapter_data.get("title", f"Chapter {chapter_number}"),
             "text": chapter_text,
             "summary": summary,
@@ -206,7 +207,7 @@ Summary:"""
     else:
         # Demo mode placeholder
         return {
-            "chapter_number": chapter_number,
+            "number": chapter_number,
             "title": chapter_data.get("title", f"Chapter {chapter_number}"),
             "text": f"[Chapter {chapter_number} would be generated here with LLM]\n\n{chapter_data.get('opening_hook', '')}",
             "summary": f"Chapter {chapter_number} placeholder summary",

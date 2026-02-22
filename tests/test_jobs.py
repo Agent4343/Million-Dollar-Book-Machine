@@ -136,7 +136,7 @@ class TestJobs(unittest.TestCase):
 
             async def fake_writer(context, chapter_num, quick_mode=False):
                 order.append(chapter_num)
-                return {"text": "x", "word_count": 1, "chapter_number": chapter_num}
+                return {"text": "x", "word_count": 1, "number": chapter_num}
 
             import agents.chapter_writer as cw_mod
             original = cw_mod.execute_chapter_writer
@@ -197,7 +197,7 @@ class TestChapterRetry(unittest.TestCase):
                 call_count += 1
                 if call_count == 1:
                     raise RuntimeError("Transient LLM error")
-                return {"text": "Chapter content", "word_count": 100, "chapter_number": chapter_num}
+                return {"text": "Chapter content", "word_count": 100, "number": chapter_num}
 
             import agents.chapter_writer as cw_mod
             original = cw_mod.execute_chapter_writer
@@ -303,8 +303,8 @@ class TestChapterRetry(unittest.TestCase):
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:
-                    return {"error": "Chapter 1 not found in blueprint", "chapter_number": 1, "text": None}
-                return {"text": "Chapter content", "word_count": 100, "chapter_number": chapter_num}
+                    return {"error": "Chapter 1 not found in blueprint", "number": 1, "text": None}
+                return {"text": "Chapter content", "word_count": 100, "number": chapter_num}
 
             import agents.chapter_writer as cw_mod
             original = cw_mod.execute_chapter_writer
