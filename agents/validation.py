@@ -12,8 +12,11 @@ These agents validate, edit, and finalize the manuscript:
 - Publishing Package
 """
 
+import logging
 from typing import Dict, Any, List
 from core.orchestrator import ExecutionContext
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -340,7 +343,9 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
         for ch in chapters[:limit]:
             if not isinstance(ch, dict):
                 continue
-            prompt = f"""You are rewriting a chapter to improve clarity, pacing, and voice consistency while preserving plot facts.
+            num = _chapter_number(ch)
+            try:
+                prompt = f"""You are rewriting a chapter to improve clarity, pacing, and voice consistency while preserving plot facts.
 
 Global issues to consider:
 Continuity audit: {continuity}
@@ -359,18 +364,34 @@ TITLE: {_chapter_title(ch)}
 TEXT:
 {_chapter_text(ch)}
 """
-            out = await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=6000)
-            new_text = out.get("text") or _chapter_text(ch)
-            num = _chapter_number(ch)
-            revised_ch = {
-                "number": num,
-                "title": _chapter_title(ch),
-                "text": new_text,
-                "summary": out.get("summary", _chapter_summary(ch) or "Updated chapter."),
-                "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
-            }
-            revised.append(revised_ch)
-            revision_log.append({"chapter": num, "changes": out.get("changes", "Revised prose and structure.")})
+                out = await llm.generate(prompt, response_format="json", temperature=0.4)
+                new_text = out.get("text") or _chapter_text(ch)
+                revised_ch = {
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": new_text,
+                    "summary": out.get("summary", _chapter_summary(ch) or "Updated chapter."),
+                    "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
+                }
+                revised.append(revised_ch)
+                revision_log.append({"chapter": num, "changes": out.get("changes", "Revised prose and structure.")})
+            except Exception as exc:
+                # A single chapter's rewrite failure (e.g. truncated JSON from
+                # the LLM) must not crash the entire agent.  Fall back to the
+                # original chapter text so the pipeline can continue.
+                logger.warning(
+                    "structural_rewrite: Chapter %s rewrite failed, keeping original: %s",
+                    num, exc,
+                )
+                t = _chapter_text(ch)
+                revised.append({
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": t,
+                    "summary": _chapter_summary(ch) or "Rewrite skipped.",
+                    "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
+                })
+                revision_log.append({"chapter": num, "changes": f"Rewrite skipped: {exc}"})
 
         for ch in chapters[limit:]:
             if isinstance(ch, dict):
@@ -437,7 +458,9 @@ async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
         for ch in revised_chapters[:limit]:
             if not isinstance(ch, dict):
                 continue
-            prompt = f"""You are a professional line editor. Improve clarity, rhythm, and correctness while preserving meaning and voice.
+            num = _chapter_number(ch)
+            try:
+                prompt = f"""You are a professional line editor. Improve clarity, rhythm, and correctness while preserving meaning and voice.
 
 Style guide:
 {style_guide}
@@ -453,19 +476,34 @@ Return ONLY valid JSON:
 Chapter text:
 {_chapter_text(ch)}
 """
-            out = await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=6000)
-            new_text = out.get("text") or _chapter_text(ch)
-            edited.append(
-                {
-                    "number": _chapter_number(ch),
-                    "title": _chapter_title(ch),
-                    "text": new_text,
-                    "summary": out.get("summary", _chapter_summary(ch) or "Line-edited."),
-                    "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
-                }
-            )
-            major += int(out.get("major_changes") or 0)
-            minor += int(out.get("minor_changes") or 0)
+                out = await llm.generate(prompt, response_format="json", temperature=0.2)
+                new_text = out.get("text") or _chapter_text(ch)
+                edited.append(
+                    {
+                        "number": num,
+                        "title": _chapter_title(ch),
+                        "text": new_text,
+                        "summary": out.get("summary", _chapter_summary(ch) or "Line-edited."),
+                        "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
+                    }
+                )
+                major += int(out.get("major_changes") or 0)
+                minor += int(out.get("minor_changes") or 0)
+            except Exception as exc:
+                logger.warning(
+                    "line_edit: Chapter %s edit failed, keeping original: %s",
+                    num, exc,
+                )
+                t = _chapter_text(ch)
+                edited.append(
+                    {
+                        "number": num,
+                        "title": _chapter_title(ch),
+                        "text": t,
+                        "summary": _chapter_summary(ch) or "Edit skipped.",
+                        "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
+                    }
+                )
 
         for ch in revised_chapters[limit:]:
             if isinstance(ch, dict):
