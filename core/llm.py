@@ -16,8 +16,8 @@ import anthropic
 logger = logging.getLogger(__name__)
 
 # Retry settings for transient API errors (429, 529, 500+).
-_LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "4") or "4")
-_LLM_RETRY_BACKOFF_BASE = float(os.environ.get("LLM_RETRY_BACKOFF_BASE", "2.0") or "2.0")
+_LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "5") or "5")
+_LLM_RETRY_BACKOFF_BASE = float(os.environ.get("LLM_RETRY_BACKOFF_BASE", "3.0") or "3.0")
 
 # HTTP status codes that are safe to retry (transient server-side issues).
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}

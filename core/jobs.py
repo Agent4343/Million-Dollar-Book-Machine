@@ -429,9 +429,24 @@ class JobManager:
                         store.save_raw(_job.job_id, _job.to_dict())
 
                 heartbeat_task = asyncio.create_task(_heartbeat(job_id, agent_id))
+                agent_raised = False
                 try:
                     cb = _draft_progress_cb if agent_id == "draft_generation" else None
                     output = await orchestrator.execute_agent(project, agent_id, progress_callback=cb)
+                except Exception as agent_exc:
+                    # The orchestrator already marks the agent as FAILED before
+                    # re-raising.  Instead of killing the entire job, log the
+                    # error and let the pipeline loop continue — the next
+                    # iteration will detect the failure through availability /
+                    # cascade logic and terminate gracefully with actionable
+                    # diagnostics.
+                    agent_raised = True
+                    self._append_event(
+                        job, "agent_error",
+                        f"Agent {agent_id} raised: {agent_exc}",
+                        agent_id=agent_id,
+                        error=str(agent_exc),
+                    )
                 finally:
                     heartbeat_task.cancel()
                     try:
@@ -440,6 +455,13 @@ class JobManager:
                         pass
                 # Persist project after each step
                 pstore.save_raw(project.project_id, orchestrator.export_project_state(project))
+
+                if agent_raised:
+                    # Project state already persisted above; continue the loop
+                    # so the "no available agents" branch produces a proper
+                    # failed/blocked status instead of a raw traceback.
+                    iterations += 1
+                    continue
 
                 # Update job progress
                 status = orchestrator.get_project_status(project)
