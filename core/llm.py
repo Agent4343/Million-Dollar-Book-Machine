@@ -15,6 +15,13 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
+# Retry settings for transient API errors (429, 529, 500+).
+_LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "4") or "4")
+_LLM_RETRY_BACKOFF_BASE = float(os.environ.get("LLM_RETRY_BACKOFF_BASE", "2.0") or "2.0")
+
+# HTTP status codes that are safe to retry (transient server-side issues).
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
+
 
 class ClaudeLLMClient:
     """
@@ -82,18 +89,42 @@ class ClaudeLLMClient:
 
         tokens = max_tokens or self.max_tokens
 
-        try:
-            # Anthropic SDK client is synchronous; run in a thread so we don't
-            # block the event loop (critical for background jobs + API polling).
-            response = await asyncio.to_thread(
-                self.client.messages.create,
-                model=self.model,
-                max_tokens=tokens,
-                system=system_prompt,
-                messages=messages,
-                temperature=temperature,
-            )
+        # Retry loop for transient API errors (429, 529, etc.).
+        last_exc: Optional[Exception] = None
+        for _attempt in range(1, _LLM_MAX_RETRIES + 1):
+            try:
+                # Anthropic SDK client is synchronous; run in a thread so we don't
+                # block the event loop (critical for background jobs + API polling).
+                response = await asyncio.to_thread(
+                    self.client.messages.create,
+                    model=self.model,
+                    max_tokens=tokens,
+                    system=system_prompt,
+                    messages=messages,
+                    temperature=temperature,
+                )
+                break  # success — exit retry loop
+            except anthropic.APIStatusError as e:
+                last_exc = e
+                if e.status_code in _RETRYABLE_STATUS_CODES and _attempt < _LLM_MAX_RETRIES:
+                    backoff = _LLM_RETRY_BACKOFF_BASE ** _attempt
+                    logger.warning(
+                        "Claude API returned %s (attempt %d/%d), retrying in %.1fs: %s",
+                        e.status_code, _attempt, _LLM_MAX_RETRIES, backoff, e,
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error(f"Claude API error: {e}")
+                raise
+            except anthropic.APIError as e:
+                logger.error(f"Claude API error: {e}")
+                raise
+        else:
+            # All retries exhausted (should not normally reach here due to
+            # the raise inside the loop, but just in case).
+            raise last_exc  # type: ignore[misc]
 
+        try:
             content = response.content[0].text
 
             # Check if response was truncated
@@ -117,9 +148,6 @@ class ClaudeLLMClient:
 
             return content
 
-        except anthropic.APIError as e:
-            logger.error(f"Claude API error: {e}")
-            raise
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}")
             logger.debug(f"Raw response: {content}")
