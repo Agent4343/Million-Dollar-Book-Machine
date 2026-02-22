@@ -599,13 +599,40 @@ async def execute_draft_generation(
     llm = context.llm_client
     chapter_blueprint = context.inputs.get("chapter_blueprint", {})
 
-    chapters = []
-    chapter_metadata = []
+    chapters: List[Dict[str, Any]] = []
+    chapter_metadata: List[Dict[str, Any]] = []
     scene_tags: Dict[str, Any] = {}
     deviations: List[Dict[str, Any]] = []
     fix_plan: List[str] = []
     chapter_scores: Dict[str, int] = {}
     failed_chapters: List[Dict[str, Any]] = []
+
+    # ── Resume from previous attempt ──
+    # If a prior attempt generated chapters but failed the gate, the
+    # orchestrator now preserves that output.  Carry forward any
+    # successfully-written chapters so we only regenerate what's missing.
+    _existing_by_num: Dict[int, Dict[str, Any]] = {}
+    for layer in context.project.layers.values():
+        if "draft_generation" in layer.agents:
+            _prev_state = layer.agents["draft_generation"]
+            if _prev_state.current_output:
+                _prev = _prev_state.current_output.content
+                if isinstance(_prev, dict) and isinstance(_prev.get("chapters"), list):
+                    for _ch in _prev["chapters"]:
+                        if isinstance(_ch, dict) and _ch.get("number") and _ch.get("text"):
+                            _existing_by_num[_ch["number"]] = _ch
+                    # Also carry forward metadata from previous run
+                    if isinstance(_prev.get("chapter_scores"), dict):
+                        chapter_scores.update(_prev["chapter_scores"])
+                    if isinstance(_prev.get("scene_tags"), dict):
+                        scene_tags.update(_prev["scene_tags"])
+            break
+
+    if _existing_by_num:
+        logger.info(
+            "draft_generation: Resuming with %d existing chapter(s) from previous attempt",
+            len(_existing_by_num),
+        )
 
     outline = chapter_blueprint.get("chapter_outline", [])
     chapters_total = len(outline)
@@ -613,6 +640,35 @@ async def execute_draft_generation(
     for chapter_index, chapter in enumerate(outline):
         chapter_num = chapter.get("number", 0)
         chapter_title = chapter.get("title", f"Chapter {chapter_num}")
+
+        # ── Skip chapters already generated in a previous attempt ──
+        if chapter_num in _existing_by_num:
+            prev_ch = _existing_by_num[chapter_num]
+            chapters.append(prev_ch)
+            chapter_metadata.append({
+                "number": chapter_num,
+                "title": prev_ch.get("title", chapter_title),
+                "scenes": len(chapter.get("scenes", [])),
+                "pov": chapter.get("pov", "Unknown"),
+            })
+            logger.info(
+                "draft_generation: Chapter %s carried forward from previous attempt",
+                chapter_num,
+            )
+            if progress_callback is not None:
+                try:
+                    cb = progress_callback({
+                        "chapter": chapter_num,
+                        "status": "carried_forward",
+                        "word_count": prev_ch.get("word_count", 0),
+                        "chapters_done": chapter_index + 1,
+                        "chapters_total": chapters_total,
+                    })
+                    if asyncio.iscoroutine(cb):
+                        await cb
+                except Exception:
+                    pass
+            continue
 
         if llm:
             # ── Retry loop: attempt each chapter up to _DRAFT_CHAPTER_MAX_RETRIES times ──
@@ -642,6 +698,10 @@ async def execute_draft_generation(
                         llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}"),
                         timeout=timeout,
                     )
+                    # Guard: ensure summary is always a string (LLM might
+                    # return JSON despite not being asked for it).
+                    if not isinstance(summary, str) or not summary.strip():
+                        summary = str(summary) if summary else f"Chapter {chapter_num} summary"
 
                     # Evaluate outline adherence (structured) for this chapter
                     adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.

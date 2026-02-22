@@ -360,6 +360,18 @@ class Orchestrator:
                 agent_state.outputs.append(output)
                 logger.info(f"Agent {agent_id} PASSED gate")
             else:
+                # For agents with output too large to repair (e.g. draft_generation),
+                # preserve the output so a retry can resume incrementally instead of
+                # regenerating everything from scratch.
+                if _output_too_large:
+                    agent_state.current_output = output
+                    agent_state.outputs.append(output)
+                    logger.info(
+                        "Agent %s gate failed but output preserved for incremental retry "
+                        "(gate: %s)",
+                        agent_id, gate_result.message,
+                    )
+
                 if agent_state.attempts >= agent_def.retry_limit:
                     agent_state.status = AgentStatus.FAILED
                     agent_state.last_error = gate_result.message
