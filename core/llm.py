@@ -57,6 +57,38 @@ class ClaudeLLMClient:
 
         logger.info(f"Initialized Claude client with model: {model}")
 
+    def _create_message_sync(
+        self,
+        model: str,
+        max_tokens: int,
+        system: str,
+        messages: list,
+        temperature: float,
+    ) -> Any:
+        """Create a message synchronously, using streaming for Opus.
+
+        The Anthropic API requires streaming for models that may exceed the
+        10-minute request timeout (Opus).  ``stream.get_final_message()``
+        returns the same ``Message`` object as ``messages.create()``, so
+        callers don't need to change.
+        """
+        if "opus" in model.lower():
+            with self.client.messages.stream(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+                temperature=temperature,
+            ) as stream:
+                return stream.get_final_message()
+        return self.client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            temperature=temperature,
+        )
+
     async def generate(
         self,
         prompt: str,
@@ -96,15 +128,15 @@ class ClaudeLLMClient:
         last_exc: Optional[Exception] = None
         for _attempt in range(1, _LLM_MAX_RETRIES + 1):
             try:
-                # Anthropic SDK client is synchronous; run in a thread so we don't
-                # block the event loop (critical for background jobs + API polling).
+                # Run in a thread so we don't block the event loop.
+                # Uses streaming for Opus (required by the API for long requests).
                 response = await asyncio.to_thread(
-                    self.client.messages.create,
-                    model=use_model,
-                    max_tokens=tokens,
-                    system=system_prompt,
-                    messages=messages,
-                    temperature=temperature,
+                    self._create_message_sync,
+                    use_model,
+                    tokens,
+                    system_prompt,
+                    messages,
+                    temperature,
                 )
                 break  # success — exit retry loop
             except anthropic.APIStatusError as e:
