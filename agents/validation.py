@@ -13,6 +13,7 @@ These agents validate, edit, and finalize the manuscript:
 """
 
 import logging
+import re
 from typing import Dict, Any, List
 from core.orchestrator import ExecutionContext
 
@@ -96,21 +97,178 @@ def _limit_for_job(context: ExecutionContext, key: str, default: int = 5) -> int
     return default
 
 
+# Relationship keywords used to extract cross-chapter character references.
+_RELATIONSHIP_WORDS = re.compile(
+    r"\b(father|mother|husband|wife|spouse|brother|sister|son|daughter|parent|"
+    r"married|marriage|wedding|divorce|widow|orphan|uncle|aunt|cousin|fianc[eé]+|"
+    r"boyfriend|girlfriend|lover|partner|ex-husband|ex-wife|stepfather|stepmother|"
+    r"kill|killed|dead|death|died|alive|murder|shot|stabbed|arrest|betray|betray[a-z]*)\b",
+    re.IGNORECASE,
+)
+
+
+def _chapter_summaries_map(chapters: List[Dict[str, Any]], max_chars: int = 15000) -> str:
+    """Build a compact per-chapter summary + opening for cross-chapter analysis.
+
+    Instead of sampling 3 chapters at 2200 chars each, this gives every
+    chapter's summary plus its first ~400 chars — enough for the LLM to
+    see character introductions, relationship references, and setup across
+    the entire manuscript.
+    """
+    if not chapters:
+        return ""
+    parts: List[str] = []
+    budget = max_chars
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        num = _chapter_number(ch)
+        title = _chapter_title(ch)
+        summary = _chapter_summary(ch)
+        opening = _chapter_text(ch)[:400]
+        entry = f"Ch{num} ({title}): {summary}"
+        if opening:
+            entry += f"\n  Opening: {opening}"
+        parts.append(entry)
+        budget -= len(entry) + 2
+        if budget <= 0:
+            break
+    return "\n".join(parts)
+
+
+def _extract_relationship_references(chapters: List[Dict[str, Any]], max_chars: int = 6000) -> str:
+    """Extract sentences containing relationship keywords from every chapter.
+
+    This produces a compact cross-chapter map of who is related to whom and
+    how those relationships change — catching contradictions like a character
+    being called 'father' in Chapter 1 but 'husband' in Chapter 14.
+    """
+    if not chapters:
+        return ""
+    parts: List[str] = []
+    budget = max_chars
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        text = _chapter_text(ch)
+        if not text:
+            continue
+        num = _chapter_number(ch)
+        # Split into sentences and find those with relationship keywords
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        hits: List[str] = []
+        for sent in sentences:
+            if _RELATIONSHIP_WORDS.search(sent):
+                # Truncate very long sentences
+                hits.append(sent[:200])
+                if len(hits) >= 8:  # cap per chapter
+                    break
+        if hits:
+            entry = f"Ch{num}: " + " | ".join(hits)
+            parts.append(entry)
+            budget -= len(entry) + 2
+            if budget <= 0:
+                break
+    return "\n".join(parts) if parts else "(No explicit relationship references found.)"
+
+
+def _extract_named_characters_per_chapter(chapters: List[Dict[str, Any]]) -> str:
+    """List character names mentioned in each chapter for subplot tracking.
+
+    Detects characters that appear once and vanish, or whose mention
+    pattern is inconsistent.
+    """
+    if not chapters:
+        return ""
+    # Build a simple proper-noun extractor (consecutive capitalized words).
+    name_pat = re.compile(r"\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?)\b")
+    # Common false positives to skip
+    skip = {
+        "The", "This", "That", "They", "Then", "There", "Their", "These",
+        "What", "When", "Where", "Which", "While", "Would", "Will", "With",
+        "Chapter", "Part", "Act", "Scene", "She", "Her", "His", "But",
+        "And", "For", "From", "Into", "After", "Before", "About", "Just",
+        "Could", "Should", "Still", "Even", "Every", "Some", "Each",
+        "Other", "Through", "Between", "Around", "Against", "Toward",
+        "Maybe", "Perhaps", "Already", "Something", "Everything", "Nothing",
+        "Someone", "Anyone", "Because", "However", "Although",
+    }
+    chapter_names: Dict[int, List[str]] = {}
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        text = _chapter_text(ch)
+        if not text:
+            continue
+        num = _chapter_number(ch)
+        found = name_pat.findall(text)
+        # Count occurrences, filter noise
+        counts: Dict[str, int] = {}
+        for name in found:
+            if name in skip or name.split()[0] in skip:
+                continue
+            counts[name] = counts.get(name, 0) + 1
+        # Keep names mentioned at least twice in this chapter
+        significant = sorted([n for n, c in counts.items() if c >= 2], key=lambda n: -counts[n])[:12]
+        if significant:
+            chapter_names[num] = significant
+    parts = [f"Ch{num}: {', '.join(names)}" for num, names in sorted(chapter_names.items())]
+    return "\n".join(parts) if parts else "(No recurring character names detected.)"
+
+
 async def execute_continuity_audit(context: ExecutionContext) -> Dict[str, Any]:
-    """Audit for continuity and logic errors."""
+    """Audit for continuity and logic errors across the full manuscript."""
     chapters = _best_available_chapters(context)
     world_rules = context.inputs.get("world_rules", {})
     characters = context.inputs.get("character_architecture", {})
 
     llm = context.llm_client
     if llm and chapters:
-        prompt = f"""You are a continuity editor. Audit the manuscript sample for continuity and logic errors.
+        # Build cross-chapter context so the LLM can detect contradictions
+        # that span the entire manuscript (e.g. a character's relationship
+        # described differently in early vs. late chapters).
+        chapter_map = _chapter_summaries_map(chapters)
+        relationship_refs = _extract_relationship_references(chapters)
+        char_per_chapter = _extract_named_characters_per_chapter(chapters)
 
-World rules (summary): {world_rules}
-Characters (summary): {characters}
+        prompt = f"""You are a professional continuity editor performing a full-manuscript audit.
 
-Manuscript sample:
-{_sample_manuscript(chapters)}
+## Established Characters
+{characters}
+
+## World Rules
+{world_rules}
+
+## Chapter-by-Chapter Summary + Opening Lines
+{chapter_map}
+
+## Relationship References Extracted from Every Chapter
+(Sentences mentioning family, romantic, or status-change keywords)
+{relationship_refs}
+
+## Character Appearances per Chapter
+{char_per_chapter}
+
+## Your Audit Tasks
+
+1. **CHARACTER RELATIONSHIP CONSISTENCY**: Check whether any character's
+   relationship to another changes without explanation (e.g. called
+   "father" in early chapters but "husband" later, or vice versa).
+   Flag as CRITICAL if found.
+
+2. **ABANDONED SUBPLOTS / VANISHING CHARACTERS**: Identify any character
+   or subplot introduced with significance that is never mentioned again.
+   If a character appears in only 1-2 chapters despite being set up as
+   important, flag it.
+
+3. **TIMELINE & LOGIC**: Check for impossible timelines, characters in
+   two places at once, or events contradicting earlier established facts.
+
+4. **CHARACTER STATUS CONTRADICTIONS**: If a character dies, is arrested,
+   or undergoes a major status change, verify later chapters respect that.
+
+5. **NAME CONSISTENCY**: Flag characters whose names change spelling or
+   whose last names switch between chapters.
 
 Return ONLY valid JSON with this exact shape:
 {{
@@ -121,9 +279,11 @@ Return ONLY valid JSON with this exact shape:
 }}
 
 Rules:
-- If you flag an issue, the description must be specific and actionable.
+- Mark relationship contradictions as severity "critical".
+- Mark abandoned subplots as severity "major".
+- Be specific: cite chapter numbers and exact contradicting references.
 - continuity_report counts must match the issues you listed."""
-        return await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=3000)
+        return await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=4000)
 
     return {
         "timeline_check": {
@@ -157,12 +317,22 @@ async def execute_emotional_validation(context: ExecutionContext) -> Dict[str, A
 
     llm = context.llm_client
     if llm and chapters:
-        prompt = f"""You are a developmental editor focused on emotional payoff.
+        chapter_map = _chapter_summaries_map(chapters)
 
-Protagonist arc: {protagonist_arc}
+        prompt = f"""You are a developmental editor focused on emotional payoff and arc completion.
 
-Manuscript sample:
-{_sample_manuscript(chapters)}
+## Protagonist Arc (from character design):
+{protagonist_arc}
+
+## Chapter-by-Chapter Summary + Opening Lines (FULL MANUSCRIPT):
+{chapter_map}
+
+## Your Tasks:
+1. Score the emotional resonance at key story points (opening, mid-book, climax, ending).
+2. Check whether the protagonist's arc is fully completed and earned.
+3. Identify the emotional peaks and their placement across the book.
+4. Flag if key emotional beats (first kiss, confession, betrayal, climax) arrive too early or too late for the genre.
+5. Flag any supporting character arcs that are introduced but never resolved.
 
 Return ONLY valid JSON with this exact shape:
 {{
@@ -173,8 +343,9 @@ Return ONLY valid JSON with this exact shape:
 
 Rules:
 - Scores are 0-10.
-- If a score is low, the notes must explain why and what to improve."""
-        return await llm.generate(prompt, response_format="json", temperature=0.3, max_tokens=2200)
+- If a score is low, the notes must explain why and what to improve.
+- If supporting_arcs_resolved is false, name the unresolved arcs in notes."""
+        return await llm.generate(prompt, response_format="json", temperature=0.3, max_tokens=2500)
 
     return {
         "scene_resonance_scores": {
@@ -329,7 +500,7 @@ Rules:
 
 
 async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any]:
-    """Perform structural and prose rewrites."""
+    """Perform structural and prose rewrites, prioritizing chapters with known issues."""
     chapters = _best_available_chapters(context)
     llm = context.llm_client
     continuity = context.inputs.get("continuity_audit", {})
@@ -338,19 +509,50 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
 
     if llm and chapters:
         limit = min(len(chapters), _limit_for_job(context, "max_rewrite_chapters", 5))
+
+        # ── Build a map of specific issues per chapter from the continuity audit ──
+        # This lets us prioritize chapters with known problems and give the
+        # rewriter targeted instructions instead of a generic "improve" directive.
+        chapter_issues: Dict[int, List[str]] = {}
+        if isinstance(continuity, dict):
+            for check_key in ("timeline_check", "character_logic_check", "world_rule_check"):
+                check = continuity.get(check_key)
+                if isinstance(check, dict):
+                    for issue in check.get("issues", []) if isinstance(check.get("issues"), list) else []:
+                        if isinstance(issue, dict):
+                            ch_num = issue.get("chapter")
+                            desc = issue.get("description", "")
+                            fix = issue.get("suggested_fix", "")
+                            if isinstance(ch_num, int) and (desc or fix):
+                                chapter_issues.setdefault(ch_num, []).append(
+                                    f"[{issue.get('severity', 'major')}] {desc}" + (f" → Fix: {fix}" if fix else "")
+                                )
+
+        # Sort chapters: those with known issues first, then by chapter order.
+        chapters_by_num = {_chapter_number(ch): ch for ch in chapters if isinstance(ch, dict)}
+        issue_chapter_nums = [n for n in sorted(chapter_issues.keys()) if n in chapters_by_num]
+        other_chapter_nums = [n for n in sorted(chapters_by_num.keys()) if n not in chapter_issues]
+        ordered_nums = issue_chapter_nums + other_chapter_nums
+
+        # Apply the limit — issue-chapters always get priority.
+        rewrite_nums = ordered_nums[:limit]
+
         revised: List[Dict[str, Any]] = []
         revision_log: List[Dict[str, Any]] = []
-        for ch in chapters[:limit]:
-            if not isinstance(ch, dict):
-                continue
-            num = _chapter_number(ch)
+        rewritten_set = set(rewrite_nums)
+        for num in rewrite_nums:
+            ch = chapters_by_num[num]
+            issues_for_ch = chapter_issues.get(num, [])
+            issues_block = ""
+            if issues_for_ch:
+                issues_block = "\n\n## SPECIFIC ISSUES TO FIX IN THIS CHAPTER:\n" + "\n".join(f"- {i}" for i in issues_for_ch)
             try:
-                prompt = f"""You are rewriting a chapter to improve clarity, pacing, and voice consistency while preserving plot facts.
+                prompt = f"""You are rewriting a chapter to fix known issues and improve clarity, pacing, and voice consistency while preserving plot facts.
 
-Global issues to consider:
-Continuity audit: {continuity}
-Emotional validation: {emotional}
-Originality scan: {originality}
+Global context from audits:
+Continuity audit summary: {(continuity.get("continuity_report", {}) or {}).get("recommendation", "No issues.")}
+Emotional validation notes: {(emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "No notes.")}
+{issues_block}
 
 Return ONLY valid JSON:
 {{
@@ -376,9 +578,6 @@ TEXT:
                 revised.append(revised_ch)
                 revision_log.append({"chapter": num, "changes": out.get("changes", "Revised prose and structure.")})
             except Exception as exc:
-                # A single chapter's rewrite failure (e.g. truncated JSON from
-                # the LLM) must not crash the entire agent.  Fall back to the
-                # original chapter text so the pipeline can continue.
                 logger.warning(
                     "structural_rewrite: Chapter %s rewrite failed, keeping original: %s",
                     num, exc,
@@ -393,28 +592,32 @@ TEXT:
                 })
                 revision_log.append({"chapter": num, "changes": f"Rewrite skipped: {exc}"})
 
-        for ch in chapters[limit:]:
-            if isinstance(ch, dict):
-                t = _chapter_text(ch)
-                revised.append(
-                    {
-                        "number": _chapter_number(ch),
-                        "title": _chapter_title(ch),
-                        "text": t,
-                        "summary": _chapter_summary(ch) or "Unchanged.",
-                        "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
-                    }
-                )
+        # Carry forward chapters that weren't rewritten, in original order.
+        for ch in chapters:
+            if not isinstance(ch, dict):
+                continue
+            num = _chapter_number(ch)
+            if num in rewritten_set:
+                continue  # already in revised list
+            t = _chapter_text(ch)
+            revised.append(
+                {
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": t,
+                    "summary": _chapter_summary(ch) or "Unchanged.",
+                    "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
+                }
+            )
 
+        # Sort revised chapters back into order.
+        revised.sort(key=lambda c: c.get("number", 0))
         return {"revised_chapters": revised, "revision_log": revision_log, "resolved_flags": len(revision_log)}
 
     return {
         "revised_chapters": chapters.copy(),
-        "revision_log": [
-            {"chapter": 1, "changes": "Tightened opening"},
-            {"chapter": 15, "changes": "Enhanced tension"}
-        ],
-        "resolved_flags": (continuity.get("continuity_report", {}) or {}).get("total_issues", 0) if isinstance(continuity, dict) else 0
+        "revision_log": [],
+        "resolved_flags": 0
     }
 
 
@@ -1068,6 +1271,62 @@ async def execute_final_proof(context: ExecutionContext) -> Dict[str, Any]:
             "Repeated phrasing detected (consider rewriting): "
             + "; ".join([f"'{p}' x{c}" for p, c in repeated])
         )
+
+    # ── Cross-chapter consistency check (single LLM call) ──
+    # Uses the relationship extractor + character map to catch issues that
+    # per-chunk proofing cannot: POV shifts, relationship contradictions,
+    # vanishing characters.
+    if llm and chapters and len(chapters) > 1:
+        try:
+            rel_refs = _extract_relationship_references(chapters, max_chars=4000)
+            char_map = _extract_named_characters_per_chapter(chapters)
+            cross_prompt = f"""You are a manuscript consistency checker. Given the following cross-chapter data, identify:
+1. **RELATIONSHIP CONTRADICTIONS**: Character called by different relationship titles in different chapters.
+2. **VANISHING CHARACTERS**: Characters mentioned significantly in some chapters but absent from the rest without explanation.
+3. **POV SHIFTS**: Changes in narrative perspective (1st/3rd person, or whose POV) between chapters without clear labeling.
+4. **NAME INCONSISTENCIES**: Character names spelled differently in different chapters.
+
+## Relationship References (sentences with relationship keywords, per chapter):
+{rel_refs}
+
+## Characters Mentioned Per Chapter:
+{char_map}
+
+Return ONLY valid JSON:
+{{
+  "issues": [
+    {{"severity":"critical|major|minor","chapters":[1,14],"description":"...","suggested_fix":"..."}}
+  ]
+}}
+
+Rules:
+- Only flag genuine contradictions or problems, not normal plot progression.
+- Relationship contradictions are always "critical".
+- Vanishing characters are "major" if set up as important, "minor" otherwise."""
+            cross_result = await llm.generate(cross_prompt, response_format="json", temperature=0.2, max_tokens=2000)
+            if isinstance(cross_result, dict):
+                for issue in cross_result.get("issues", []):
+                    if isinstance(issue, dict) and issue.get("description"):
+                        consistency_findings.append(
+                            f"[{issue.get('severity', 'major')}] Ch{issue.get('chapters', '?')}: "
+                            f"{issue['description']}"
+                        )
+                        # Also add to per_chapter_issues for scoring
+                        for ch_num in issue.get("chapters", []):
+                            if isinstance(ch_num, int):
+                                per_chapter_issues.append({
+                                    "chapter": ch_num,
+                                    "title": "",
+                                    "issues": [{
+                                        "severity": issue.get("severity", "major"),
+                                        "location": f"Cross-chapter (Ch{issue.get('chapters', [])})",
+                                        "description": issue["description"],
+                                        "suggested_fix": issue.get("suggested_fix", ""),
+                                    }],
+                                })
+                                break  # only count once for scoring
+        except Exception as exc:
+            logger.warning("final_proof: Cross-chapter consistency check failed: %s", exc)
 
     # LLM-based proof per chapter (chunked)
     if llm and chapters:
