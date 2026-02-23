@@ -371,6 +371,263 @@ Rules:
     }
 
 
+async def execute_developmental_editor(context: ExecutionContext) -> Dict[str, Any]:
+    """Professional developmental editor: diagnose and prescribe fixes across 8 areas.
+
+    Uses a comprehensive editorial framework calibrated to the book's genre,
+    audience, and development stage.  Covers character consistency, structural
+    integrity, unearned pivots, underdeveloped opposition, perspective gaps,
+    opening/closing weaknesses, stated-vs-demonstrated content, and generic
+    titling.  All findings include exact locations, reader-impact reasoning,
+    and actionable prescriptions.
+    """
+    chapters = _best_available_chapters(context)
+    llm = context.llm_client
+
+    # Gather all relevant upstream context
+    characters = context.inputs.get("character_architecture", {})
+    concept = context.inputs.get("concept_definition", {})
+    blueprint = context.inputs.get("chapter_blueprint", {})
+    theme = context.inputs.get("thematic_architecture", {})
+    story_q = context.inputs.get("story_question", {})
+    plot = context.inputs.get("plot_structure", {})
+    voice = context.inputs.get("voice_specification", {})
+    continuity = context.inputs.get("continuity_audit", {})
+    emotional = context.inputs.get("emotional_validation", {})
+    constraints = context.inputs.get("user_constraints", {}) or {}
+    genre = constraints.get("genre", "Fiction") if isinstance(constraints, dict) else "Fiction"
+    audience = constraints.get("audience", "Adult") if isinstance(constraints, dict) else "Adult"
+
+    if llm and chapters:
+        chapter_map = _chapter_summaries_map(chapters, max_chars=18000)
+        char_per_chapter = _extract_named_characters_per_chapter(chapters)
+        relationship_refs = _extract_relationship_references(chapters, max_chars=6000)
+
+        system_prompt = """You are a professional developmental editor AI. Your sole function is to identify and resolve weaknesses in how a book has been developed. You do not write prose unless explicitly asked. You diagnose, flag, and prescribe fixes.
+
+You apply your assessment across every book type — fiction, non-fiction, children's, young adult, academic, and anything in between. You always calibrate your standards to the specific genre, category, and target audience before issuing any critique.
+
+PRIORITY ORDER — Always address improvement areas in this sequence:
+1. Character Consistency
+2. Structural Integrity
+3. Unearned Pivots
+4. Underdeveloped Opposition
+5. Perspective Gaps
+6. Opening & Closing Weaknesses
+7. Stated vs. Demonstrated Content
+8. Generic Titling
+
+FLAGGING STANDARD — Every identified problem must include:
+- Exact location in the document (chapter number)
+- Why it is a problem stated as a reader experience consequence
+- What must be resolved before development can proceed
+
+DEPENDENCY RULE — Character Consistency must be resolved before any other improvement work is actioned. All other assessments depend on a stable, canonical character or argument foundation.
+
+DO NOT:
+- Generate prose unless explicitly instructed
+- Apply fiction standards to non-fiction or vice versa
+- Issue critique without prescribing a specific fix
+- Flag the same problem more than once across different improvement areas"""
+
+        prompt = f"""Perform a full developmental edit assessment on this manuscript.
+
+## CALIBRATION
+- Book category: {genre}
+- Target audience: {audience}
+- Development stage: full draft
+- Title: {context.project.title}
+
+## CONCEPT & THEME
+{concept}
+
+## THEMATIC ARCHITECTURE
+{theme}
+
+## CENTRAL STORY QUESTION
+{story_q}
+
+## PLOT STRUCTURE
+{plot}
+
+## CHARACTER ARCHITECTURE
+{characters}
+
+## VOICE SPECIFICATION
+{voice}
+
+## CHAPTER BLUEPRINT (OUTLINE)
+{blueprint}
+
+## UPSTREAM AUDIT FINDINGS
+Continuity audit: {continuity}
+Emotional validation: {emotional}
+
+## CHAPTER-BY-CHAPTER SUMMARIES + OPENINGS
+{chapter_map}
+
+## CHARACTER APPEARANCES PER CHAPTER
+{char_per_chapter}
+
+## RELATIONSHIP REFERENCES ACROSS CHAPTERS
+{relationship_refs}
+
+## ASSESSMENT INSTRUCTIONS
+
+Evaluate ALL 8 improvement areas below. For each area, flag specific problems with chapter locations and prescribe concrete fixes.
+
+### AREA 1: CHARACTER CONSISTENCY
+Flag when: characters described differently across sections; traits listed but never shown; wounds stated but never affecting decisions; supporting characters with no autonomous wants; arcs declared but not built into chapter structure.
+Prescribe: identify contradictions with exact locations; present conflicting versions side by side; map every stated trait to the chapter where it must be demonstrated.
+
+### AREA 2: STRUCTURAL INTEGRITY
+Flag when: key beats (inciting incident, midpoint, climax, resolution) missing or misplaced; middle section has no escalation; final act is compressed with multiple unresolved threads in 1-2 chapters.
+Prescribe: map actual structure against genre framework; identify structural gaps with chapter locations; for compressed endings, list unresolved threads and scene space each requires.
+
+### AREA 3: UNEARNED PIVOTS
+Flag when: major emotional or plot shifts arrive without sufficient buildup; characters change because plot requires it; intimacy/betrayal/forgiveness scenes feel like convenience; any moment where reader would ask "why now?"
+Prescribe: identify every major pivot point; trace backward for insufficient buildup; specify which chapters need additional scaffolding; state how many chapters of runway each pivot requires.
+
+### AREA 4: UNDERDEVELOPED OPPOSITION
+Flag when: antagonist is nameless force without a specific person; villain's only characteristic is menace; antagonist appears primarily in final act without earlier seeding.
+Prescribe: develop named antagonist with worldview and protagonist connection; map antagonist into earlier chapters.
+
+### AREA 5: PERSPECTIVE GAPS
+Flag when: major character's internal world implied but never shown through direct POV; POV characters mirror protagonist rather than having independent emotional logic; love interest or antagonist exists only through protagonist's perception.
+Prescribe: identify missing perspectives; recommend locations where additional perspective carries most weight.
+
+### AREA 6: OPENING & CLOSING WEAKNESSES
+Flag when: chapters open with weather, waking up, mirror scenes, or backstory summary; chapter endings resolve tension rather than deepen it; book opening does not establish voice, stakes, or compelling question.
+Prescribe: flag every weak opening/closing with chapter location and specific pattern; recommend alternatives.
+
+### AREA 7: STATED VS. DEMONSTRATED CONTENT
+Flag when: character traits listed in brief but not demonstrated through actions; protagonist described as brilliant but makes average decisions; core promise stated in introduction but not delivered by conclusion.
+Prescribe: cross-reference every stated trait against chapter structure; ensure every trait appears minimum three times (established, challenged, resolved).
+
+### AREA 8: GENERIC TITLING
+Flag when: chapter titles interchangeable with other books in genre; titles summarize plot rather than create emotional invitation; book title too broad.
+Prescribe: flag every generic title; for each, generate 3 alternatives specific to this book's world or central relationship.
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "calibration": {{
+    "book_category": "...",
+    "genre": "...",
+    "target_audience": "...",
+    "development_stage": "full draft",
+    "calibration_notes": "..."
+  }},
+  "character_consistency_report": {{
+    "status": "passed|failed|warning",
+    "issues": [{{"chapter": 1, "description": "...", "reader_impact": "...", "prescription": "...", "severity": "critical|major|minor"}}],
+    "canonical_character_notes": "..."
+  }},
+  "structural_integrity_report": {{
+    "status": "passed|failed|warning",
+    "actual_structure_map": "...",
+    "issues": [{{"chapter": 1, "beat": "...", "description": "...", "reader_impact": "...", "prescription": "...", "severity": "critical|major|minor"}}],
+    "compressed_ending_analysis": "..."
+  }},
+  "unearned_pivots_report": {{
+    "status": "passed|failed|warning",
+    "pivots": [{{"chapter": 1, "pivot_type": "...", "description": "...", "buildup_chapters_needed": 0, "prescription": "...", "severity": "critical|major|minor"}}]
+  }},
+  "opposition_report": {{
+    "status": "passed|failed|warning",
+    "issues": [{{"chapter": 1, "description": "...", "reader_impact": "...", "prescription": "...", "severity": "critical|major|minor"}}],
+    "antagonist_assessment": "..."
+  }},
+  "perspective_gaps_report": {{
+    "status": "passed|failed|warning",
+    "issues": [{{"chapter": 1, "character": "...", "description": "...", "reader_impact": "...", "prescription": "...", "severity": "critical|major|minor"}}]
+  }},
+  "opening_closing_report": {{
+    "status": "passed|failed|warning",
+    "weak_openings": [{{"chapter": 1, "pattern": "...", "alternative": "..."}}],
+    "weak_closings": [{{"chapter": 1, "pattern": "...", "alternative": "..."}}]
+  }},
+  "stated_vs_demonstrated_report": {{
+    "status": "passed|failed|warning",
+    "gaps": [{{"trait_or_promise": "...", "stated_location": "...", "demonstration_status": "missing|partial|complete", "chapters_needed": [1], "prescription": "..."}}]
+  }},
+  "titling_report": {{
+    "status": "passed|failed|warning",
+    "generic_titles": [{{"chapter": 1, "current_title": "...", "alternatives": ["...", "...", "..."]}}],
+    "book_title_assessment": "..."
+  }},
+  "priority_fixes": [
+    {{"priority": 1, "area": "...", "description": "...", "chapters_affected": [1], "must_resolve_before": "..."}}
+  ],
+  "developmental_letter": "..."
+}}
+
+Rules:
+- The developmental_letter should read like a professional editor's letter: 2-3 paragraphs covering strengths, key weaknesses, and recommended next steps.
+- priority_fixes must be ordered by severity (character consistency issues first per the dependency rule).
+- Be specific: cite chapter numbers and exact contradicting references.
+- If an area has no issues, set status to "passed" with empty issues array.
+- Do not repeat the same finding across multiple areas."""
+
+        return await llm.generate(
+            prompt,
+            response_format="json",
+            system=system_prompt,
+            temperature=0.3,
+            max_tokens=16000,
+        )
+
+    # Demo / fallback response
+    return {
+        "calibration": {
+            "book_category": genre,
+            "genre": genre,
+            "target_audience": audience,
+            "development_stage": "full draft",
+            "calibration_notes": "Assessment calibrated to genre conventions."
+        },
+        "character_consistency_report": {
+            "status": "passed",
+            "issues": [],
+            "canonical_character_notes": "Characters are consistent across chapters."
+        },
+        "structural_integrity_report": {
+            "status": "passed",
+            "actual_structure_map": "Standard three-act structure detected.",
+            "issues": [],
+            "compressed_ending_analysis": "Ending has adequate space for resolution."
+        },
+        "unearned_pivots_report": {
+            "status": "passed",
+            "pivots": []
+        },
+        "opposition_report": {
+            "status": "passed",
+            "issues": [],
+            "antagonist_assessment": "Antagonist is present and well-developed."
+        },
+        "perspective_gaps_report": {
+            "status": "passed",
+            "issues": []
+        },
+        "opening_closing_report": {
+            "status": "passed",
+            "weak_openings": [],
+            "weak_closings": []
+        },
+        "stated_vs_demonstrated_report": {
+            "status": "passed",
+            "gaps": []
+        },
+        "titling_report": {
+            "status": "passed",
+            "generic_titles": [],
+            "book_title_assessment": "Title is distinctive and genre-appropriate."
+        },
+        "priority_fixes": [],
+        "developmental_letter": "The manuscript is well-developed with consistent characters, solid structure, and effective pacing. No critical developmental issues found at this stage. Recommend proceeding to originality and legal review."
+    }
+
+
 async def execute_originality_scan(context: ExecutionContext) -> Dict[str, Any]:
     """Scan for creative originality issues."""
     chapters = _best_available_chapters(context)
@@ -506,6 +763,7 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
     continuity = context.inputs.get("continuity_audit", {})
     emotional = context.inputs.get("emotional_validation", {})
     originality = context.inputs.get("originality_scan", {})
+    dev_editor = context.inputs.get("developmental_editor", {})
 
     if llm and chapters:
         # ── Build a map of specific issues per chapter from upstream audits ──
@@ -523,6 +781,43 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
                                 chapter_issues.setdefault(ch_num, []).append(
                                     f"[{issue.get('severity', 'major')}] {desc}" + (f" → Fix: {fix}" if fix else "")
                                 )
+        # Pull issues from developmental editor priority_fixes
+        if isinstance(dev_editor, dict):
+            for fix in dev_editor.get("priority_fixes", []):
+                if isinstance(fix, dict):
+                    desc = fix.get("description", "")
+                    area = fix.get("area", "")
+                    for ch_num in fix.get("chapters_affected", []):
+                        if isinstance(ch_num, int) and desc:
+                            chapter_issues.setdefault(ch_num, []).append(
+                                f"[major] Dev editor ({area}): {desc}"
+                            )
+            # Also pull per-area issues with chapter locations
+            for report_key in (
+                "character_consistency_report", "structural_integrity_report",
+                "opposition_report", "perspective_gaps_report",
+                "unearned_pivots_report", "stated_vs_demonstrated_report",
+            ):
+                report = dev_editor.get(report_key, {})
+                if not isinstance(report, dict):
+                    continue
+                for issue in report.get("issues", report.get("pivots", report.get("gaps", []))):
+                    if not isinstance(issue, dict):
+                        continue
+                    ch_num = issue.get("chapter")
+                    desc = issue.get("description") or issue.get("prescription") or issue.get("trait_or_promise", "")
+                    sev = issue.get("severity", "major")
+                    if isinstance(ch_num, int) and desc:
+                        chapter_issues.setdefault(ch_num, []).append(
+                            f"[{sev}] Dev editor: {desc}"
+                        )
+                    # Handle chapters_needed for stated_vs_demonstrated
+                    for cn in issue.get("chapters_needed", []):
+                        if isinstance(cn, int) and cn != ch_num and desc:
+                            chapter_issues.setdefault(cn, []).append(
+                                f"[{sev}] Dev editor: {desc}"
+                            )
+
         # Also pull issues from emotional validation
         if isinstance(emotional, dict):
             arc_notes = (emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "")
@@ -555,11 +850,14 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
             if issues_for_ch:
                 issues_block = "\n\n## SPECIFIC ISSUES TO FIX IN THIS CHAPTER:\n" + "\n".join(f"- {i}" for i in issues_for_ch)
             try:
+                dev_letter = ""
+                if isinstance(dev_editor, dict) and dev_editor.get("developmental_letter"):
+                    dev_letter = f"\nDevelopmental editor letter: {dev_editor['developmental_letter']}"
                 prompt = f"""You are rewriting a chapter to fix known issues and improve clarity, pacing, and voice consistency while preserving plot facts.
 
 Global context from audits:
 Continuity audit summary: {(continuity.get("continuity_report", {}) or {}).get("recommendation", "No issues.")}
-Emotional validation notes: {(emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "No notes.")}
+Emotional validation notes: {(emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "No notes.")}{dev_letter}
 {issues_block}
 
 Return ONLY valid JSON:
@@ -1571,6 +1869,7 @@ TEXT:
 VALIDATION_EXECUTORS = {
     "continuity_audit": execute_continuity_audit,
     "emotional_validation": execute_emotional_validation,
+    "developmental_editor": execute_developmental_editor,
     "originality_scan": execute_originality_scan,
     "plagiarism_audit": execute_plagiarism_audit,
     "transformative_verification": execute_transformative_verification,

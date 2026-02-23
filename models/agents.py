@@ -303,6 +303,30 @@ EMOTIONAL_VALIDATION = AgentDefinition(
     dependencies=["continuity_audit"]
 )
 
+DEVELOPMENTAL_EDITOR = AgentDefinition(
+    agent_id="developmental_editor",
+    name="Developmental Editor",
+    layer=14,
+    agent_type=AgentType.EDITING,
+    purpose="Diagnose and prescribe fixes across 8 improvement areas: character consistency, structural integrity, unearned pivots, underdeveloped opposition, perspective gaps, opening/closing weaknesses, stated vs. demonstrated content, and generic titling",
+    inputs=[
+        "chapters", "character_architecture", "concept_definition",
+        "chapter_blueprint", "thematic_architecture",
+        "story_question", "plot_structure", "voice_specification",
+        "continuity_audit", "emotional_validation", "user_constraints",
+    ],
+    outputs=[
+        "calibration", "character_consistency_report", "structural_integrity_report",
+        "unearned_pivots_report", "opposition_report", "perspective_gaps_report",
+        "opening_closing_report", "stated_vs_demonstrated_report", "titling_report",
+        "priority_fixes", "developmental_letter",
+    ],
+    gate_criteria="All 8 improvement areas assessed with actionable prescriptions",
+    fail_condition="Unable to evaluate manuscript or no substantive feedback provided",
+    dependencies=["emotional_validation"],
+    preferred_model="opus",
+)
+
 
 # =============================================================================
 # LAYER 7: ORIGINALITY & LEGAL SAFETY
@@ -363,7 +387,7 @@ STRUCTURAL_REWRITE = AgentDefinition(
     agent_type=AgentType.EDITING,
     purpose="Improve clarity, force, and resolve flagged issues",
     # Use producing agent ids so inputs are always discoverable.
-    inputs=["chapters", "continuity_audit", "emotional_validation", "originality_scan", "plagiarism_audit", "transformative_verification"],
+    inputs=["chapters", "continuity_audit", "emotional_validation", "developmental_editor", "originality_scan", "plagiarism_audit", "transformative_verification"],
     outputs=["revised_chapters", "revision_log", "resolved_flags"],
     gate_criteria="All flagged issues resolved",
     fail_condition="New inconsistencies introduced",
@@ -564,6 +588,7 @@ AGENT_REGISTRY: Dict[str, AgentDefinition] = {
     # Layer 13-14: Quality Control
     "continuity_audit": CONTINUITY_AUDIT,
     "emotional_validation": EMOTIONAL_VALIDATION,
+    "developmental_editor": DEVELOPMENTAL_EDITOR,
     # Layer 15: Originality & Legal
     "originality_scan": ORIGINALITY_SCAN,
     "plagiarism_audit": PLAGIARISM_AUDIT,
