@@ -9,6 +9,7 @@ complete book development pipeline.
 import inspect
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
@@ -24,6 +25,59 @@ logger = logging.getLogger(__name__)
 
 # Default retry limit used when an agent definition is not found in the registry.
 DEFAULT_RETRY_LIMIT = 3
+
+# ---------------------------------------------------------------------------
+# Per-agent model selection
+# ---------------------------------------------------------------------------
+# AgentDefinition.preferred_model is a tier name ("opus", "sonnet") that maps
+# to a concrete model ID.  Set USE_OPUS_FOR_CREATIVE=false to force all agents
+# onto Sonnet (saves cost at the expense of creative quality).
+
+_MODEL_TIERS: Dict[str, str] = {
+    "opus": os.environ.get("OPUS_MODEL", "claude-opus-4-20250514"),
+    "sonnet": os.environ.get("SONNET_MODEL", "claude-sonnet-4-20250514"),
+}
+
+_USE_OPUS = os.environ.get("USE_OPUS_FOR_CREATIVE", "true").lower() in ("true", "1", "yes")
+
+
+def _resolve_model(tier: Optional[str]) -> Optional[str]:
+    """Resolve a model tier name to a full model ID.
+
+    Returns None if the tier is unrecognised or Opus is disabled, in which
+    case the caller should fall back to the client's default model.
+    """
+    if not tier:
+        return None
+    if tier == "opus" and not _USE_OPUS:
+        return None  # fall back to default Sonnet
+    return _MODEL_TIERS.get(tier)
+
+
+class _ModelOverrideLLM:
+    """Thin proxy that injects a model override into all LLM generate calls.
+
+    This allows the orchestrator to route creative agents to Opus without
+    changing any executor code — every executor calls context.llm_client.generate()
+    and this wrapper transparently adds the model= kwarg.
+    """
+
+    def __init__(self, client: Any, model: str):
+        self._client = client
+        self._model = model
+
+    async def generate(self, *args: Any, **kwargs: Any) -> Any:
+        if "model" not in kwargs:
+            kwargs["model"] = self._model
+        return await self._client.generate(*args, **kwargs)
+
+    async def generate_structured(self, *args: Any, **kwargs: Any) -> Any:
+        if "model" not in kwargs:
+            kwargs["model"] = self._model
+        return await self._client.generate_structured(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
 
 
 @dataclass
@@ -273,12 +327,20 @@ class Orchestrator:
         # Gather inputs
         inputs = self.gather_inputs(project, agent_id)
 
+        # Wrap LLM client with model override if the agent has a preferred model
+        llm = self.llm_client
+        if agent_def.preferred_model and self.llm_client is not None:
+            resolved = _resolve_model(agent_def.preferred_model)
+            if resolved:
+                llm = _ModelOverrideLLM(self.llm_client, resolved)
+                logger.info("Agent %s using model: %s", agent_id, resolved)
+
         # Create execution context
         context = ExecutionContext(
             project=project,
             inputs=inputs,
             agent_def=agent_def,
-            llm_client=self.llm_client
+            llm_client=llm,
         )
 
         try:

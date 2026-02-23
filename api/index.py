@@ -403,10 +403,19 @@ async def llm_status(auth: bool = Depends(require_auth)):
             "has_env_var": has_key,
             "message": "No ANTHROPIC_API_KEY configured. Running in demo mode with placeholder responses." if not has_key else "API key found but client initialization failed."
         }
+    from core.orchestrator import _MODEL_TIERS, _USE_OPUS
+    opus_agents = [
+        aid for aid, adef in AGENT_REGISTRY.items()
+        if adef.preferred_model == "opus"
+    ]
     return {
         "enabled": True,
         "model": client.model,
+        "opus_model": _MODEL_TIERS.get("opus", "N/A"),
+        "opus_enabled": _USE_OPUS,
+        "opus_agents": opus_agents,
         "message": "Claude API configured and ready"
+            + (f" — Opus enabled for {len(opus_agents)} creative agents" if _USE_OPUS else " — all agents using Sonnet (USE_OPUS_FOR_CREATIVE=false)"),
     }
 
 

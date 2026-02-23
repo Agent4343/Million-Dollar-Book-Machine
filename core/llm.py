@@ -63,7 +63,8 @@ class ClaudeLLMClient:
         response_format: Optional[str] = None,
         system: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None  # Allow per-call override
+        max_tokens: Optional[int] = None,  # Allow per-call override
+        model: Optional[str] = None,  # Allow per-call model override
     ) -> Any:
         """
         Generate content using Claude.
@@ -74,6 +75,7 @@ class ClaudeLLMClient:
             system: Optional system prompt
             temperature: Creativity level (0-1)
             max_tokens: Override default max_tokens for this call
+            model: Override default model for this call (e.g. use Opus for creative tasks)
 
         Returns:
             Generated content (dict if JSON, str otherwise)
@@ -88,6 +90,7 @@ class ClaudeLLMClient:
         )
 
         tokens = max_tokens or self.max_tokens
+        use_model = model or self.model
 
         # Retry loop for transient API errors (429, 529, etc.).
         last_exc: Optional[Exception] = None
@@ -97,7 +100,7 @@ class ClaudeLLMClient:
                 # block the event loop (critical for background jobs + API polling).
                 response = await asyncio.to_thread(
                     self.client.messages.create,
-                    model=self.model,
+                    model=use_model,
                     max_tokens=tokens,
                     system=system_prompt,
                     messages=messages,
@@ -287,7 +290,8 @@ Content to repair:
         self,
         prompt: str,
         schema: dict,
-        system: Optional[str] = None
+        system: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> dict:
         """
         Generate structured output matching a schema.
@@ -296,6 +300,7 @@ Content to repair:
             prompt: The prompt
             schema: JSON schema for expected output
             system: Optional system prompt
+            model: Override default model for this call
 
         Returns:
             Structured dict matching schema
@@ -310,7 +315,8 @@ Respond with valid JSON matching this schema exactly."""
         return await self.generate(
             prompt=enhanced_prompt,
             response_format="json",
-            system=system
+            system=system,
+            model=model,
         )
 
 

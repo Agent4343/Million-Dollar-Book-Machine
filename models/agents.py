@@ -40,6 +40,7 @@ class AgentDefinition:
     dependencies: List[str] = field(default_factory=list)  # Agent IDs that must complete first
     prompts: Dict[str, str] = field(default_factory=dict)  # LLM prompts for this agent
     retry_limit: int = 3
+    preferred_model: Optional[str] = None  # Model tier: "opus" for creative, None = default (sonnet)
 
 
 # =============================================================================
@@ -131,7 +132,8 @@ WORLD_RULES = AgentDefinition(
     outputs=["physical_rules", "social_rules", "power_rules", "world_bible", "constraint_list"],
     gate_criteria="Constraints actively enforce story tension",
     fail_condition="Rules break plot or remove tension",
-    dependencies=["story_question"]
+    dependencies=["story_question"],
+    preferred_model="opus",
 )
 
 CHARACTER_ARCHITECTURE = AgentDefinition(
@@ -148,7 +150,8 @@ CHARACTER_ARCHITECTURE = AgentDefinition(
     ],
     gate_criteria="Every character pressures the theme",
     fail_condition="Passive protagonist or purposeless characters",
-    dependencies=["world_rules"]
+    dependencies=["world_rules"],
+    preferred_model="opus",
 )
 
 RELATIONSHIP_DYNAMICS = AgentDefinition(
@@ -161,7 +164,8 @@ RELATIONSHIP_DYNAMICS = AgentDefinition(
     outputs=["conflict_web", "power_shifts", "dependency_arcs", "relationship_matrix"],
     gate_criteria="Relationships evolve meaningfully through story",
     fail_condition="Static interactions that don't change",
-    dependencies=["character_architecture"]
+    dependencies=["character_architecture"],
+    preferred_model="opus",
 )
 
 
@@ -233,7 +237,8 @@ VOICE_SPECIFICATION = AgentDefinition(
     ],
     gate_criteria="Style test passages pass consistency check",
     fail_condition="Voice drift or inconsistent tone",
-    dependencies=["chapter_blueprint"]
+    dependencies=["chapter_blueprint"],
+    preferred_model="opus",
 )
 
 
@@ -263,7 +268,8 @@ DRAFT_GENERATION = AgentDefinition(
     ],
     gate_criteria="Draft follows outline and voice spec",
     fail_condition="Off-outline drift or voice inconsistency",
-    dependencies=["voice_specification"]
+    dependencies=["voice_specification"],
+    preferred_model="opus",
 )
 
 
@@ -361,7 +367,8 @@ STRUCTURAL_REWRITE = AgentDefinition(
     outputs=["revised_chapters", "revision_log", "resolved_flags"],
     gate_criteria="All flagged issues resolved",
     fail_condition="New inconsistencies introduced",
-    dependencies=["transformative_verification"]
+    dependencies=["transformative_verification"],
+    preferred_model="opus",
 )
 
 POST_REWRITE_SCAN = AgentDefinition(
@@ -392,7 +399,8 @@ LINE_EDIT = AgentDefinition(
     outputs=["edited_chapters", "grammar_fixes", "rhythm_improvements", "edit_report"],
     gate_criteria="Editorial standards met",
     fail_condition="Mechanical errors remain",
-    dependencies=["post_rewrite_scan"]
+    dependencies=["post_rewrite_scan"],
+    preferred_model="opus",
 )
 
 BETA_SIMULATION = AgentDefinition(
@@ -471,7 +479,8 @@ PUBLISHING_PACKAGE = AgentDefinition(
     outputs=["blurb", "synopsis", "metadata", "keywords", "series_hooks", "author_bio"],
     gate_criteria="Platform-ready package complete",
     fail_condition="Weak positioning or missing elements",
-    dependencies=["final_validation", "production_readiness"]
+    dependencies=["final_validation", "production_readiness"],
+    preferred_model="opus",
 )
 
 KDP_READINESS = AgentDefinition(
@@ -510,7 +519,8 @@ MANUSCRIPT_FIXUP = AgentDefinition(
     outputs=["edited_chapters", "fixes_applied", "fix_log"],
     gate_criteria="Fixes applied successfully",
     fail_condition="Unable to apply critical fixes",
-    dependencies=["final_proof"]
+    dependencies=["final_proof"],
+    preferred_model="opus",
 )
 
 IP_CLEARANCE = AgentDefinition(
