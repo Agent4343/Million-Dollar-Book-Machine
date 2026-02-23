@@ -508,11 +508,7 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
     originality = context.inputs.get("originality_scan", {})
 
     if llm and chapters:
-        limit = min(len(chapters), _limit_for_job(context, "max_rewrite_chapters", 5))
-
-        # ── Build a map of specific issues per chapter from the continuity audit ──
-        # This lets us prioritize chapters with known problems and give the
-        # rewriter targeted instructions instead of a generic "improve" directive.
+        # ── Build a map of specific issues per chapter from upstream audits ──
         chapter_issues: Dict[int, List[str]] = {}
         if isinstance(continuity, dict):
             for check_key in ("timeline_check", "character_logic_check", "world_rule_check"):
@@ -527,15 +523,27 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
                                 chapter_issues.setdefault(ch_num, []).append(
                                     f"[{issue.get('severity', 'major')}] {desc}" + (f" → Fix: {fix}" if fix else "")
                                 )
+        # Also pull issues from emotional validation
+        if isinstance(emotional, dict):
+            arc_notes = (emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "")
+            if arc_notes and not (emotional.get("arc_fulfillment_check", {}) or {}).get("protagonist_arc_complete", True):
+                # The arc is incomplete — flag all chapters for potential arc work,
+                # but only actually rewrite chapters in the second half where the
+                # arc should be resolving.
+                total = len(chapters)
+                for i in range(total // 2, total):
+                    ch = chapters[i] if i < len(chapters) else None
+                    if isinstance(ch, dict):
+                        num = _chapter_number(ch)
+                        chapter_issues.setdefault(num, []).append(
+                            f"[major] Arc incomplete: {arc_notes}"
+                        )
 
-        # Sort chapters: those with known issues first, then by chapter order.
+        # Only LLM-rewrite chapters that have known issues. Chapters without
+        # issues pass through unchanged — this avoids wasting LLM calls on
+        # chapters that are already fine and prevents introducing new errors.
         chapters_by_num = {_chapter_number(ch): ch for ch in chapters if isinstance(ch, dict)}
-        issue_chapter_nums = [n for n in sorted(chapter_issues.keys()) if n in chapters_by_num]
-        other_chapter_nums = [n for n in sorted(chapters_by_num.keys()) if n not in chapter_issues]
-        ordered_nums = issue_chapter_nums + other_chapter_nums
-
-        # Apply the limit — issue-chapters always get priority.
-        rewrite_nums = ordered_nums[:limit]
+        rewrite_nums = [n for n in sorted(chapter_issues.keys()) if n in chapters_by_num]
 
         revised: List[Dict[str, Any]] = []
         revision_log: List[Dict[str, Any]] = []
@@ -654,7 +662,7 @@ async def execute_line_edit(context: ExecutionContext) -> Dict[str, Any]:
 
     llm = context.llm_client
     if llm and isinstance(revised_chapters, list) and revised_chapters:
-        limit = min(len(revised_chapters), _limit_for_job(context, "max_line_edit_chapters", 5))
+        limit = min(len(revised_chapters), _limit_for_job(context, "max_line_edit_chapters", 50))
         edited: List[Dict[str, Any]] = []
         major = 0
         minor = 0
@@ -1438,6 +1446,115 @@ CHAPTER {_chapter_number(ch)} ({_chapter_title(ch)}) - Chunk {idx}/{len(chunks)}
     }
 
 
+async def execute_manuscript_fixup(context: ExecutionContext) -> Dict[str, Any]:
+    """Final pass: fix issues identified by final_proof in the actual chapter text.
+
+    This agent runs after final_proof and before KDP packaging. It reads the
+    proof findings, applies targeted fixes to affected chapters, and produces
+    the final clean manuscript.  This closes the gap where earlier agents
+    identified issues but nothing downstream actually fixed them.
+    """
+    chapters = _best_available_chapters(context)
+    llm = context.llm_client
+    proof_output = context.inputs.get("final_proof", {})
+
+    if not llm or not chapters:
+        return {
+            "final_chapters": chapters.copy() if chapters else [],
+            "fixes_applied": 0,
+            "fix_log": [],
+        }
+
+    # Gather per-chapter issues from final_proof
+    per_chapter_issues: Dict[int, List[Dict[str, Any]]] = {}
+    if isinstance(proof_output, dict):
+        for entry in proof_output.get("per_chapter_issues", []):
+            if isinstance(entry, dict):
+                ch_num = entry.get("chapter")
+                issues = entry.get("issues", [])
+                if isinstance(ch_num, int) and isinstance(issues, list) and issues:
+                    per_chapter_issues[ch_num] = issues
+
+    # Also gather consistency findings as global context
+    consistency = proof_output.get("consistency_findings", []) if isinstance(proof_output, dict) else []
+
+    chapters_by_num = {_chapter_number(ch): ch for ch in chapters if isinstance(ch, dict)}
+    final_chapters: List[Dict[str, Any]] = []
+    fix_log: List[Dict[str, Any]] = []
+    fixes_applied = 0
+
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        num = _chapter_number(ch)
+        issues = per_chapter_issues.get(num, [])
+
+        # Only send chapters with actual proof issues to the LLM
+        if not issues:
+            final_chapters.append(ch)
+            continue
+
+        issues_text = "\n".join(
+            f"- [{i.get('severity', 'minor')}] {i.get('description', '')} → {i.get('suggested_fix', '')}"
+            for i in issues[:15]
+            if isinstance(i, dict)
+        )
+        consistency_text = "\n".join(f"- {c}" for c in consistency[:5]) if consistency else "(None)"
+
+        try:
+            prompt = f"""You are performing the FINAL edit pass on a chapter before publication. Fix the specific issues listed below while preserving the chapter's voice, style, and plot.
+
+## ISSUES TO FIX IN THIS CHAPTER:
+{issues_text}
+
+## CROSS-CHAPTER CONSISTENCY NOTES:
+{consistency_text}
+
+## RULES:
+- Fix ONLY the identified issues. Do not rewrite content that has no issues.
+- Preserve the chapter's tone, voice, and style.
+- Maintain exact plot events and character actions.
+- If an issue mentions a name/relationship contradiction, ensure consistency with earlier chapters.
+
+Return ONLY valid JSON:
+{{
+  "text": "...",
+  "summary": "...",
+  "fixes_applied": ["list of specific fixes made"]
+}}
+
+Chapter to fix:
+TITLE: {_chapter_title(ch)}
+TEXT:
+{_chapter_text(ch)}
+"""
+            out = await llm.generate(prompt, response_format="json", temperature=0.2)
+            new_text = out.get("text") or _chapter_text(ch)
+            applied = out.get("fixes_applied", [])
+            final_chapters.append({
+                "number": num,
+                "title": _chapter_title(ch),
+                "text": new_text,
+                "summary": out.get("summary", _chapter_summary(ch) or "Fixed."),
+                "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
+            })
+            fix_log.append({"chapter": num, "fixes": applied if isinstance(applied, list) else [str(applied)]})
+            fixes_applied += len(applied) if isinstance(applied, list) else 1
+        except Exception as exc:
+            logger.warning("manuscript_fixup: Chapter %s fix failed, keeping original: %s", num, exc)
+            final_chapters.append(ch)
+            fix_log.append({"chapter": num, "fixes": [f"Fix failed: {exc}"]})
+
+    # Sort back into chapter order
+    final_chapters.sort(key=lambda c: c.get("number", 0))
+
+    return {
+        "edited_chapters": final_chapters,
+        "fixes_applied": fixes_applied,
+        "fix_log": fix_log,
+    }
+
+
 # =============================================================================
 # REGISTRATION
 # =============================================================================
@@ -1457,6 +1574,7 @@ VALIDATION_EXECUTORS = {
     "production_readiness": execute_production_readiness,
     "publishing_package": execute_publishing_package,
     "final_proof": execute_final_proof,
+    "manuscript_fixup": execute_manuscript_fixup,
     "kdp_readiness": execute_kdp_readiness,
     "ip_clearance": execute_ip_clearance,
 }
