@@ -1234,6 +1234,86 @@ async def export_epub(project_id: str, auth: bool = Depends(require_auth)):
         raise HTTPException(status_code=500, detail=f"Failed to generate EPUB: {str(e)}")
 
 
+@app.post("/api/projects/{project_id}/upload-cover")
+async def upload_cover(project_id: str, request: Request, auth: bool = Depends(require_auth)):
+    """Upload a cover image for the book (KDP requires a cover).
+
+    Accepts JPEG, PNG, or TIFF images via multipart form upload.
+    KDP recommendation: 2560x1600 pixels minimum, RGB colour space.
+
+    The image is stored on disk and its path saved in project.user_constraints.cover_image_path.
+    """
+    import os
+
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    content_type = request.headers.get("content-type", "")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="No file content received")
+
+    # Accept multipart form or raw binary upload
+    file_bytes: Optional[bytes] = None
+    file_ext = "jpg"
+
+    if "multipart" in content_type:
+        from fastapi import UploadFile
+        form = await request.form()
+        upload = form.get("file") or form.get("cover")
+        if upload is None:
+            raise HTTPException(status_code=400, detail="Missing 'file' or 'cover' field in form")
+        if hasattr(upload, "read"):
+            file_bytes = await upload.read()
+            fname = getattr(upload, "filename", "") or ""
+            if "." in fname:
+                file_ext = fname.rsplit(".", 1)[-1].lower()
+        else:
+            raise HTTPException(status_code=400, detail="Upload must be a file")
+    else:
+        # Raw binary upload — use Content-Type to guess extension
+        file_bytes = body
+        if "png" in content_type:
+            file_ext = "png"
+        elif "tiff" in content_type or "tif" in content_type:
+            file_ext = "tiff"
+
+    if not file_bytes or len(file_bytes) < 100:
+        raise HTTPException(status_code=400, detail="File too small or empty")
+    if len(file_bytes) > 20 * 1024 * 1024:  # 20 MB limit
+        raise HTTPException(status_code=400, detail="File too large (max 20 MB)")
+
+    # Validate extension
+    if file_ext not in ("jpg", "jpeg", "png", "tiff", "tif", "webp"):
+        raise HTTPException(status_code=400, detail=f"Unsupported image format: {file_ext}")
+
+    # Store the cover alongside the project data
+    storage_base = os.environ.get("COVER_STORAGE_DIR") or os.environ.get("PROJECT_STORAGE_DIR")
+    if not storage_base:
+        storage_base = "/data/covers" if os.path.isdir("/data") else "./data/covers"
+    os.makedirs(storage_base, exist_ok=True)
+
+    cover_path = os.path.join(storage_base, f"{project_id}_cover.{file_ext}")
+    with open(cover_path, "wb") as f:
+        f.write(file_bytes)
+
+    # Save the path in project constraints so export picks it up
+    project.user_constraints["cover_image_path"] = cover_path
+    project.update_timestamp()
+    pstore = get_project_store()
+    pstore.save_raw(project.project_id, orch.export_project_state(project))
+
+    return {
+        "success": True,
+        "cover_path": cover_path,
+        "size_bytes": len(file_bytes),
+        "format": file_ext,
+        "message": f"Cover image saved. It will be embedded in EPUB exports.",
+    }
+
+
 @app.get("/api/projects/{project_id}/stats")
 async def get_project_stats(project_id: str, auth: bool = Depends(require_auth)):
     """Get project statistics including word count and chapter status."""

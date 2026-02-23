@@ -34,6 +34,8 @@ def _front_matter_defaults(project) -> Dict[str, Any]:
         "disclaimer_text": c.get("disclaimer_text") or "This is a work of fiction. Names, characters, businesses, places, events, and incidents are either the products of the author’s imagination or used in a fictitious manner.",
         "isbn": c.get("isbn") or "",
         "rights_statement": c.get("rights_statement") or "All rights reserved.",
+        "dedication": (c.get("dedication") or "").strip(),
+        "cover_image_path": c.get("cover_image_path") or "",
     }
 
 
@@ -45,12 +47,27 @@ def _supplemental_matter(project) -> Dict[str, Any]:
     if not isinstance(also_by, list):
         also_by = []
     also_by = [str(t).strip() for t in also_by if str(t).strip()]
+
+    # Pull auto-generated content from publishing_package agent output
+    # if user hasn't provided their own.  This closes the gap where the
+    # pipeline generates a bio/blurb but it never reaches the export.
+    agent_bio = ""
+    agent_blurb = ""
+    for layer in project.layers.values():
+        pp_state = layer.agents.get("publishing_package")
+        if pp_state and pp_state.current_output:
+            pp = pp_state.current_output.content or {}
+            agent_bio = (pp.get("author_bio") or "").strip()
+            agent_blurb = (pp.get("blurb") or "").strip()
+            break
+
     return {
         "also_by": also_by,
         "acknowledgements": (c.get("acknowledgements") or "").strip(),
-        "about_author": (c.get("about_author") or c.get("about_author_text") or "").strip(),
+        "about_author": (c.get("about_author") or c.get("about_author_text") or agent_bio).strip(),
         "newsletter_cta": (c.get("newsletter_cta") or "").strip(),
         "newsletter_url": (c.get("newsletter_url") or "").strip(),
+        "blurb": (c.get("blurb") or agent_blurb).strip(),
     }
 
 
@@ -142,6 +159,15 @@ def generate_docx(project, include_outline: bool = False, chapters_override: Opt
         doc.add_paragraph(fm.get("disclaimer_text", ""))
 
     doc.add_page_break()
+
+    # === Dedication (optional) ===
+    if fm.get("dedication"):
+        for _ in range(6):
+            doc.add_paragraph()
+        ded_para = doc.add_paragraph()
+        ded_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        ded_para.add_run(fm["dedication"]).italic = True
+        doc.add_page_break()
 
     sup = _supplemental_matter(project)
 
@@ -343,13 +369,160 @@ def generate_docx(project, include_outline: bool = False, chapters_override: Opt
     return buffer.getvalue()
 
 
+def _load_cover_image(path: str) -> Optional[bytes]:
+    """Load a cover image from disk. Returns None if not found."""
+    import os
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _cover_media_type(path: str) -> str:
+    """Guess media type from file extension."""
+    lower = path.lower()
+    if lower.endswith(".png"):
+        return "image/png"
+    if lower.endswith(".gif"):
+        return "image/gif"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    return "image/jpeg"  # default for .jpg/.jpeg/.tiff
+
+
+# Kindle-optimised CSS — used by all XHTML pages in the EPUB.
+_KINDLE_CSS = '''\
+@page { margin: 0; }
+body {
+    font-family: Georgia, "Times New Roman", serif;
+    margin: 1em 1.2em;
+    line-height: 1.65;
+    orphans: 2;
+    widows: 2;
+}
+h1 {
+    text-align: center;
+    margin-top: 2em;
+    margin-bottom: 1.5em;
+    font-size: 1.6em;
+    font-weight: bold;
+    page-break-before: always;
+}
+h1.title-page {
+    font-size: 2.5em;
+    margin-top: 35%;
+    page-break-before: auto;
+}
+p {
+    text-indent: 1.5em;
+    margin: 0.2em 0;
+}
+p.first, p.no-indent {
+    text-indent: 0;
+}
+p.scene-break {
+    text-align: center;
+    text-indent: 0;
+    margin: 1.5em 0;
+    font-size: 1.2em;
+    letter-spacing: 0.3em;
+}
+p.center {
+    text-align: center;
+    text-indent: 0;
+}
+p.dedication {
+    text-align: center;
+    text-indent: 0;
+    font-style: italic;
+    margin-top: 35%;
+}
+div.copyright {
+    margin-top: 20%;
+    text-align: center;
+    font-size: 0.9em;
+    line-height: 1.8;
+}
+ul.also-by {
+    list-style: none;
+    padding: 0;
+    text-align: center;
+}
+ul.also-by li {
+    margin: 0.4em 0;
+    font-style: italic;
+}
+span.dropcap {
+    float: left;
+    font-size: 3.2em;
+    line-height: 0.8;
+    padding-right: 0.08em;
+    margin-top: 0.05em;
+    font-weight: bold;
+}
+'''
+
+
+def _make_xhtml(title: str, body: str, css_file: str = "style/kindle.css") -> str:
+    """Wrap body content in an HTML page with CSS link.
+
+    ebooklib handles the EPUB-specific XML serialisation itself, so we
+    provide simple HTML here (no xmlns or XML prolog) which its internal
+    lxml parser can consume without issues.
+    """
+    return (
+        '<html>\n'
+        f'<head><title>{html.escape(title)}</title>'
+        f'<link rel="stylesheet" type="text/css" href="{css_file}"/>'
+        '</head>\n'
+        f'<body>\n{body}\n</body>\n</html>'
+    )
+
+
+def _text_to_html_paragraphs(text: str, first_para_dropcap: bool = True) -> str:
+    """Convert plain text to styled HTML paragraphs with scene-break handling."""
+    if not text:
+        return ""
+    paragraphs = text.split('\n\n')
+    parts: List[str] = []
+    is_first_body_para = True
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        if para in ('* * *', '---', '***', '~ ~ ~', '###'):
+            parts.append('<p class="scene-break">* * *</p>')
+            is_first_body_para = True  # next para after break gets no indent
+            continue
+        escaped = html.escape(para)
+        if is_first_body_para:
+            if first_para_dropcap and len(escaped) > 1 and escaped[0].isalpha():
+                escaped = f'<span class="dropcap">{escaped[0]}</span>{escaped[1:]}'
+            parts.append(f'<p class="first">{escaped}</p>')
+            is_first_body_para = False
+        else:
+            parts.append(f'<p>{escaped}</p>')
+    return '\n'.join(parts)
+
+
 def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """
-    Generate an EPUB file from the project manuscript.
-    Compatible with Kindle and other eReaders.
+    Generate a publication-quality EPUB file from the project manuscript.
+    Compatible with Kindle Direct Publishing and other eReaders.
+
+    Features:
+    - Cover image embedding (KDP requirement)
+    - Proper front matter (title, copyright, dedication, also-by)
+    - Kindle-optimised CSS (drop caps, scene breaks, orphan/widow control)
+    - Auto-populated back matter from publishing_package agent output
+    - NCX + Nav for full device compatibility
 
     Args:
         project: BookProject instance
+        chapters_override: Optional list of chapter dicts to use instead of project.manuscript
 
     Returns:
         bytes: The .epub file content
@@ -357,206 +530,175 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     from ebooklib import epub
 
     book = epub.EpubBook()
+    fm = _front_matter_defaults(project)
+    sup = _supplemental_matter(project)
+    genre = project.user_constraints.get('genre', 'Fiction').replace('_', ' ').title()
 
-    # Set metadata
+    # --- Metadata ---
     book.set_identifier(f'million-dollar-book-{project.project_id}')
     book.set_title(project.title)
     book.set_language('en')
-
-    # Add author (placeholder - could be made configurable)
-    fm = _front_matter_defaults(project)
     book.add_author(fm["author_name"])
-
-    # Add description
     if project.user_constraints.get('description'):
         book.add_metadata('DC', 'description', project.user_constraints['description'])
-
-    # Genre as subject
-    genre = project.user_constraints.get('genre', 'Fiction').replace('_', ' ').title()
+    elif sup.get("blurb"):
+        book.add_metadata('DC', 'description', sup["blurb"])
     book.add_metadata('DC', 'subject', genre)
+    book.add_metadata('DC', 'date', str(fm["copyright_year"]))
+    if fm.get("publisher_name"):
+        book.add_metadata('DC', 'publisher', fm["publisher_name"])
 
-    # Create chapters
-    chapters = _get_best_chapters(project, chapters_override=chapters_override)
-    epub_chapters = []
-    sup = _supplemental_matter(project)
+    # --- CSS ---
+    kindle_css = epub.EpubItem(
+        uid="style_kindle",
+        file_name="style/kindle.css",
+        media_type="text/css",
+        content=_KINDLE_CSS,
+    )
+    book.add_item(kindle_css)
+
+    # --- Cover Image ---
+    cover_data = _load_cover_image(fm.get("cover_image_path", ""))
+    if cover_data:
+        cover_path = fm["cover_image_path"]
+        media_type = _cover_media_type(cover_path)
+        ext = cover_path.rsplit(".", 1)[-1].lower() if "." in cover_path else "jpg"
+        cover_filename = f"images/cover.{ext}"
+        cover_image = epub.EpubItem(
+            uid="cover-image",
+            file_name=cover_filename,
+            media_type=media_type,
+            content=cover_data,
+        )
+        book.add_item(cover_image)
+        book.set_cover(cover_filename, cover_data)
+
+        # Cover page XHTML
+        cover_page = epub.EpubHtml(title="Cover", file_name="cover.xhtml", lang="en")
+        cover_page.content = _make_xhtml("Cover",
+            f'<div style="text-align:center;">'
+            f'<img src="{cover_filename}" alt="Cover" style="max-width:100%; max-height:100%;"/>'
+            f'</div>')
+        book.add_item(cover_page)
+
+    # --- Spine items (ordered reading list) ---
+    epub_chapters: List[Any] = []
 
     # Title page
-    title_page = epub.EpubHtml(title='Title Page', file_name='title.xhtml', lang='en')
-    title_page.content = f'''
-    <html>
-    <head><title>{html.escape(project.title)}</title></head>
-    <body>
-        <div style="text-align: center; margin-top: 30%;">
-            <h1 style="font-size: 2.5em;">{html.escape(project.title)}</h1>
-            <p style="margin-top: 2em; font-style: italic;">{html.escape(genre)}</p>
-        </div>
-    </body>
-    </html>
-    '''
+    title_body = (
+        f'<h1 class="title-page">{html.escape(project.title)}</h1>\n'
+        f'<p class="center" style="margin-top:2em;font-style:italic;">{html.escape(genre)}</p>\n'
+        f'<p class="center" style="margin-top:1em;">{html.escape(fm["author_name"])}</p>'
+    )
+    title_page = epub.EpubHtml(title="Title Page", file_name="title.xhtml", lang="en")
+    title_page.content = _make_xhtml(project.title, title_body)
     book.add_item(title_page)
     epub_chapters.append(title_page)
 
-    # Copyright page (KDP recommended)
-    copyright_page = epub.EpubHtml(title='Copyright', file_name='copyright.xhtml', lang='en')
-    disclaimer_html = ""
+    # Copyright page
+    cr_parts = [
+        f'<p>Copyright &copy; {fm["copyright_year"]} {html.escape(fm["author_name"])}</p>',
+        f'<p>{html.escape(fm["rights_statement"])}</p>',
+    ]
+    if fm.get("publisher_name"):
+        cr_parts.append(f'<p>Published by {html.escape(fm["publisher_name"])}</p>')
+    if fm.get("isbn"):
+        cr_parts.append(f'<p>ISBN: {html.escape(str(fm["isbn"]))}</p>')
     if fm.get("include_disclaimer"):
-        disclaimer_html = f"<p><strong>Disclaimer:</strong> {html.escape(fm.get('disclaimer_text', ''))}</p>"
-    publisher_html = f"<p>Publisher: {html.escape(fm.get('publisher_name', ''))}</p>" if fm.get("publisher_name") else ""
-    isbn_html = f"<p>ISBN: {html.escape(str(fm.get('isbn', '')))}</p>" if fm.get("isbn") else ""
-    copyright_page.content = f"""
-    <html>
-    <head><title>Copyright</title></head>
-    <body>
-        <h1>Copyright</h1>
-        <p>© {fm['copyright_year']} {html.escape(fm['author_name'])}. {html.escape(fm['rights_statement'])}</p>
-        {publisher_html}
-        {isbn_html}
-        {disclaimer_html}
-    </body>
-    </html>
-    """
+        cr_parts.append(f'<p style="margin-top:1.5em;font-size:0.85em;">{html.escape(fm["disclaimer_text"])}</p>')
+    copyright_page = epub.EpubHtml(title="Copyright", file_name="copyright.xhtml", lang="en")
+    copyright_page.content = _make_xhtml("Copyright", f'<div class="copyright">{"".join(cr_parts)}</div>')
     book.add_item(copyright_page)
     epub_chapters.append(copyright_page)
 
+    # Dedication (optional)
+    if fm.get("dedication"):
+        ded_page = epub.EpubHtml(title="Dedication", file_name="dedication.xhtml", lang="en")
+        ded_page.content = _make_xhtml("Dedication",
+            f'<p class="dedication">{html.escape(fm["dedication"])}</p>')
+        book.add_item(ded_page)
+        epub_chapters.append(ded_page)
+
     # Also By (optional)
     if sup["also_by"]:
-        also_by_page = epub.EpubHtml(title="Also By", file_name="also_by.xhtml", lang="en")
-        items = "".join(f"<li>{html.escape(t)}</li>" for t in sup["also_by"])
-        also_by_page.content = f"""
-        <html>
-        <head><title>Also By</title></head>
-        <body>
-            <h1>Also By</h1>
-            <ul>{items}</ul>
-        </body>
-        </html>
-        """
-        book.add_item(also_by_page)
-        epub_chapters.append(also_by_page)
+        items_html = "".join(f"<li>{html.escape(t)}</li>" for t in sup["also_by"])
+        also_page = epub.EpubHtml(title="Also By", file_name="also_by.xhtml", lang="en")
+        also_page.content = _make_xhtml("Also By",
+            f'<h1>Also by {html.escape(fm["author_name"])}</h1>\n<ul class="also-by">{items_html}</ul>')
+        book.add_item(also_page)
+        epub_chapters.append(also_page)
 
+    # --- Chapters ---
+    chapters = _get_best_chapters(project, chapters_override=chapters_override)
     if chapters:
         for chapter in sorted(chapters, key=lambda x: x.get('number', 0)):
             ch_num = chapter.get('number', '?')
             ch_title = chapter.get('title', f'Chapter {ch_num}')
-
-            # Create chapter
             ch = epub.EpubHtml(
                 title=f'Chapter {ch_num}: {ch_title}',
                 file_name=f'chapter_{ch_num}.xhtml',
-                lang='en'
+                lang='en',
             )
-
-            # Format chapter content
             text = chapter.get('text', '')
+            heading = f'<h1>Chapter {ch_num}<br/><span style="font-size:0.7em;font-weight:normal;">{html.escape(ch_title)}</span></h1>\n'
             if text:
-                # Convert text to HTML paragraphs
-                paragraphs = text.split('\n\n')
-                html_content = f'<h1>Chapter {ch_num}: {html.escape(ch_title)}</h1>\n'
-
-                for para in paragraphs:
-                    para = para.strip()
-                    if para:
-                        # Handle scene breaks
-                        if para in ['* * *', '---', '***']:
-                            html_content += '<p style="text-align: center; margin: 2em 0;">* * *</p>\n'
-                        else:
-                            # Escape HTML entities
-                            para = para.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                            html_content += f'<p style="text-indent: 1.5em; margin: 0.5em 0;">{para}</p>\n'
+                body_html = heading + _text_to_html_paragraphs(text, first_para_dropcap=True)
             else:
-                html_content = f'''
-                <h1>Chapter {ch_num}: {html.escape(ch_title)}</h1>
-                <p><em>Chapter content not yet written.</em></p>
-                '''
-
-            ch.content = f'''
-            <html>
-            <head><title>Chapter {ch_num}</title></head>
-            <body>
-                {html_content}
-            </body>
-            </html>
-            '''
-
+                body_html = heading + '<p class="first"><em>Chapter content not yet written.</em></p>'
+            ch.content = _make_xhtml(f"Chapter {ch_num}", body_html)
             book.add_item(ch)
             epub_chapters.append(ch)
     else:
-        # No chapters yet
-        empty_ch = epub.EpubHtml(title='No Content', file_name='empty.xhtml', lang='en')
-        empty_ch.content = '''
-        <html>
-        <head><title>No Content</title></head>
-        <body>
-            <h1>No Chapters Written</h1>
-            <p>Use the Chapter Writer to generate content from your outline.</p>
-        </body>
-        </html>
-        '''
+        empty_ch = epub.EpubHtml(title="No Content", file_name="empty.xhtml", lang="en")
+        empty_ch.content = _make_xhtml("No Content",
+            '<h1>No Chapters Written</h1><p class="first">Use the pipeline to generate your manuscript.</p>')
         book.add_item(empty_ch)
         epub_chapters.append(empty_ch)
 
-    # Back matter (optional)
+    # --- Back matter ---
     if sup.get("acknowledgements"):
         acks = epub.EpubHtml(title="Acknowledgements", file_name="acknowledgements.xhtml", lang="en")
-        txt = sup["acknowledgements"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        acks.content = f"<html><head><title>Acknowledgements</title></head><body><h1>Acknowledgements</h1><p>{txt}</p></body></html>"
+        acks.content = _make_xhtml("Acknowledgements",
+            f'<h1>Acknowledgements</h1>\n<p class="first">{html.escape(sup["acknowledgements"])}</p>')
         book.add_item(acks)
         epub_chapters.append(acks)
 
     if sup.get("newsletter_cta") or sup.get("newsletter_url"):
+        parts: List[str] = []
+        if sup.get("newsletter_cta"):
+            parts.append(f'<p class="center">{html.escape(sup["newsletter_cta"])}</p>')
+        if sup.get("newsletter_url"):
+            url = html.escape(sup["newsletter_url"])
+            parts.append(f'<p class="center"><a href="{url}">{url}</a></p>')
         news = epub.EpubHtml(title="Stay in Touch", file_name="newsletter.xhtml", lang="en")
-        cta = sup.get("newsletter_cta", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        url = sup.get("newsletter_url", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        parts = []
-        if cta:
-            parts.append(f"<p>{cta}</p>")
-        if url:
-            parts.append(f"<p>{url}</p>")
-        news.content = f"<html><head><title>Stay in Touch</title></head><body><h1>Stay in Touch</h1>{''.join(parts)}</body></html>"
+        news.content = _make_xhtml("Stay in Touch", f'<h1>Stay in Touch</h1>\n{"".join(parts)}')
         book.add_item(news)
         epub_chapters.append(news)
 
     if sup.get("about_author"):
         about = epub.EpubHtml(title="About the Author", file_name="about_author.xhtml", lang="en")
-        txt = sup["about_author"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        about.content = f"<html><head><title>About the Author</title></head><body><h1>About the Author</h1><p>{txt}</p></body></html>"
+        about.content = _make_xhtml("About the Author",
+            f'<h1>About the Author</h1>\n<p class="first">{html.escape(sup["about_author"])}</p>')
         book.add_item(about)
         epub_chapters.append(about)
 
-    # Define Table of Contents
+    # --- Link CSS to every page ---
+    for page in epub_chapters:
+        page.add_item(kindle_css)
+
+    # --- Table of Contents ---
     book.toc = tuple(epub_chapters)
 
-    # Add navigation files
+    # --- Navigation ---
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
 
-    # Define CSS style
-    style = '''
-    body {
-        font-family: Georgia, serif;
-        margin: 1em;
-        line-height: 1.6;
-    }
-    h1 {
-        text-align: center;
-        margin-bottom: 1.5em;
-        font-size: 1.5em;
-    }
-    p {
-        text-indent: 1.5em;
-        margin: 0.5em 0;
-    }
-    '''
-    nav_css = epub.EpubItem(
-        uid="style_nav",
-        file_name="style/nav.css",
-        media_type="text/css",
-        content=style
-    )
-    book.add_item(nav_css)
-
-    # Create spine
-    book.spine = ['nav'] + epub_chapters
+    # --- Spine ---
+    spine_items: List[Any] = ['nav']
+    if cover_data:
+        spine_items.insert(0, 'cover')
+    spine_items.extend(epub_chapters)
+    book.spine = spine_items
 
     # Write to bytes
     buffer = io.BytesIO()

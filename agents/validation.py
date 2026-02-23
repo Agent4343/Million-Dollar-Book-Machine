@@ -993,17 +993,22 @@ Return ONLY valid JSON:
     "audience": "..."
   }},
   "keywords": ["...", "...", "..."],
+  "bisac_categories": [
+    {{"code": "FIC000000", "label": "FICTION / General"}},
+    {{"code": "FIC000000", "label": "FICTION / General"}}
+  ],
   "series_hooks": ["...", "..."],
   "author_bio": "..."
 }}
 
 Requirements:
-- blurb: A compelling 150-word book description for Amazon. Open with a hook, introduce the protagonist and stakes, hint at conflict without spoilers, end with a cliffhanger question.
+- blurb: A compelling 150-word book description for Amazon KDP. Open with a hook, introduce the protagonist and stakes, hint at conflict without spoilers, end with a cliffhanger question. Use short paragraphs (2-3 sentences each).
 - synopsis: A 2-paragraph synopsis for agents/publishers (summary including ending).
-- keywords: 5-7 search-optimized keywords for the book's genre and themes.
+- keywords: Exactly 7 search-optimized keywords for the book's genre and themes (Amazon allows up to 7).
+- bisac_categories: Exactly 2 BISAC subject codes with labels that best fit this book (required for KDP). Use real BISAC codes (e.g. FIC028000 for Science Fiction, FIC027000 for Romance).
 - series_hooks: 2-3 potential sequel hooks or series possibilities.
 - author_bio: A 50-word author bio placeholder appropriate for the genre."""
-        return await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=2000)
+        return await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=2500)
 
     return {
         "blurb": "[Compelling 150-word book description would be generated here]",
@@ -1014,7 +1019,11 @@ Requirements:
             "word_count": word_count,
             "audience": "Adult"
         },
-        "keywords": ["transformation", "journey", "discovery", "contemporary"],
+        "keywords": ["transformation", "journey", "discovery", "contemporary", "literary fiction", "character-driven", "modern"],
+        "bisac_categories": [
+            {"code": "FIC019000", "label": "FICTION / Literary"},
+            {"code": "FIC045000", "label": "FICTION / Family Life / General"}
+        ],
         "series_hooks": ["Potential for sequel", "Expandable world"],
         "author_bio": "[Author bio placeholder]"
     }
