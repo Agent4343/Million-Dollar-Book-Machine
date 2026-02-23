@@ -453,7 +453,52 @@
                         <input type="text" id="projectComps" placeholder="e.g., The Alchemist, Atomic Habits">
                         <label>Themes (comma separated)</label>
                         <input type="text" id="projectThemes" placeholder="e.g., redemption, identity, love">
-                        <button type="submit" class="btn btn-primary">Create Project</button>
+
+                        <details style="margin-top:1rem;border:1px solid #333;border-radius:8px;padding:0.5rem 1rem;">
+                            <summary style="cursor:pointer;font-weight:bold;color:#8e44ad;">Publishing Metadata (for Kindle/KDP)</summary>
+                            <div style="margin-top:0.75rem;">
+                                <div class="grid-2">
+                                    <div>
+                                        <label>Author / Pen Name</label>
+                                        <input type="text" id="projectAuthorName" placeholder="Your author name">
+                                    </div>
+                                    <div>
+                                        <label>Publisher Name</label>
+                                        <input type="text" id="projectPublisher" placeholder="e.g., Self-Published">
+                                    </div>
+                                </div>
+                                <label>Dedication</label>
+                                <input type="text" id="projectDedication" placeholder="e.g., For my family, who always believed.">
+                                <div class="grid-2">
+                                    <div>
+                                        <label>Series Name</label>
+                                        <input type="text" id="projectSeriesName" placeholder="e.g., The Dark Tower">
+                                    </div>
+                                    <div>
+                                        <label>Series Number</label>
+                                        <input type="number" id="projectSeriesNumber" min="1" placeholder="e.g., 1">
+                                    </div>
+                                </div>
+                                <label>About the Author (50-100 words)</label>
+                                <textarea id="projectAboutAuthor" rows="2" placeholder="Brief author bio for the back of the book..."></textarea>
+                                <label>Also By (comma-separated titles)</label>
+                                <input type="text" id="projectAlsoBy" placeholder="e.g., My First Book, My Second Book">
+                                <label>Acknowledgements</label>
+                                <textarea id="projectAcknowledgements" rows="2" placeholder="Optional acknowledgements..."></textarea>
+                                <div class="grid-2">
+                                    <div>
+                                        <label>Newsletter CTA</label>
+                                        <input type="text" id="projectNewsletterCta" placeholder="e.g., Want more? Join my list!">
+                                    </div>
+                                    <div>
+                                        <label>Newsletter URL</label>
+                                        <input type="url" id="projectNewsletterUrl" placeholder="https://...">
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Create Project</button>
                     </form>
                 </div>
             </div>
@@ -525,6 +570,48 @@
                                     <button class="btn btn-secondary btn-small" onclick="exportManuscript()">Manuscript (MD)</button>
                                 </div>
                                 <p id="exportStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></p>
+
+                                <!-- Cover Image Upload -->
+                                <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #333;">
+                                    <label style="font-weight:bold;font-size:0.9rem;">Cover Image (KDP requires a cover)</label>
+                                    <p style="font-size:0.8rem;color:#888;margin:0.25rem 0 0.5rem;">JPEG or PNG, recommended 2560x1600px minimum</p>
+                                    <input type="file" id="coverUpload" accept="image/jpeg,image/png,image/tiff" style="display:none;" onchange="uploadCover(event)">
+                                    <button class="btn btn-secondary btn-small" onclick="document.getElementById('coverUpload').click()">Upload Cover Image</button>
+                                    <span id="coverStatus" style="margin-left:0.5rem;font-size:0.8rem;color:#888;"></span>
+                                </div>
+
+                                <!-- Quick Metadata Editor -->
+                                <details style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #333;">
+                                    <summary style="cursor:pointer;font-weight:bold;font-size:0.9rem;color:#8e44ad;">Edit Publishing Metadata</summary>
+                                    <div style="margin-top:0.5rem;">
+                                        <div class="grid-2">
+                                            <div>
+                                                <label style="font-size:0.85rem;">Author Name</label>
+                                                <input type="text" id="metaAuthorName" placeholder="Author name">
+                                            </div>
+                                            <div>
+                                                <label style="font-size:0.85rem;">Publisher</label>
+                                                <input type="text" id="metaPublisher" placeholder="Publisher">
+                                            </div>
+                                        </div>
+                                        <label style="font-size:0.85rem;">Dedication</label>
+                                        <input type="text" id="metaDedication" placeholder="For...">
+                                        <label style="font-size:0.85rem;">About the Author</label>
+                                        <textarea id="metaAboutAuthor" rows="2" placeholder="Author bio..."></textarea>
+                                        <div class="grid-2">
+                                            <div>
+                                                <label style="font-size:0.85rem;">Newsletter CTA</label>
+                                                <input type="text" id="metaNewsletterCta" placeholder="Join my list!">
+                                            </div>
+                                            <div>
+                                                <label style="font-size:0.85rem;">Newsletter URL</label>
+                                                <input type="url" id="metaNewsletterUrl" placeholder="https://...">
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-primary btn-small" style="margin-top:0.5rem;" onclick="saveMetadata()">Save Metadata</button>
+                                        <span id="metaSaveStatus" style="margin-left:0.5rem;font-size:0.8rem;color:#888;"></span>
+                                    </div>
+                                </details>
                             </div>
 
                             <!-- Chapter Writer Section -->
@@ -1087,6 +1174,26 @@
         document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            // Collect publishing metadata (only include non-empty values)
+            const additional = {};
+            const metaFields = {
+                author_name: 'projectAuthorName',
+                publisher_name: 'projectPublisher',
+                dedication: 'projectDedication',
+                series_name: 'projectSeriesName',
+                about_author: 'projectAboutAuthor',
+                also_by_titles: 'projectAlsoBy',
+                acknowledgements: 'projectAcknowledgements',
+                newsletter_cta: 'projectNewsletterCta',
+                newsletter_url: 'projectNewsletterUrl',
+            };
+            for (const [key, id] of Object.entries(metaFields)) {
+                const val = (document.getElementById(id)?.value || '').trim();
+                if (val) additional[key] = val;
+            }
+            const seriesNum = document.getElementById('projectSeriesNumber')?.value;
+            if (seriesNum) additional.series_number = parseInt(seriesNum);
+
             const body = {
                 title: document.getElementById('projectTitle').value,
                 genre: document.getElementById('projectGenre').value,
@@ -1094,7 +1201,8 @@
                 target_word_count: parseInt(document.getElementById('projectWordCount').value),
                 target_audience: document.getElementById('projectAudience').value,
                 comparable_titles: document.getElementById('projectComps').value.split(',').map(s => s.trim()).filter(s => s),
-                themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s)
+                themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s),
+                additional_constraints: Object.keys(additional).length > 0 ? additional : undefined
             };
 
             const res = await fetch('/api/projects', {
@@ -1288,6 +1396,74 @@
             // Update chapter writer section
             await updateChapterWriter();
         };
+
+        // =================================================================
+        // Cover Upload & Metadata
+        // =================================================================
+
+        async function uploadCover(event) {
+            if (!currentProject) { alert('Select a project first'); return; }
+            const file = event.target.files[0];
+            if (!file) return;
+            const status = document.getElementById('coverStatus');
+            status.textContent = 'Uploading...';
+            status.style.color = '#f39c12';
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await fetch(`/api/projects/${currentProject}/upload-cover`, {
+                    method: 'POST', credentials: 'include', body: form
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Upload failed');
+                status.textContent = `Cover uploaded (${(data.size_bytes / 1024).toFixed(0)} KB)`;
+                status.style.color = '#2ecc71';
+            } catch (err) {
+                status.textContent = 'Upload failed: ' + err.message;
+                status.style.color = '#e74c3c';
+            }
+            event.target.value = '';
+        }
+
+        async function saveMetadata() {
+            if (!currentProject) { alert('Select a project first'); return; }
+            const status = document.getElementById('metaSaveStatus');
+            const fields = {
+                author_name: 'metaAuthorName',
+                publisher_name: 'metaPublisher',
+                dedication: 'metaDedication',
+                about_author: 'metaAboutAuthor',
+                newsletter_cta: 'metaNewsletterCta',
+                newsletter_url: 'metaNewsletterUrl',
+            };
+            const body = {};
+            for (const [key, id] of Object.entries(fields)) {
+                const val = (document.getElementById(id)?.value || '').trim();
+                if (val) body[key] = val;
+            }
+            if (Object.keys(body).length === 0) {
+                status.textContent = 'Nothing to save';
+                status.style.color = '#888';
+                return;
+            }
+            status.textContent = 'Saving...';
+            status.style.color = '#f39c12';
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/metadata`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Save failed');
+                status.textContent = `Saved ${data.updated_keys.length} field(s)`;
+                status.style.color = '#2ecc71';
+            } catch (err) {
+                status.textContent = 'Failed: ' + err.message;
+                status.style.color = '#e74c3c';
+            }
+        }
 
         // =================================================================
         // Export Functions

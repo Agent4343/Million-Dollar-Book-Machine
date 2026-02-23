@@ -506,6 +506,53 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
     }
 
 
+@app.patch("/api/projects/{project_id}/metadata")
+async def update_metadata(project_id: str, request: Request, auth: bool = Depends(require_auth)):
+    """Update project metadata (author name, dedication, cover path, etc.).
+
+    Accepts a JSON body whose keys are merged into project.user_constraints.
+    Only known publishing-related keys are accepted to prevent accidental
+    overwriting of pipeline-critical fields like 'genre' or 'target_word_count'.
+    """
+    ALLOWED_KEYS = {
+        "author_name", "pen_name", "publisher_name", "copyright_year",
+        "isbn", "rights_statement", "include_disclaimer", "disclaimer_text",
+        "dedication", "about_author", "about_author_text",
+        "also_by", "also_by_titles",
+        "acknowledgements", "newsletter_cta", "newsletter_url",
+        "series_name", "series_number",
+        "cover_image_path",  # normally set by upload-cover, but allow manual too
+        "blurb",  # override agent-generated blurb
+        "description",  # book description
+        "target_audience", "tone",
+    }
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+
+    rejected = [k for k in body if k not in ALLOWED_KEYS]
+    if rejected:
+        raise HTTPException(status_code=400,
+            detail=f"Keys not allowed via this endpoint: {', '.join(rejected)}. "
+                   f"Allowed: {', '.join(sorted(ALLOWED_KEYS))}")
+
+    project.user_constraints.update(body)
+    project.update_timestamp()
+    pstore = get_project_store()
+    pstore.save_raw(project.project_id, orch.export_project_state(project))
+
+    return {
+        "success": True,
+        "updated_keys": list(body.keys()),
+        "message": f"Updated {len(body)} metadata field(s)",
+    }
+
+
 @app.get("/api/projects")
 async def list_projects(auth: bool = Depends(require_auth)):
     """List all projects."""
@@ -1299,19 +1346,43 @@ async def upload_cover(project_id: str, request: Request, auth: bool = Depends(r
     with open(cover_path, "wb") as f:
         f.write(file_bytes)
 
+    # Validate image dimensions if Pillow is available
+    warnings = []
+    dimensions = None
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(file_bytes))
+        dimensions = {"width": img.width, "height": img.height, "mode": img.mode}
+        if img.width < 1600 or img.height < 2560:
+            warnings.append(
+                f"Image is {img.width}x{img.height}px. "
+                "KDP recommends at least 1600x2560px (width x height) for best quality."
+            )
+        if img.mode not in ("RGB", "RGBA"):
+            warnings.append(f"Image colour mode is {img.mode}. KDP requires RGB.")
+    except ImportError:
+        warnings.append("Pillow not installed — could not validate image dimensions. Install with: pip install Pillow")
+    except Exception as img_err:
+        warnings.append(f"Could not validate image: {img_err}")
+
     # Save the path in project constraints so export picks it up
     project.user_constraints["cover_image_path"] = cover_path
     project.update_timestamp()
     pstore = get_project_store()
     pstore.save_raw(project.project_id, orch.export_project_state(project))
 
-    return {
+    result = {
         "success": True,
         "cover_path": cover_path,
         "size_bytes": len(file_bytes),
         "format": file_ext,
-        "message": f"Cover image saved. It will be embedded in EPUB exports.",
+        "message": "Cover image saved. It will be embedded in EPUB exports.",
     }
+    if dimensions:
+        result["dimensions"] = dimensions
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 @app.get("/api/projects/{project_id}/stats")
