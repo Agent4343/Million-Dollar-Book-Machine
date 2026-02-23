@@ -1204,5 +1204,381 @@ Each book is a standalone romance with a complete HEA but contributes to an over
 
 ---
 
+## 13. DETAILED SCENE CARDS
+
+### Act 1 Key Scenes
+
+#### SC-01.3 — THE ENVELOPE
+- **Chapter**: 1, Scene 3
+- **POV**: Sera
+- **Location**: Sera's studio apartment above the laundromat
+- **Time**: 1:47 AM, after closing shift at Onyx
+- **Characters Present**: Sera (alone)
+- **Entering Emotional State**: Numb, exhausted, performing "I'm fine"
+- **Exiting Emotional State**: Terrified, electrified, the first real feeling in months
+- **Scene Goal**: Transform Sera from passive survivor to active protagonist
+- **Conflict Type**: Internal → External
+- **What Happens**: Sera comes home to find an envelope slipped under her door — no postmark, no return address, just her name in block print. Inside: three photographs of Lena. Recent. Lena in a crowd, at a café, walking on a sidewalk. She looks alive. She looks scared. A handwritten note on cardstock: *"The Cage. Friday. Alone."* Sera's hands shake. She turns the photos over. The back of one has a date — six weeks ago. Lena has been dead for a year. Sera buried her. Sera identified the body. Except — she identified a body. Dental records were inconclusive. The casket was closed. The doubt she buried with her sister claws its way out of the ground.
+- **Key Sensory Details**: The smell of detergent rising through the floorboards from the laundromat below. The single bulb flickering in the kitchen. The cold of the photographs — glossy, sharp-edged.
+- **Subtext**: This is the first time Sera has felt anything in months. The terror is almost welcome. She's been sleepwalking, and this is the slap across the face.
+- **Plants/Payoffs**: The photos are real but old (Kas took them before Lena's death) — this is revealed in Ch 3. The handwriting on the note is Kas's.
+- **Hook Into Next Scene**: Sera pins the photos to her wall with pushpins. Stares at them. Opens her laptop. Searches "The Cage" + the city name. Finds nothing. That means it's real — the things you can't Google are the things that matter.
+
+---
+
+#### SC-02.3 — FIRST CONTACT
+- **Chapter**: 2, Scene 3
+- **POV**: Sera
+- **Location**: The Cage VIP mezzanine
+- **Time**: 11:20 PM, Friday
+- **Characters Present**: Sera, Kas, Ilya (background), two security guards
+- **Entering Emotional State**: Terrified, running on adrenaline, cornered
+- **Exiting Emotional State**: Furious, intrigued, out of her depth
+- **Scene Goal**: First meeting between Sera and Kas; establish the power imbalance and the instant, unwanted chemistry
+- **Conflict Type**: Interpersonal (power)
+- **What Happens**: Security catches Sera snooping near the fighter prep areas. They're dragging her toward an exit when a voice cuts through — quiet, precise, the kind of voice that doesn't need volume. "Let her go." Kas emerges from a private booth above the ring. Tailored suit, drink in hand, watching the fight below with the disinterest of a man who's seen a thousand of them. He already knows who she is. "I was wondering when you'd come." He dismisses the guards. Ilya watches from the shadows. Kas offers Sera a seat. She refuses. He gestures to the ring below: "Do you know what this place is?" She says, "A crime scene." He almost smiles. "Closer than you think."
+- **Key Sensory Details**: The copper smell of blood from the ring below. Bass vibrating through the floor. Kas's cologne — something cold, expensive, wrong in this context. His hands: elegant and scarred.
+- **Subtext**: Kas has staged this entire encounter. He sent the photos, timed the discovery, predicted she'd come. He's already five moves ahead. She doesn't know this yet, but she senses it — she's a journalist, and this feels orchestrated.
+- **Plants/Payoffs**: "I was wondering when you'd come" — reveals in Ch 3 that he sent the photos. The almost-smile — he won't fully smile until Ch 25. Ilya's presence — he's been briefed on Sera and told to watch.
+- **Hook**: Kas says: "You have questions about your sister. I have answers. But not here, and not free." She should leave. She stays.
+
+---
+
+#### SC-04.2 — THE DEAL
+- **Chapter**: 4, Scene 2
+- **POV**: Sera
+- **Location**: Kas's penthouse, living area
+- **Time**: Evening
+- **Characters Present**: Sera, Kas
+- **Entering Emotional State**: Cornered, furious, calculating
+- **Exiting Emotional State**: Resigned, determined, burning with hate that looks a lot like something else
+- **Scene Goal**: Establish the terms of the arrangement that will define Act 1
+- **Conflict Type**: Interpersonal (negotiation/power)
+- **What Happens**: Kas lays out the deal. He'll give her information about Lena's death — real information, with proof. In exchange: she investigates the fight circuit for him. Uses her journalist skills to document what Viktor is doing. He can't go to the police (he's a Morozov). He can't hire someone (Viktor would know). He needs someone with the skills to find evidence AND the motivation to use it. She's both. Sera pushes back on every term. She doesn't live here. (He's already moved her things.) She answers to no one. (He has her debts.) She can walk away anytime. (Where will she go?) The negotiation is brutal, precise, two people measuring each other. She agrees — not because she's defeated but because she's been looking for a reason to fight for three years and he just gave her one.
+- **Key Sensory Details**: The city lights through floor-to-ceiling windows — beautiful and cold, like a painting of a life she'll never live. The clink of ice in Kas's untouched drink. The contract (physical, printed, actual — Kas is the kind of man who puts things in writing because it gives the illusion of civilization).
+- **Subtext**: This is a transaction between two people who are both pretending they don't feel the charge in the room. Kas's control falters exactly once — when she says Lena's name, his hand tightens on his glass. She notices.
+- **Hook**: "How do I know you'll keep your word?" She's looking at his scarred knuckles. He looks at them too. "You don't. That's the interesting part."
+
+---
+
+#### SC-08.2 — VIKTOR'S TABLE
+- **Chapter**: 8, Scene 2
+- **POV**: Sera
+- **Location**: Viktor's estate, formal dining room
+- **Time**: 8:00 PM
+- **Characters Present**: Sera, Kas, Viktor, Viktor's wife Natalia, two business associates, a house staff
+- **Entering Emotional State**: Performing calm, internally terrified
+- **Exiting Emotional State**: Shaken, furious, something awful recognized her
+- **Scene Goal**: First direct encounter with the antagonist; show Viktor's charm and danger; test Sera and Kas's "couple" performance
+- **Conflict Type**: External (social danger), Interpersonal (performance)
+- **What Happens**: The dinner is immaculate. Seven courses, crystal, candlelight. Viktor is the perfect host — warm, attentive, telling stories about Kas as a boy that make him sound human. He asks Sera about her work ("journalism, I hear — fascinating profession"). She handles it well until Viktor says, casually, over dessert: "You remind me of someone. Can't place it. Do you have family in the city?" She says no. His eyes say he doesn't believe her. Under the table, Kas's hand finds her knee. Not romantic — a warning. *Don't react.* She doesn't. But something in Viktor's gaze has shifted. He's interested now. And interest from Viktor Morozov is the most dangerous thing in the room.
+- **Key Sensory Details**: Viktor's cologne (different from Kas's — warmer, more inviting, a predator's camouflage). The weight of real silver in her hand. A painting behind Viktor's head: a ship in a storm, its sails torn. Natalia's smile, which never wavers and never warms.
+- **Subtext**: Viktor sees Lena in Sera's face. He doesn't say it, but the audience (and the reader) should feel it. Kas knows immediately that something has changed.
+- **Plants/Payoffs**: Viktor's recognition of Lena in Sera sets up his escalating suspicion through Acts 2–3. Natalia's empty smile — she knows what her husband is and has chosen survival. The painting — a symbol of the world Sera has sailed into.
+
+---
+
+### Midpoint Scene
+
+#### SC-12.2 — THE CONFESSION
+- **Chapter**: 12, Scene 2
+- **POV**: Sera
+- **Location**: Penthouse living room
+- **Time**: Late afternoon, golden hour light
+- **Characters Present**: Sera, Kas
+- **Entering Emotional State**: Devastated, betrayed, holding Lena's journal like a weapon
+- **Exiting Emotional State**: Gutted, grieving, seeing Kas clearly for the first time
+- **Scene Goal**: **THE MIDPOINT** — Kas's full confession about Lena; the relationship is recontextualized; Sera must decide whether to stay or go
+- **Conflict Type**: Interpersonal (truth/betrayal)
+- **What Happens**: Sera confronts Kas with the journal. "She was here. In this apartment. In that bed. With you." He doesn't deny it. He sits down slowly — the first time she's seen him move without precision — and tells her everything. How he met Lena (she was translating for Viktor's European contacts — she didn't know what she was translating for). How they fell in love (quickly, recklessly, the way people do when they're surrounded by danger). How she discovered the trafficking. How she wanted to go to the police. How he asked her to wait — just wait, he was building a case. How Viktor found out about the relationship. How Viktor told Lena that Kas had known about the trafficking all along, had been using her. How that lie destroyed her. He pauses. "She called me. The night she — " He stops. Starts again. "She called me and I didn't answer because I was in a meeting with Viktor and I couldn't — " He stops again. This time he doesn't start. The silence in the room is the loudest thing Sera has ever heard. She understands now. The penthouse. The chess games at 3 AM. The insomnia. The plan to destroy Viktor. All of it is a dead man walking, trying to finish one thing before the guilt kills him.
+- **Key Sensory Details**: The journal in Sera's hands — Lena's handwriting, the ink slightly smudged where tears fell on the page. The golden light making everything look warm and gentle, a cruel contrast. Kas sitting on the edge of the sofa with his elbows on his knees, hands hanging — the posture of a man who has stopped holding himself up.
+- **Subtext**: This is the first time Kas has told anyone the full truth. Not the strategic version he told Ilya. The real version, where he failed the woman he loved because he chose the plan over her. He's not confessing to be absolved — he's confessing because Sera deserves the truth and he's too tired to construct another lie.
+- **Turning Point**: Sera doesn't forgive him. She doesn't comfort him. She says: "You should have told me." He says: "I know." She says: "You should have answered her call." He says: "I know." She leaves. But the fact that he said "I know" instead of making excuses — that will bring her back.
+
+---
+
+### Climax Scenes
+
+#### SC-23.2 — THE CRUELEST TRUTH
+- **Chapter**: 23, Scene 2
+- **POV**: Kas
+- **Location**: The Cage, inside the ring
+- **Time**: Close to midnight
+- **Characters Present**: Kas, Viktor, Alexei (bound, bleeding at ring edge)
+- **Entering Emotional State**: Cold, ready to die, numb
+- **Exiting Emotional State**: Shattered beyond repair
+- **Scene Goal**: Viktor's final weapon — the truth about Lena that even Kas didn't know
+- **Conflict Type**: Interpersonal (psychological destruction)
+- **What Happens**: Viktor circles Kas like a disappointed father. He talks about legacy, about family, about how Kas could have had everything. Then he shifts. "You want to know what really happened to your little translator?" Kas braces himself. Viktor tells him: "She didn't jump because she thought you abandoned her. Well — she did. But that's not all." Viktor describes Lena's final days. How she came to Viktor's estate, begging for the truth about Kas. How Viktor told her Kas was complicit in the trafficking. And then: "She told me she was pregnant. Your child. She wanted me to help her leave the country. I told her I would." He pauses. "I lied." He lets that sit. "She went to that bridge the same night." Kas goes to his knees. Not because Viktor pushed him — because his body stops working. The chess player, the strategist, the man who planned for every contingency — there is no contingency for this. His lover died carrying his child because his uncle lied to her, and he didn't answer the phone.
+- **Key Sensory Details**: The cage lights humming. Blood on the concrete (Alexei's). Viktor's voice — gentle, almost fatherly, which makes it infinitely worse. The sound Kas makes, which isn't a word.
+- **Subtext**: Viktor reveals this not out of cruelty (though he's capable of it) but as a demonstration of power. This is what happens when you betray the family. He wants Kas to understand that everything he lost, he lost because he chose wrong. In Viktor's mind, this is a lesson.
+- **Payoff**: The pregnancy was never mentioned in Lena's journal (she didn't know yet when she wrote the last entry). This is genuinely new information. It recontextualizes Kas's entire mission — he wasn't just avenging a death, he was failing to save two lives.
+
+---
+
+## 14. CHARACTER DEEP DIVES
+
+### Sera Voss — Extended Profile
+
+**Daily Routine (Before the Story)**:
+- 6:00 AM: Wakes up after 3-4 hours of sleep. Checks phone for nothing. Runs 3-5 miles.
+- 8:00 AM: Coffee (black, too strong). Reads news. Avoids the journalism section.
+- 10:00 AM – 4:00 PM: Dead time. Applies for jobs she won't get. Researches Lena's case in circles she's traveled a hundred times. Eats something forgettable.
+- 5:00 PM: Walks to Onyx. The commute is the best part of her day because she has a destination.
+- 6:00 PM – 2:00 AM: Bartends. This is where she's most alive — the performance of being fine is easier when it has an audience.
+- 2:30 AM: Home. Wine. Lena's case files. Sleep, eventually.
+
+**Formative Memories**:
+1. **Age 7**: Roman breaks a plate during dinner. Lena (10) steps in front of Sera. Roman stops. Sera learns: Lena is safety.
+2. **Age 12**: Reaches for a falling glass during one of Roman's episodes. The glass shatters in her hand — the scar on her left palm. Lena wraps her hand with a kitchen towel and says, "You're tougher than he is."
+3. **Age 22**: First published investigation — a local corruption piece. Her editor calls it "fearless." She tapes the paper to her refrigerator. It's still there in her apartment.
+4. **Age 25**: The false source story. She published an investigation into a defense contractor based on fabricated documents. The retraction destroyed her career in 72 hours. She still doesn't know who planted the documents (it was connected to Viktor's network — hinted but not fully explored in Book 1, potential Book 2 thread).
+5. **Age 26**: Lena disappears. Sera spends six months searching. Loans. Private investigators. Dead ends. The body is found (or a body is found). The funeral. Sera stops eating for two weeks.
+
+**Speech Patterns**:
+- Uses dark humor as a shield: "I'm fine. I mean, in the way that a building is fine right before it collapses, but technically still standing."
+- Asks questions instead of making statements when she's cornered (journalist instinct)
+- Curses under stress (not constantly — it's reserved for impact)
+- Gets clipped and telegraphic when emotional — sentences shorten to fragments
+- Calls people by their full first name when she's angry ("Konstantin" instead of "Kas")
+
+**Physical Tells**:
+- Touches the scar on her left palm when anxious (she doesn't know she does this)
+- Crosses her arms when she feels threatened — creates a physical barrier
+- Tilts her chin up when challenged — refuses to look small
+- Runs her hand along surfaces (tables, walls, bookshelves) when thinking — tactile processing
+- Her jaw tightens before she says something she'll regret
+
+**Secret**: She identified Lena's body, but the face was damaged. Dental records were inconclusive. There was always a 12% chance it wasn't Lena. She chose to believe it was because the alternative — hope — was more destructive than grief. She has never told anyone about that 12%.
+
+---
+
+### Konstantin "Kas" Morozov — Extended Profile
+
+**Daily Routine (Before Sera)**:
+- 4:30 AM: Wakes (if he slept). Chess puzzles for 30 minutes — the only thing that quiets his mind.
+- 5:30 AM: Gym. Fights a training partner or the bag. Not for fitness — for control. The body is a machine. Machines must be maintained.
+- 7:00 AM: Shower, dress (the suit is another form of armor). Reviews the day's legitimate business.
+- 8:00 AM – 6:00 PM: Morozov Holdings. Board meetings, acquisitions, the mask of a dutiful heir. Occasional side meetings with Ilya about the plan.
+- 7:00 PM: The Cage, if there's a card. He watches. He catalogs. He pretends to enjoy it.
+- 10:00 PM: Penthouse. Alone. Surveillance review. Evidence compilation. Chess against himself.
+- 1:00 AM: Reads. Poetry (Russian, always — Akhmatova, Tsvetaeva). The only space where he allows himself to feel.
+- 3:00 AM: Stares at the ceiling. Doesn't sleep.
+
+**Formative Memories**:
+1. **Age 8**: Father takes him to a boxing match (legitimate). Afterwards, asks what Kas noticed. Kas describes not the fight but the crowd — who was betting, who was scared, who was pretending. His father says: "You see too much. That's your gift and your burden."
+2. **Age 14**: Mother plays Rachmaninoff's Piano Concerto No. 2 for the last time before her illness takes her hands. He memorizes the sound.
+3. **Age 22**: Father's funeral. Viktor puts his arm around Kas and says, "I'll take care of you now." The arm felt like a collar.
+4. **Age 24**: First time at The Cage. Sees a fighter — a boy, maybe 19 — get beaten unconscious while the crowd cheers. Viktor leans over and says, "That's what hunger looks like." Kas goes home and vomits.
+5. **Age 29**: Meets Lena at a Morozov Foundation charity gala. She's translating for a Ukrainian delegate. She laughs at something someone says and the sound stops him in the middle of a sentence. He will later identify this as the moment his life split into before and after.
+
+**Speech Patterns**:
+- Speaks less than anyone in any room. When he does speak, people stop to listen — not because he's loud but because every word is chosen.
+- Uses formal language as armor — avoids contractions when he's in control ("I do not" instead of "I don't")
+- Contractions slip in when his control breaks (around Sera)
+- Gives orders in the form of observations: "The door is unlocked" means "lock the door"
+- His voice gets quieter when he's most dangerous — the inverse of what people expect
+- Calls Sera "Seraphina" when he's trying to maintain distance, "Sera" when he can't
+
+**Physical Tells**:
+- Adjusts his cufflinks when thinking strategically — a self-soothing gesture disguised as grooming
+- His jaw muscle tightens when he's suppressing emotion — visible to someone watching closely (Sera starts noticing this)
+- Stands with his hands behind his back in formal settings — a posture of control and restraint
+- When genuinely angry, he goes completely still. People who know him fear the stillness more than shouting.
+- Touches his scarred knuckles when he's remembering Lena — a mirror of Sera's scar-touching
+
+**Secret**: He has a will. In it, everything goes to a trust for trafficking survivors. There's a letter for Sera. He updates it every Sunday night. He's been updating it for three months before she arrives. He expected to be dead by now.
+
+---
+
+### Viktor Morozov — Extended Profile
+
+**Core Belief**: "Love is the weakness that other men offer you. Leverage is the strength you take for yourself."
+
+**Why He's Not a Cartoon Villain**:
+Viktor genuinely loves (in his way). He loved his brother Nikolai, though he considered him naive. He loves Kas, though he sees him as a project to be shaped. He even loved, briefly, when he was young — a woman who left him for a man with less money but more warmth. That taught him: warmth is currency you can't control. Money is currency you can. He chose money. He hasn't regretted it. He doesn't understand why anyone would choose differently.
+
+His trafficking operation started as "just business" — providing fighters for the circuit. The progression to actual human trafficking happened incrementally, each step justifiable by the one before it. He's the banality of evil in a tailored suit. He doesn't see victims. He sees assets.
+
+**Domestic Life**:
+- Married to Natalia (50), a former model who understood the transaction from day one: beauty and composure in exchange for security and status. They are fond of each other in the way of business partners who've survived decades together.
+- No children. Viktor considered this a strategic choice. Children are vulnerabilities.
+- His estate is immaculate, warm, filled with art. He hosts charity galas. He donates to hospitals. The mask is so complete that sometimes even Viktor forgets it's a mask.
+
+**Speech Patterns**:
+- Charming, warm, erudite. Quotes Dostoyevsky and Sun Tzu interchangeably.
+- Tells stories — always personal, always with a lesson embedded, always with an edge that only reveals itself later
+- Never raises his voice. Never swears. The closest he gets to emotional is a slight change in cadence — the words slow down when he's dangerous.
+- Uses "we" when he means "I" — a power move disguised as inclusivity
+- Calls Kas "nephew" or "son" depending on whether he's pleased or correcting
+
+---
+
+## 15. WORLD GLOSSARY
+
+| Term | Definition | Context |
+|------|-----------|---------|
+| **The Cage** | The underground fight circuit, physically located in a converted warehouse on the waterfront. The name refers to both the specific venue and the broader network. | The central location of the criminal operation |
+| **A Card** | A fight night event — the scheduled bouts. "There's a card on Friday" means fights are happening. | From boxing terminology |
+| **The Circuit** | The broader network of underground fight venues across four cities. | Viktor's empire |
+| **The Ledger** | Viktor's private record of the trafficking network — names, payments, routes, buyers. The holy grail of evidence. Physical book kept in Viktor's estate safe. | The MacGuffin of the investigation |
+| **Clean Side** | The legitimate Morozov businesses — Morozov Holdings (real estate, investments). Kas runs this. | The family's public face |
+| **Dirty Side** | The criminal operations — The Cage, trafficking, money laundering. Viktor runs this. | The family's hidden reality |
+| **Marked** | Someone Viktor has designated for elimination. Once you're marked, the only question is when. | "He's been marked" = death sentence |
+| **The Foundation** | The Morozov Family Foundation — legitimate charity arm. Used for laundering, social cover, and recruiting. | Where Lena was first employed |
+| **A Package** | A group of trafficked fighters being moved between cities. Dehumanizing term used by Viktor's people. | The trafficking operation's vocabulary |
+| **Going to ground** | Hiding from Viktor's surveillance. What Kas will eventually need to do. | Criminal underworld terminology |
+| **The Ring** | The physical fighting area inside The Cage — a modified boxing ring with additional barriers. | Where the violence happens |
+| **Onyx** | The upscale cocktail bar where Sera bartends. Located in the financial district. Frequented by the kind of wealthy people who might also attend Cage events. | Sera's pre-story world |
+
+---
+
+## 16. SERIES ARC OVERVIEW
+
+### The Ruin Series — 3-Book Arc
+
+**Overarching Conspiracy**: Viktor's trafficking network is one branch of a larger international operation. The Ledger Sera finds is a copy — the original contains names that reach into government, law enforcement, and Fortune 500 companies. Each book exposes a new layer while telling a complete standalone romance.
+
+### Book 1: *Yours to Ruin* (Kas & Sera)
+- **Romance**: Enemies-to-lovers via forced proximity and shared mission
+- **Conspiracy**: Takes down Viktor's branch; discovers the network is bigger
+- **Cliffhanger**: Anonymous file suggesting the Ledger was a copy; the original is elsewhere
+- **Status**: This bible
+
+### Book 2: *Yours to Break* (Ilya & TBD heroine)
+- **Premise**: Six months after Viktor's arrest, Ilya Petrov is tracking the source of the anonymous file from Book 1's epilogue. The trail leads to a woman running a survivor advocacy nonprofit — except she's not who she claims to be. She's the daughter of one of the men named in the original Ledger, and she's been building her own case from the inside.
+- **Romance**: Forced alliance between two people with trust issues so deep they make Kas and Sera look well-adjusted. Ilya can't let anyone close because the last time he trusted someone inside The Cage, they sold him to Viktor. She can't trust him because her father warned her about "Morozov's dog."
+- **Conspiracy**: Tracks the original Ledger to a second city; discovers the network includes a sitting senator
+- **Tropes**: Grumpy/sunshine (he's the grump), bodyguard romance, "she's hiding something," enemies-to-partners-to-lovers
+
+### Book 3: *Yours to Keep* (Alexei & TBD heroine)
+- **Premise**: One year after Book 2. Alexei Volkov, now free and rebuilding his life, is pulled back in when a woman from his past — someone he knew in the trafficking pipeline — reappears with evidence that the network's leader is about to launch a new operation. To stop it, Alexei has to go back into the world that nearly destroyed him.
+- **Romance**: Reunited lovers / second chance; they knew each other in captivity and their trauma bonded them in ways that are both real and complicated
+- **Conspiracy**: The final takedown. The head of the international network is revealed and dismantled. All threads from Books 1–2 converge.
+- **Tropes**: Second chance, hurt/comfort, "we survived this together," protector hero
+
+### Recurring Characters Across Series
+
+| Character | Book 1 Role | Book 2 Role | Book 3 Role |
+|-----------|-------------|-------------|-------------|
+| Sera | Protagonist | Supporting (journalist investigating new leads) | Supporting (publishes final exposé) |
+| Kas | Protagonist | Supporting (provides resources, intelligence) | Supporting (final operation) |
+| Ilya | Supporting | Protagonist | Supporting (ally) |
+| Maren | Supporting (FBI) | Major supporting (now lead agent on the case) | Supporting |
+| Alexei | Supporting | Supporting (recovering, rebuilding) | Protagonist |
+| Viktor | Antagonist | Referenced (in prison, still pulling strings) | Minor (testifies for reduced sentence) |
+
+---
+
+## 17. SAMPLE CHAPTER — Chapter 1: "Last Call"
+
+### [SERA]
+
+The thing about bartending for rich people is you learn exactly how much money it takes to make someone boring.
+
+The answer, in case you're wondering, is about four million. Below that, they still have stories. Above it, they just have opinions about wine.
+
+"The Sancerre," says the man at the end of the bar, and I pour it without looking at the bottle because I've poured this exact glass for this exact man every Thursday for eleven months. He's a hedge fund manager. He tips eighteen percent, which is insulting from someone whose watch costs more than my apartment. He thinks my name is Sarah.
+
+"Thanks, Sarah."
+
+"Anytime."
+
+Onyx is the kind of bar that wants you to feel like you've been invited somewhere exclusive, which is ironic because the only requirement for entry is a credit card with a high enough limit. The lighting is amber, the jazz is soft, and every surface is designed to make you forget that outside these doors the city smells like exhaust and regret. I wipe down the bar top — mahogany, the real stuff — and check the clock. Four hours to close. Four hours of this. Four hours of being Sarah.
+
+My real name is Sera Voss. I used to write for the *Chronicle*. I used to have a byline that made powerful people nervous. I used to be someone.
+
+Now I garnish gin and tonics with rosemary sprigs and pretend I don't notice when the district attorney two seats down pockets a cocktail napkin with a phone number that isn't his wife's.
+
+The bar fills and empties the way it does every night — a tide of silk and ambition. I mix, I pour, I smile without showing teeth. I am very good at this job, and I hate that I'm good at it, and I hate that I hate it, because there's nothing wrong with bartending. There's nothing wrong with honest work. There's only something wrong with doing it because every other door has been nailed shut.
+
+At midnight, Maren appears on the customer side of the bar and slides onto a stool with the authority of someone who knows the bartender will forgive the intrusion.
+
+"You look like hell," she says.
+
+"Thank you. I've been working on it."
+
+She orders her usual — gin and tonic, extra lime, which she'll nurse for two hours because she's careful with money in a way that makes me trust her. Maren Cross is the only person in this city I'd call a friend, though I'd deny it under oath. She bartends at a place in Midtown — different clientele, same bullshit — and we bonded over a shared theory that anyone who orders a Long Island Iced Tea after the age of twenty-five should be monitored by the government.
+
+"Have you eaten today?"
+
+"I ate."
+
+"What did you eat?"
+
+"Food."
+
+"Sera."
+
+"I had a granola bar and the crusts from a sandwich someone left at the bar. It was prosciutto. Very upscale scraps."
+
+She gives me the look. The one that says *I'm worried about you but I know that if I say I'm worried about you, you'll deflect so hard you'll pull a muscle.* I love Maren for a lot of reasons, but mostly I love her for the restraint of that look — how much it says by saying nothing.
+
+"I'm fine," I tell her, because that's my line, and she raises her glass because that's hers, and we both pretend this is true because the alternative is a conversation neither of us has the energy for on a Thursday.
+
+---
+
+Last call comes at 1:30. I close out tabs, wipe down, lock up the register with the precision of someone who once organized evidence boards for federal corruption cases. The irony isn't lost on me. It's just not funny anymore.
+
+The walk home takes twelve minutes. I count them. I count a lot of things these days — steps, drinks, hours since I last slept through the night (forty-seven). Counting is what you do when the things that matter can't be quantified. How much do you miss your sister? Uncountable. How guilty do you feel? Unmeasurable. How long can you live like this?
+
+Open question.
+
+My apartment is above a laundromat on Delancey Street. The stairs smell like detergent and mildew — a combination that shouldn't work but has become, through repetition, the smell of home. I unlock the door, don't turn on the light (the bulb in the kitchen flickers and it makes me feel like I'm in a horror movie, which, fair), and drop my keys on the counter.
+
+The envelope is on the floor. Just inside the door. Slid underneath.
+
+My name on the front. Block print. No postmark. No return address.
+
+I pick it up. The paper is heavy — expensive cardstock, the kind Kas will later tell me he prefers because cheap paper tears. (But I don't know his name yet. I don't know anything yet. I am still, for the next forty-five seconds, a bartender named Sarah.)
+
+Inside: three photographs.
+
+The first one stops my heart.
+
+Lena.
+
+My sister. My dead sister. Walking on a sidewalk I don't recognize, wearing a coat I've never seen, carrying a coffee cup with a logo I can't read. She looks thin. She looks alive.
+
+The second: Lena in a crowd. Some kind of market or festival. She's not smiling. She's looking over her shoulder.
+
+The third: Lena at a café, alone, staring at something out of frame. The light suggests late afternoon. Her hair is shorter than I remember.
+
+I turn the photos over. The back of the first has a date in pencil. Six weeks ago.
+
+Lena died thirteen months ago. I identified the body. I stood in a room with fluorescent lights and a smell I will never forget and I looked at what was left of my sister and I said, *Yes. That's her.* I planned the funeral. I picked the casket. I watched them put her in the ground.
+
+Except.
+
+The face was damaged. Water damage, they said. The dental records were inconclusive. The identifying features I confirmed were — what? Her height. Her build. The gold chain around her neck. The same gold chain I'm wearing now, the one I took from the evidence bag because I needed something of hers to hold.
+
+I sit on my kitchen floor with the photographs spread in front of me and I do something I haven't done in months: I feel something. It's not hope — I'm not that stupid. It's not grief — I'm past the stage where grief arrives in waves. It's something older and meaner than either.
+
+It's doubt. The doubt I buried with her. The twelve percent I never told anyone about — the coroner's hedged language, the incomplete dental match, the closed casket I chose because I couldn't bear to look again.
+
+There's a note. Handwritten, same expensive cardstock. Three words and an address:
+
+*The Cage. Friday. Alone.*
+
+I should call the police. I should call Maren. I should do what any rational person would do when they receive anonymous photographs of their dead sister: I should assume it's a scam, a manipulation, a cruel trick designed to exploit the worst thing that ever happened to me.
+
+I pin the photographs to my wall with pushpins. I stare at them.
+
+I open my laptop. I search "The Cage" plus the city name. Nothing. No results. No listings. No reviews. No trace.
+
+The things you can't Google are the things that matter.
+
+Friday is two days away.
+
+I'm going.
+
+---
+
+*End of Chapter 1: "Last Call" — 1,547 words (preview draft)*
+*Full chapter target: 3,200 words — remaining scenes to be expanded in draft generation*
+
+---
+
 *Book bible generated by Million Dollar Book Machine*
 *Pipeline: Layers 0–11 (Strategic Foundation → Voice Specification) + Layer 20 (Publishing Package)*
+*To run the full 21-agent pipeline with AI generation, set a valid ANTHROPIC_API_KEY in .env*
