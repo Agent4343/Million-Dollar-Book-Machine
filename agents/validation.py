@@ -32,7 +32,7 @@ def _best_available_chapters(context: ExecutionContext) -> List[Dict[str, Any]]:
     backwards-compatible with earlier wiring that passed draft_generation output
     under the "draft_generation" key.
     """
-    for key in ("edited_chapters", "revised_chapters", "chapters"):
+    for key in ("final_chapters", "edited_chapters", "revised_chapters", "chapters"):
         val = context.inputs.get(key)
         if isinstance(val, list):
             return val
@@ -1864,7 +1864,7 @@ TEXT:
     final_chapters.sort(key=lambda c: c.get("number", 0))
 
     return {
-        "edited_chapters": final_chapters,
+        "final_chapters": final_chapters,
         "fixes_applied": fixes_applied,
         "fix_log": fix_log,
     }

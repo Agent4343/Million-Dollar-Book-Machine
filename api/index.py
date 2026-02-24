@@ -130,9 +130,10 @@ def get_orchestrator():
             if isinstance(data, dict):
                 try:
                     _orchestrator.import_project_state(data)
-                except Exception:
-                    # Skip corrupted projects rather than breaking startup.
-                    pass
+                except Exception as exc:
+                    # Skip corrupted projects rather than breaking startup,
+                    # but log so users can investigate.
+                    logger.warning("Skipping corrupted project on load: %s", exc)
         _projects_loaded = True
     # Update LLM client in case it wasn't available before
     if _orchestrator.llm_client is None:
@@ -699,11 +700,20 @@ async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require
         raise HTTPException(status_code=404, detail="Project not found")
 
     results = []
-    available = get_orchestrator().get_available_agents(project)
 
-    for agent_id in available:
-        agent_def = AGENT_REGISTRY.get(agent_id)
-        if agent_def and agent_def.layer == layer_id:
+    # Re-check availability after each agent execution so that intra-layer
+    # dependencies (e.g. emotional_validation -> developmental_editor on
+    # layer 14) are resolved within a single API call.
+    while True:
+        available = get_orchestrator().get_available_agents(project)
+        layer_agents = [
+            aid for aid in available
+            if (ad := AGENT_REGISTRY.get(aid)) and ad.layer == layer_id
+        ]
+        if not layer_agents:
+            break
+
+        for agent_id in layer_agents:
             try:
                 output = await get_orchestrator().execute_agent(project, agent_id)
                 store = get_project_store()
@@ -725,6 +735,8 @@ async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require
                     "success": False,
                     "message": str(e)
                 })
+            # Break inner loop to re-check availability after each execution
+            break
 
     return {"layer": layer_id, "results": results}
 

@@ -941,28 +941,36 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         if isinstance(project.manuscript.get("chapters"), list) and project.manuscript.get("chapters"):
             manuscript["chapters"] = project.manuscript.get("chapters", [])
         else:
-            # 2) Prefer line-edited chapters if available
-            line_edit = self._find_agent_state(project, "line_edit")
-            if line_edit and line_edit.current_output:
-                content = line_edit.current_output.content
-                if isinstance(content, dict) and isinstance(content.get("edited_chapters"), list):
-                    manuscript["chapters"] = content.get("edited_chapters", [])
+            # 2) Prefer manuscript_fixup (final cleaned version)
+            fixup = self._find_agent_state(project, "manuscript_fixup")
+            if fixup and fixup.current_output:
+                content = fixup.current_output.content
+                if isinstance(content, dict) and isinstance(content.get("final_chapters"), list):
+                    manuscript["chapters"] = content["final_chapters"]
 
-            # 3) Revised chapters
+            # 3) Line-edited chapters
+            if not manuscript["chapters"]:
+                line_edit = self._find_agent_state(project, "line_edit")
+                if line_edit and line_edit.current_output:
+                    content = line_edit.current_output.content
+                    if isinstance(content, dict) and isinstance(content.get("edited_chapters"), list):
+                        manuscript["chapters"] = content["edited_chapters"]
+
+            # 4) Revised chapters from structural rewrite
             if not manuscript["chapters"]:
                 rewrite = self._find_agent_state(project, "structural_rewrite")
                 if rewrite and rewrite.current_output:
                     content = rewrite.current_output.content
                     if isinstance(content, dict) and isinstance(content.get("revised_chapters"), list):
-                        manuscript["chapters"] = content.get("revised_chapters", [])
+                        manuscript["chapters"] = content["revised_chapters"]
 
-            # 4) Raw draft generation
+            # 5) Raw draft generation
             if not manuscript["chapters"]:
                 draft_agent = self._find_agent_state(project, "draft_generation")
                 if draft_agent and draft_agent.current_output:
                     content = draft_agent.current_output.content
                     if isinstance(content, dict) and isinstance(content.get("chapters"), list):
-                        manuscript["chapters"] = content.get("chapters", [])
+                        manuscript["chapters"] = content["chapters"]
 
         # Gather publishing package
         pub_agent = self._find_agent_state(project, "publishing_package")
