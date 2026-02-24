@@ -38,7 +38,7 @@ _MODEL_TIERS: Dict[str, str] = {
     "sonnet": os.environ.get("SONNET_MODEL", "claude-sonnet-4-20250514"),
 }
 
-_USE_OPUS = os.environ.get("USE_OPUS_FOR_CREATIVE", "true").lower() in ("true", "1", "yes")
+_USE_OPUS = os.environ.get("USE_OPUS_FOR_CREATIVE", "false").lower() in ("true", "1", "yes")
 
 
 def _resolve_model(tier: Optional[str]) -> Optional[str]:
@@ -421,6 +421,25 @@ class Orchestrator:
                 agent_state.current_output = output
                 agent_state.outputs.append(output)
                 logger.info(f"Agent {agent_id} PASSED gate")
+
+                # Auto-populate project.manuscript from chapter-producing agents
+                # so the chapter_writer endpoint knows chapters exist (avoids
+                # re-generating from scratch) and exports use the latest version.
+                _chapter_keys = {
+                    "draft_generation": "chapters",
+                    "structural_rewrite": "revised_chapters",
+                    "line_edit": "edited_chapters",
+                    "manuscript_fixup": "final_chapters",
+                }
+                if agent_id in _chapter_keys and isinstance(result, dict):
+                    ch_key = _chapter_keys[agent_id]
+                    chapters = result.get(ch_key, [])
+                    if isinstance(chapters, list) and chapters:
+                        project.manuscript["chapters"] = chapters
+                        logger.info(
+                            "Updated project.manuscript with %d chapters from %s",
+                            len(chapters), agent_id,
+                        )
             else:
                 # For agents with output too large to repair (e.g. draft_generation),
                 # preserve the output so a retry can resume incrementally instead of

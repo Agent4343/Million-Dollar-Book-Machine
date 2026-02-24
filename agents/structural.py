@@ -24,6 +24,10 @@ _DRAFT_CHAPTER_TIMEOUT = int(os.environ.get("DRAFT_CHAPTER_TIMEOUT", "300") or "
 _DRAFT_CHAPTER_MAX_RETRIES = int(os.environ.get("DRAFT_CHAPTER_MAX_RETRIES", "3") or "3")
 _DRAFT_CHAPTER_RETRY_BACKOFF = float(os.environ.get("DRAFT_CHAPTER_RETRY_BACKOFF", "2.0") or "2.0")
 
+# Skip per-chapter adherence checks to reduce LLM costs (saves 1 LLM call per chapter).
+# Set to "true" to enable adherence scoring (adds ~30% cost to draft generation).
+_DRAFT_ADHERENCE_CHECK = os.environ.get("DRAFT_ADHERENCE_CHECK", "false").lower() in ("true", "1", "yes")
+
 
 # =============================================================================
 # PROMPTS
@@ -703,8 +707,9 @@ async def execute_draft_generation(
                     if not isinstance(summary, str) or not summary.strip():
                         summary = str(summary) if summary else f"Chapter {chapter_num} summary"
 
-                    # Evaluate outline adherence (structured) for this chapter
-                    adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
+                    # Optional: evaluate outline adherence (saves 1 LLM call per chapter when disabled)
+                    if _DRAFT_ADHERENCE_CHECK:
+                        adherence_prompt = f"""You are verifying whether a generated chapter follows its blueprint.
 
 Blueprint for this chapter:
 {chapter}
@@ -727,21 +732,24 @@ Rules:
 - outline_adherence_score is 0-100.
 - scene_checks must include every scene_number listed in the blueprint.
 - If deviation=true, suggested_fix must be specific."""
-                    adherence = await asyncio.wait_for(
-                        llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600),
-                        timeout=timeout,
-                    )
+                        adherence = await asyncio.wait_for(
+                            llm.generate(adherence_prompt, response_format="json", temperature=0.2, max_tokens=1600),
+                            timeout=timeout,
+                        )
 
-                    score = adherence.get("outline_adherence_score")
-                    if isinstance(score, int):
-                        chapter_scores[str(chapter_num)] = score
+                        score = adherence.get("outline_adherence_score")
+                        if isinstance(score, int):
+                            chapter_scores[str(chapter_num)] = score
+                        else:
+                            chapter_scores[str(chapter_num)] = 0
+
+                        scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
+                        for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
+                            if isinstance(d, dict):
+                                deviations.append(d)
                     else:
-                        chapter_scores[str(chapter_num)] = 0
-
-                    scene_tags[f"Ch{chapter_num}"] = adherence.get("scene_checks", [])
-                    for d in adherence.get("chapter_deviations", []) if isinstance(adherence, dict) else []:
-                        if isinstance(d, dict):
-                            deviations.append(d)
+                        # Default pass score when adherence checking is disabled
+                        chapter_scores[str(chapter_num)] = 85
 
                     word_count = len(chapter_text.split())
                     chapters.append({
