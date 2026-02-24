@@ -672,7 +672,23 @@ async def execute_agent(project_id: str, agent_id: str, auth: bool = Depends(req
             "output_keys": list(output.content.keys())
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Persist state even on failure so the updated retry/PENDING status
+        # is saved (the orchestrator now correctly marks agents as retryable).
+        try:
+            store = get_project_store()
+            store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+        except Exception:
+            pass
+        agent_state = get_orchestrator()._find_agent_state(project, agent_id)
+        retryable = agent_state and agent_state.status == AgentStatus.PENDING if agent_state else False
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(e),
+                "retryable": retryable,
+                "attempts": agent_state.attempts if agent_state else 0,
+            }
+        )
 
 
 @app.post("/api/projects/{project_id}/run-layer/{layer_id}")
@@ -698,6 +714,12 @@ async def run_layer(project_id: str, layer_id: int, auth: bool = Depends(require
                     "message": output.gate_result.message if output.gate_result else ""
                 })
             except Exception as e:
+                # Persist state on failure so retry status is saved
+                try:
+                    store = get_project_store()
+                    store.save_raw(project.project_id, get_orchestrator().export_project_state(project))
+                except Exception:
+                    pass
                 results.append({
                     "agent_id": agent_id,
                     "success": False,

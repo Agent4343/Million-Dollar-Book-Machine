@@ -168,28 +168,38 @@ async def execute_chapter_writer(
         # Adjust token limit based on mode
         max_tokens = 1500 if quick_mode else 12000
 
-        # Generate the chapter
+        # Generate the chapter (with error handling for LLM failures)
         chapter_text = await llm.generate(
             prompt,
             max_tokens=max_tokens,
             temperature=0.8   # Slightly more creative for prose
         )
 
+        # Validate that the LLM returned a string (not a dict/JSON)
+        if not isinstance(chapter_text, str):
+            chapter_text = str(chapter_text)
+
         # Skip summary in quick mode to save time
         if quick_mode:
             summary = f"Preview of Chapter {chapter_number}"
         else:
             # Generate a summary for context in next chapter
+            # Use more of the chapter text for better summaries
             summary_prompt = f"""Summarize this chapter in 2-3 sentences, focusing on:
 1. Key plot developments
 2. Character emotional state at end
 3. Any cliffhangers or hooks
 
 Chapter text:
-{chapter_text[:3000]}...
+{chapter_text[:8000]}
 
 Summary:"""
-            summary = await llm.generate(summary_prompt, max_tokens=200)
+            try:
+                summary = await llm.generate(summary_prompt, max_tokens=200)
+                if not isinstance(summary, str):
+                    summary = str(summary)
+            except Exception:
+                summary = f"Chapter {chapter_number} summary generation failed"
 
         word_count = len(chapter_text.split())
 

@@ -69,23 +69,31 @@ def _chapter_summary(ch: Dict[str, Any]) -> str:
     return s if isinstance(s, str) and s.strip() else ""
 
 
-def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 7000) -> str:
-    """Bounded manuscript sample for analysis prompts."""
+def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 18000) -> str:
+    """Bounded manuscript sample for analysis prompts.
+
+    Samples every chapter with an adaptive per-chapter budget so that
+    quality validation sees representative text from across the entire
+    book, not just the first, middle, and last chapters.
+    """
     if not chapters:
         return ""
-    picks = [chapters[0]]
-    if len(chapters) >= 3:
-        picks.append(chapters[len(chapters) // 2])
-    if len(chapters) >= 2:
-        picks.append(chapters[-1])
+    # Budget characters per chapter evenly
+    valid = [ch for ch in chapters if isinstance(ch, dict)]
+    if not valid:
+        return ""
+    per_chapter = max(1200, max_chars // len(valid))
     out = ""
-    for ch in picks:
-        if not isinstance(ch, dict):
-            continue
-        out += f"\n\n---\nCHAPTER {_chapter_number(ch)}: {_chapter_title(ch)}\n"
-        out += _chapter_text(ch)[:2200]
-        if len(out) >= max_chars:
+    for ch in valid:
+        snippet = f"\n\n---\nCHAPTER {_chapter_number(ch)}: {_chapter_title(ch)}\n"
+        snippet += _chapter_text(ch)[:per_chapter]
+        if len(out) + len(snippet) > max_chars:
+            # Fit as much of remaining chapters as possible
+            remaining = max_chars - len(out)
+            if remaining > 200:
+                out += snippet[:remaining]
             break
+        out += snippet
     return out[:max_chars]
 
 

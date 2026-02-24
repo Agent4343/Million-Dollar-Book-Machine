@@ -449,9 +449,25 @@ class Orchestrator:
             return output
 
         except Exception as e:
-            agent_state.status = AgentStatus.FAILED
             agent_state.last_error = str(e)
-            logger.exception(f"Agent {agent_id} raised exception")
+            # Respect retry budget: only mark as permanently FAILED when all
+            # attempts are exhausted.  Previously, any Python exception
+            # (network timeout, JSON parse error, etc.) on the first attempt
+            # would permanently kill the agent even though retries remained.
+            if agent_state.attempts >= agent_def.retry_limit:
+                agent_state.status = AgentStatus.FAILED
+                logger.exception(
+                    "Agent %s FAILED after %d attempts (exception)",
+                    agent_id, agent_state.attempts,
+                )
+            else:
+                agent_state.status = AgentStatus.PENDING
+                logger.warning(
+                    "Agent %s raised exception on attempt %d/%d, will retry: %s",
+                    agent_id, agent_state.attempts, agent_def.retry_limit, e,
+                )
+            # Check layer completion in case this was the last pending agent
+            self._check_layer_completion(project, agent_def.layer)
             raise
 
     def _default_executor(self, context: ExecutionContext) -> Dict[str, Any]:
@@ -586,10 +602,6 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         all_terminal = all(_is_terminal(agent) for agent in layer.agents.values())
 
         if all_terminal:
-            layer.status = LayerStatus.COMPLETED
-            layer.completed_at = datetime.now(timezone.utc).isoformat()
-            project.current_layer = layer_id
-
             # Collect agent IDs that failed terminally in this layer.
             failed_ids = {
                 a.agent_id
@@ -597,20 +609,36 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
                 if a.status == AgentStatus.FAILED
             }
 
+            all_passed = not failed_ids
+            layer.status = LayerStatus.COMPLETED if all_passed else LayerStatus.FAILED
+            layer.completed_at = datetime.now(timezone.utc).isoformat()
+            project.current_layer = layer_id
+
             # Cascade failure: mark any downstream PENDING agent whose
             # dependency chain includes a terminally-failed agent as FAILED
             # too, so the pipeline doesn't get stuck with unexecutable agents.
             if failed_ids:
                 self._cascade_failures(project, failed_ids)
+                logger.warning(
+                    "Layer %d completed with failures: %s",
+                    layer_id, failed_ids,
+                )
 
-            # Unlock next layer
+            # Unlock next layer (always — cascade already handles blocking
+            # agents whose deps failed, so agents without failed deps can
+            # still proceed).
             next_layer_id = layer_id + 1
             if next_layer_id in project.layers:
                 project.layers[next_layer_id].status = LayerStatus.AVAILABLE
                 project.current_layer = next_layer_id
                 logger.info(f"Layer {layer_id} completed, unlocked layer {next_layer_id}")
             else:
-                logger.info(f"Layer {layer_id} completed (final layer)")
+                # Final layer done — mark project status
+                if all_passed:
+                    project.status = "completed"
+                    logger.info("All layers completed — project done!")
+                else:
+                    logger.info(f"Layer {layer_id} completed with failures (final layer)")
 
     def _cascade_failures(self, project: BookProject, failed_ids: set) -> None:
         """Mark PENDING agents as FAILED if any dependency is in *failed_ids*.
@@ -663,8 +691,11 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         agent_state = self._find_agent_state(project, agent_id)
         if not agent_state:
             raise ValueError(f"Agent not found in project: {agent_id}")
-        if agent_state.status != AgentStatus.FAILED:
-            raise ValueError(f"Agent {agent_id} is not in FAILED status (current: {agent_state.status.value})")
+        if agent_state.status not in (AgentStatus.FAILED, AgentStatus.RUNNING):
+            raise ValueError(
+                f"Agent {agent_id} cannot be reset from {agent_state.status.value} status "
+                f"(must be FAILED or RUNNING)"
+            )
 
         agent_def = AGENT_REGISTRY.get(agent_id)
         if not agent_def:
@@ -832,18 +863,21 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
     async def run_to_completion(
         self,
         project: BookProject,
-        max_iterations: int = 100
+        max_iterations: int = 200
     ) -> BookProject:
         """
         Run all available agents until project is complete or blocked.
 
         Args:
             project: The book project
-            max_iterations: Safety limit on iterations
+            max_iterations: Safety limit on iterations (counts individual
+                agent executions, not loop passes)
 
         Returns:
             Updated project
         """
+        import asyncio
+
         iterations = 0
 
         while iterations < max_iterations:
@@ -863,10 +897,31 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
                     logger.warning("Project blocked - no available agents")
                 break
 
-            # Execute next available agent
-            agent_id = available[0]
-            await self.execute_agent(project, agent_id)
-            iterations += 1
+            # Execute all independent available agents concurrently within
+            # the same layer.  This dramatically speeds up layers with
+            # multiple independent agents.
+            tasks = []
+            for agent_id in available:
+                if iterations + len(tasks) >= max_iterations:
+                    break
+                tasks.append(self.execute_agent(project, agent_id))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, res in enumerate(results):
+                if isinstance(res, Exception):
+                    logger.warning(
+                        "Agent %s failed during parallel execution: %s",
+                        available[i], res,
+                    )
+            iterations += len(tasks)
+
+        if iterations >= max_iterations:
+            project.status = "blocked"
+            logger.error(
+                "Project hit max iteration limit (%d). "
+                "Pipeline may need manual intervention.",
+                max_iterations,
+            )
 
         return project
 
@@ -966,6 +1021,11 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         user_constraints = data.get("user_constraints") or {}
 
         project = self.create_project(title, user_constraints)
+        # Remove the auto-generated ID entry — we'll re-register under the
+        # imported ID below.  Previously this left an orphaned entry in
+        # self.projects on every import.
+        auto_id = project.project_id
+        self.projects.pop(auto_id, None)
 
         # Override with imported data
         project.project_id = data.get("project_id", project.project_id)
