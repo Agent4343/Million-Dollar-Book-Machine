@@ -360,6 +360,18 @@ Write engaging, publication-quality prose that:
 - Executes each scene's goal
 - Closes with the specified hook
 - Hits the word target approximately
+- Uses * * * on its own line for scene breaks within the chapter
+
+## PROSE QUALITY RULES (CRITICAL)
+- NEVER use AI-telltale phrases: "In a world where", "Little did she know",
+  "A symphony of", "sent shivers down", "pierced the silence", "could not help but",
+  "a dance of", "the weight of", "it was as if", "time seemed to stop"
+- NEVER start consecutive paragraphs the same way
+- Use concrete, specific details not vague abstractions
+- Dialogue: real speech with interruptions, incomplete thoughts, subtext
+- Vary paragraph length dramatically: one-line gut-punches mixed with flowing passages
+- Physical reactions before emotional labels (racing pulse before "she was afraid")
+- Internal monologue should feel raw and unfiltered
 
 ## Output the chapter text directly.
 """

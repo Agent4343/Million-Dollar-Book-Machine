@@ -50,6 +50,19 @@ Write the complete chapter following these guidelines:
 
 Write publication-quality prose. Show, don't tell. Trust the reader.
 
+## PROSE QUALITY RULES (CRITICAL)
+- NEVER use these AI-telltale phrases: "In a world where", "Little did she know",
+  "A symphony of", "sent shivers down", "pierced the silence", "could not help but",
+  "a dance of", "the weight of", "it was as if", "time seemed to stop"
+- NEVER start consecutive paragraphs the same way
+- Use concrete, specific details (brand names, textures, temperatures) not vague abstractions
+- Dialogue should sound like real people: interruptions, incomplete thoughts, subtext
+- Vary paragraph length dramatically: one-line gut-punches mixed with flowing passages
+- Scene breaks should use * * * on their own line
+- Every chapter must have at least ONE moment that makes the reader's breath catch
+- Internal monologue should feel raw and unfiltered, not polished
+- Physical reactions before emotional labels (racing pulse before "she was afraid")
+
 ---
 
 BEGIN CHAPTER {chapter_number}:
