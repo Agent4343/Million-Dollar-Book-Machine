@@ -51,9 +51,9 @@ else:
 
 # --- Create Project ---
 PROJECT = {
-    "title": "Vow of Ruin",
+    "title": "Vow of Ruin: A Dark Mafia Romance",
     "genre": "Dark Romance",
-    "target_word_count": 85000,
+    "target_word_count": 90000,
     "description": (
         "A headstrong prosecutor is forced into an arranged marriage with the "
         "ruthless heir of a rival crime family to seal a blood truce\u2014but she "
@@ -169,17 +169,18 @@ PROJECT = {
             "To the readers who crave stories that make them feel everything\u2014"
             "this one is for you."
         ),
-        # --- Amazon KDP optimization ---
+        # --- Amazon KDP optimization (researched 2025-2026 data) ---
         "amazon_keywords_target": [
-            "dark romance arranged marriage",
-            "mafia romance books",
-            "enemies to lovers dark romance",
-            "morally grey hero romance",
-            "possessive hero romance",
-            "organized crime romance",
-            "dark romance series",
+            "dark mafia romance arranged marriage",
+            "enemies to lovers dark romance possessive",
+            "morally grey hero organized crime romance",
+            "captive dark romance alpha male",
+            "forbidden romance dark steamy mafia",
+            "dark romance series first book",
+            "arranged marriage romance enemies to lovers",
         ],
-        "bisac_categories_target": ["FIC027310", "FIC027020"],
+        # FIC027180 = Romance/Suspense, FIC027220 = Romance/Gothic (lower competition)
+        "bisac_categories_target": ["FIC027180", "FIC027220"],
     },
 }
 

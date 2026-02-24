@@ -609,6 +609,26 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
         book.add_item(ded_page)
         epub_chapters.append(ded_page)
 
+    # Content Warnings / Trigger Warnings (optional — standard for dark romance)
+    content_warnings = project.user_constraints.get("content_warnings", "")
+    if content_warnings:
+        if isinstance(content_warnings, list):
+            warnings_html = "".join(f"<li>{html.escape(w)}</li>" for w in content_warnings)
+        else:
+            # Split comma/semicolon-separated string into list items
+            items = [w.strip() for w in str(content_warnings).replace(";", ",").split(",") if w.strip()]
+            warnings_html = "".join(f"<li>{html.escape(w)}</li>" for w in items)
+        cw_page = epub.EpubHtml(title="Content Warnings", file_name="content_warnings.xhtml", lang="en")
+        cw_page.content = _make_xhtml("Content Warnings",
+            '<h1>Content Warnings</h1>\n'
+            '<p style="margin-bottom:1em;">This book contains themes and scenes that some readers may find '
+            'triggering. Please review the list below before continuing.</p>\n'
+            f'<ul style="line-height:1.8;">{warnings_html}</ul>\n'
+            '<p style="margin-top:1.5em;font-style:italic;">Reader discretion is advised. '
+            'This is a work of fiction.</p>')
+        book.add_item(cw_page)
+        epub_chapters.append(cw_page)
+
     # Also By (optional)
     if sup["also_by"]:
         items_html = "".join(f"<li>{html.escape(t)}</li>" for t in sup["also_by"])
