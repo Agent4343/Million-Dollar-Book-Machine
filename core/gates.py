@@ -135,6 +135,35 @@ def validate_agent_output(
                 normalized_content,
             )
 
+        # Minimum chapter count: the LLM sometimes returns far fewer chapters
+        # than requested.  An 80k-word book at 3500 words/chapter needs ~23
+        # chapters, not 3.  Require at least 40% of the expected count.
+        total_word_target = sum(
+            int(c.get("word_target") or 0)
+            for c in outline if isinstance(c, dict)
+        )
+        if total_word_target > 0:
+            avg_per_chapter = total_word_target / len(chapter_nums)
+            expected_count = max(8, round(total_word_target / max(avg_per_chapter, 1)))
+        else:
+            expected_count = 8  # fallback minimum
+
+        min_chapters = max(6, int(expected_count * 0.4))
+        if len(chapter_nums) < min_chapters:
+            return (
+                False,
+                f"Only {len(chapter_nums)} chapters outlined but expected at least "
+                f"{min_chapters} for the target word count. The blueprint prompt "
+                f"suggested ~{expected_count} chapters.",
+                {"errors": [{
+                    "msg": "too_few_chapters",
+                    "actual": len(chapter_nums),
+                    "minimum": min_chapters,
+                    "expected": expected_count,
+                }]},
+                normalized_content,
+            )
+
     if agent_id == "draft_generation":
         chapters = normalized_content.get("chapters") or []
         if not isinstance(chapters, list) or not chapters:

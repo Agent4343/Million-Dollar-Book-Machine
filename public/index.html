@@ -886,6 +886,15 @@ The AI will sort everything into the right categories and fill in gaps." style="
             document.getElementById('pipelineView').classList.remove('hidden');
             document.getElementById('pipelineProjectTitle').textContent = projectData.title;
 
+            // Auto-save full project state to localStorage for recovery after server restarts
+            try {
+                const exportRes = await fetch(`/api/projects/${currentProject}/export`, {credentials: 'include'});
+                if (exportRes.ok) {
+                    const fullState = await exportRes.json();
+                    saveToLocalStorage(fullState);
+                }
+            } catch (e) { console.debug('Auto-save skipped:', e); }
+
             // Stats
             const layers = Object.keys(projectData.layers).length;
             let agents = 0, completed = 0;
@@ -1534,6 +1543,9 @@ The AI will sort everything into the right categories and fill in gaps." style="
             statusEl.textContent = 'Downloading story bible...';
 
             try {
+                if (!await ensureProjectOnServer(currentProject)) {
+                    throw new Error('Project not found on server. Try refreshing the page.');
+                }
                 const res = await fetch(`/api/projects/${currentProject}/export/story-bible`, {credentials: 'include'});
                 if (!res.ok) throw new Error('Export failed');
 
@@ -1560,6 +1572,9 @@ The AI will sort everything into the right categories and fill in gaps." style="
             }
 
             try {
+                if (!await ensureProjectOnServer(currentProject)) {
+                    throw new Error('Project not found on server. Try refreshing the page.');
+                }
                 const res = await fetch(`/api/projects/${currentProject}/export/outline`, {credentials: 'include'});
                 if (!res.ok) throw new Error('Export failed');
 
@@ -1567,7 +1582,7 @@ The AI will sort everything into the right categories and fill in gaps." style="
                 downloadMarkdown(data.filename, data.content);
             } catch (error) {
                 console.error('Export outline error:', error);
-                alert('Failed to export outline. Make sure the pipeline has been run.');
+                alert('Failed to export outline: ' + error.message);
             }
         }
 
@@ -1578,6 +1593,9 @@ The AI will sort everything into the right categories and fill in gaps." style="
             }
 
             try {
+                if (!await ensureProjectOnServer(currentProject)) {
+                    throw new Error('Project not found on server. Try refreshing the page.');
+                }
                 const res = await fetch(`/api/projects/${currentProject}/export/manuscript`, {credentials: 'include'});
                 if (!res.ok) throw new Error('Export failed');
 
@@ -1585,7 +1603,7 @@ The AI will sort everything into the right categories and fill in gaps." style="
                 downloadMarkdown(data.filename, data.content);
             } catch (error) {
                 console.error('Export manuscript error:', error);
-                alert('Failed to export manuscript');
+                alert('Failed to export manuscript: ' + error.message);
             }
         }
 
@@ -1612,18 +1630,20 @@ The AI will sort everything into the right categories and fill in gaps." style="
             statusEl.textContent = 'Generating Word document...';
 
             try {
-                // Ensure project exists on server
                 if (!await ensureProjectOnServer(currentProject)) {
-                    throw new Error('Project not found on server');
+                    throw new Error('Project not found on server. Try refreshing the page or re-importing your project.');
                 }
 
                 const res = await fetch(`/api/projects/${currentProject}/export/docx`, {credentials: 'include'});
                 if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Export failed');
+                    let msg = `Server error (${res.status})`;
+                    try { const err = await res.json(); msg = err.detail || msg; } catch(e) {}
+                    throw new Error(msg);
                 }
 
                 const blob = await res.blob();
+                if (blob.size === 0) throw new Error('Server returned empty file');
+
                 const url = URL.createObjectURL(blob);
                 const filename = (projectData?.title || 'Book').replace(/[^a-z0-9]/gi, '_') + '.docx';
 
@@ -1654,18 +1674,20 @@ The AI will sort everything into the right categories and fill in gaps." style="
             statusEl.textContent = 'Generating EPUB for Kindle...';
 
             try {
-                // Ensure project exists on server
                 if (!await ensureProjectOnServer(currentProject)) {
-                    throw new Error('Project not found on server');
+                    throw new Error('Project not found on server. Try refreshing the page or re-importing your project.');
                 }
 
                 const res = await fetch(`/api/projects/${currentProject}/export/epub`, {credentials: 'include'});
                 if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Export failed');
+                    let msg = `Server error (${res.status})`;
+                    try { const err = await res.json(); msg = err.detail || msg; } catch(e) {}
+                    throw new Error(msg);
                 }
 
                 const blob = await res.blob();
+                if (blob.size === 0) throw new Error('Server returned empty file');
+
                 const url = URL.createObjectURL(blob);
                 const filename = (projectData?.title || 'Book').replace(/[^a-z0-9]/gi, '_') + '.epub';
 
