@@ -313,6 +313,17 @@ class Orchestrator:
         if not agent_state:
             raise ValueError(f"Agent not found in project: {agent_id}")
 
+        # Defensive dependency check: ensure all dependencies have passed
+        # before allowing execution (guards against direct calls that bypass
+        # the API-level availability check).
+        for dep_id in agent_def.dependencies:
+            dep_state = self._find_agent_state(project, dep_id)
+            if not dep_state or dep_state.status != AgentStatus.PASSED:
+                raise ValueError(
+                    f"Cannot execute {agent_id}: dependency '{dep_id}' "
+                    f"has not passed (status={dep_state.status.value if dep_state else 'missing'})"
+                )
+
         # Update status
         agent_state.status = AgentStatus.RUNNING
         agent_state.attempts += 1
