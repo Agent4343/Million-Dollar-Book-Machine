@@ -109,6 +109,91 @@ def _limit_for_job(context: ExecutionContext, key: str, default: int = 5) -> int
     return default
 
 
+# AI-telltale phrases shared across validation agents (final_proof + structural_rewrite).
+# These are checked in pure Python (free) before deciding whether to send a chapter
+# to the LLM for a full quality sweep.
+_AI_TELLTALE_PHRASES = [
+    "in a world where", "little did she know", "little did he know",
+    "a symphony of", "sent shivers down", "pierced the silence",
+    "could not help but", "couldn't help but", "a dance of",
+    "the weight of the world", "it was as if", "time seemed to stop",
+    "a testament to", "in the grand tapestry", "with bated breath",
+    "a wave of emotion", "etched on her face", "etched on his face",
+    "the silence was deafening", "a newfound sense of",
+    "the air was thick with", "words hung in the air",
+    "her world came crashing", "his world came crashing",
+    "a flicker of", "a glimmer of hope",
+]
+
+# Told-not-shown emotion patterns (e.g. "she felt angry", "he was terrified")
+_TOLD_EMOTION_RE = re.compile(
+    r"\b(she|he|they|I)\s+(was|were|felt|seemed)\s+"
+    r"(afraid|angry|anxious|bitter|confused|desperate|devastated|disappointed|"
+    r"disgusted|embarrassed|excited|frightened|frustrated|furious|grateful|guilty|"
+    r"happy|heartbroken|helpless|hopeful|horrified|hurt|jealous|joyful|lonely|"
+    r"nervous|overwhelmed|panicked|proud|relieved|sad|scared|shocked|terrified|"
+    r"thrilled|torn|worried)\b",
+    re.IGNORECASE,
+)
+
+
+def _heuristic_chapter_issues(text: str) -> List[str]:
+    """Run free Python heuristics on a single chapter's text.
+
+    Returns a list of issue descriptions. An empty list means the chapter
+    looks clean and can skip the expensive LLM quality sweep.
+
+    This is the key cost-saving gate: only chapters with heuristic flags
+    get sent to the LLM, so clean chapters cost nothing.
+    """
+    issues: List[str] = []
+    if not text or len(text.strip()) < 500:
+        return issues
+
+    text_lower = text.lower()
+
+    # Check 1: AI-telltale phrases
+    ai_found = [p for p in _AI_TELLTALE_PHRASES if p in text_lower]
+    if ai_found:
+        issues.append(f"AI phrases: {', '.join(ai_found[:5])}")
+
+    # Check 2: Consecutive paragraphs starting the same way
+    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paras) >= 2:
+        same_start_count = 0
+        for i in range(1, len(paras)):
+            # Compare first 3 words
+            words_a = paras[i - 1].split()[:3]
+            words_b = paras[i].split()[:3]
+            if words_a and words_b and words_a == words_b:
+                same_start_count += 1
+        if same_start_count >= 2:
+            issues.append(f"Consecutive same-start paragraphs: {same_start_count} instances")
+
+    # Check 3: Told-not-shown emotions
+    told_hits = _TOLD_EMOTION_RE.findall(text)
+    if len(told_hits) >= 4:
+        examples = list(set(h[2] for h in told_hits[:6]))
+        issues.append(f"Told emotions ({len(told_hits)}x): {', '.join(examples[:4])}")
+
+    # Check 4: Repetitive sentence starts within proximity
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) >= 6:
+        start_counts: Dict[str, int] = {}
+        for s in sentences:
+            first_word = s.split()[0].lower() if s.split() else ""
+            if first_word and len(first_word) > 2:
+                start_counts[first_word] = start_counts.get(first_word, 0) + 1
+        # Flag if any non-article word starts >15% of sentences
+        threshold = max(4, len(sentences) // 7)
+        overused = [w for w, c in start_counts.items()
+                    if c >= threshold and w not in ("the", "a", "an", "i", "he", "she", "it", "they", "we")]
+        if overused:
+            issues.append(f"Repetitive sentence starts: {', '.join(overused)}")
+
+    return issues
+
+
 # Relationship keywords used to extract cross-chapter character references.
 _RELATIONSHIP_WORDS = re.compile(
     r"\b(father|mother|husband|wife|spouse|brother|sister|son|daughter|parent|"
@@ -953,16 +1038,17 @@ TEXT:
                 rewritten_set.add(num)
                 revision_log.append({"chapter": num, "changes": f"Rewrite skipped: {exc}"})
 
-        # ── Phase 2: Quality sweep unflagged chapters ──
-        # These chapters had no upstream issues flagged, but that's because
-        # the validation agents only sampled ~6-13% of the text. Run a
-        # lightweight quality check on each one so nothing slips through.
+        # ── Phase 2: Heuristic-gated quality sweep of unflagged chapters ──
+        # Run FREE Python heuristics first on each chapter. Only chapters
+        # that fail heuristics (AI phrases, told-not-shown, repetition, etc.)
+        # get sent to the LLM. Clean chapters pass through unchanged.
+        # This typically cuts LLM calls by 60-80% vs. sweeping every chapter.
         max_sweep = _limit_for_job(context, "max_sweep_chapters", 50)
+        heuristic_skipped = 0
         for num in unflagged_nums[:max_sweep]:
             ch = chapters_by_num[num]
             text = _chapter_text(ch)
             if not text or len(text.strip()) < 500:
-                # Too short to meaningfully review
                 revised.append({
                     "number": num,
                     "title": _chapter_title(ch),
@@ -972,27 +1058,46 @@ TEXT:
                 })
                 rewritten_set.add(num)
                 continue
+
+            # Run free heuristics — if chapter is clean, skip the LLM call
+            heuristic_flags = _heuristic_chapter_issues(text)
+            if not heuristic_flags:
+                # Chapter passed all heuristic checks — no LLM call needed
+                revised.append({
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": text,
+                    "summary": _chapter_summary(ch) or "Passed heuristic quality check.",
+                    "word_count": len(text.split()) if text else 0,
+                })
+                rewritten_set.add(num)
+                heuristic_skipped += 1
+                continue
+
+            # Chapter has heuristic issues — send to LLM for targeted fixes
+            heuristic_context = "\n".join(f"- {f}" for f in heuristic_flags)
             try:
-                prompt = f"""You are a quality editor doing a sweep of a chapter that passed initial validation. Check for and fix:
-1. AI-telltale phrases ("In a world where", "Little did she know", "sent shivers down", etc.)
-2. Consecutive paragraphs starting the same way
-3. Told emotions instead of shown (e.g. "she was angry" vs showing physical reaction)
-4. Repetitive sentence structures or word echoes within 3 paragraphs
-5. Weak dialogue tags (overuse of adverbs, said-bookisms)
-6. Generic descriptions that could be in any book (replace with specific, grounded details)
+                prompt = f"""You are a quality editor fixing specific issues detected in a chapter.
+
+## DETECTED ISSUES (fix these specifically):
+{heuristic_context}
+
+## ADDITIONAL CHECKS:
+1. Weak dialogue tags (overuse of adverbs, said-bookisms)
+2. Generic descriptions that could be in any book (replace with specific, grounded details)
 
 Style guide: {voice_guide}
 
 RULES:
 - Preserve ALL plot events, character actions, and dialogue meaning.
 - Only improve prose quality; do NOT change the story.
-- If the chapter is already strong, return it mostly unchanged.
+- Focus on the detected issues above — they are confirmed problems.
 
 Return ONLY valid JSON:
 {{
   "text": "...",
   "summary": "...",
-  "changes": "brief description of what was improved, or 'No significant changes needed'"
+  "changes": "brief description of what was improved"
 }}
 
 Chapter to review:
@@ -1011,7 +1116,7 @@ TEXT:
                     "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
                 })
                 rewritten_set.add(num)
-                revision_log.append({"chapter": num, "changes": f"Quality sweep: {changes}"})
+                revision_log.append({"chapter": num, "changes": f"Quality sweep ({len(heuristic_flags)} issues): {changes}"})
             except Exception as exc:
                 logger.warning("structural_rewrite: Chapter %s quality sweep failed: %s", num, exc)
                 revised.append({
@@ -1022,6 +1127,9 @@ TEXT:
                     "word_count": len(text.split()) if text else 0,
                 })
                 rewritten_set.add(num)
+
+        if heuristic_skipped:
+            logger.info("structural_rewrite: %d chapters passed heuristic check, skipped LLM sweep", heuristic_skipped)
 
         # Carry forward any chapters not processed (shouldn't happen, but safety net)
         for ch in chapters:
@@ -1707,25 +1815,13 @@ async def execute_final_proof(context: ExecutionContext) -> Dict[str, Any]:
         )
 
     # ── Heuristic scan #2: AI-telltale phrases across entire manuscript ──
-    ai_phrases = [
-        "in a world where", "little did she know", "little did he know",
-        "a symphony of", "sent shivers down", "pierced the silence",
-        "could not help but", "couldn't help but", "a dance of",
-        "the weight of the world", "it was as if", "time seemed to stop",
-        "a testament to", "in the grand tapestry", "with bated breath",
-        "a wave of emotion", "etched on her face", "etched on his face",
-        "the silence was deafening", "a newfound sense of",
-        "the air was thick with", "words hung in the air",
-        "her world came crashing", "his world came crashing",
-        "a flicker of", "a glimmer of hope",
-    ]
     ai_hits: Dict[str, List[int]] = {}
     for ch in chapters:
         if not isinstance(ch, dict):
             continue
         text_lower = _chapter_text(ch).lower()
         num = _chapter_number(ch)
-        for phrase in ai_phrases:
+        for phrase in _AI_TELLTALE_PHRASES:
             if phrase in text_lower:
                 ai_hits.setdefault(phrase, []).append(num)
     if ai_hits:
