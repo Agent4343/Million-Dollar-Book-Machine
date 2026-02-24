@@ -69,12 +69,16 @@ def _chapter_summary(ch: Dict[str, Any]) -> str:
     return s if isinstance(s, str) and s.strip() else ""
 
 
-def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 18000) -> str:
+def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 40000) -> str:
     """Bounded manuscript sample for analysis prompts.
 
     Samples every chapter with an adaptive per-chapter budget so that
     quality validation sees representative text from across the entire
     book, not just the first, middle, and last chapters.
+
+    Default budget increased from 18K to 40K chars to cover ~13% of an
+    80K-word book (vs. 6% before).  For a 14-chapter book this gives
+    ~2,800 chars per chapter — enough to catch most prose-level issues.
     """
     if not chapters:
         return ""
@@ -82,7 +86,7 @@ def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 18000) -
     valid = [ch for ch in chapters if isinstance(ch, dict)]
     if not valid:
         return ""
-    per_chapter = max(1200, max_chars // len(valid))
+    per_chapter = max(2000, max_chars // len(valid))
     out = ""
     for ch in valid:
         snippet = f"\n\n---\nCHAPTER {_chapter_number(ch)}: {_chapter_title(ch)}\n"
@@ -115,13 +119,15 @@ _RELATIONSHIP_WORDS = re.compile(
 )
 
 
-def _chapter_summaries_map(chapters: List[Dict[str, Any]], max_chars: int = 15000) -> str:
-    """Build a compact per-chapter summary + opening for cross-chapter analysis.
+def _chapter_summaries_map(chapters: List[Dict[str, Any]], max_chars: int = 25000) -> str:
+    """Build a compact per-chapter summary + opening + closing for cross-chapter analysis.
 
-    Instead of sampling 3 chapters at 2200 chars each, this gives every
-    chapter's summary plus its first ~400 chars — enough for the LLM to
-    see character introductions, relationship references, and setup across
-    the entire manuscript.
+    Gives every chapter's summary plus its first ~600 chars and last ~400 chars,
+    so the LLM can see character introductions, relationship references, setup,
+    AND how each chapter ends (cliffhangers, emotional states, plot turns).
+
+    Budget increased from 15K to 25K chars to provide meaningful coverage
+    of the full manuscript arc.
     """
     if not chapters:
         return ""
@@ -133,10 +139,16 @@ def _chapter_summaries_map(chapters: List[Dict[str, Any]], max_chars: int = 1500
         num = _chapter_number(ch)
         title = _chapter_title(ch)
         summary = _chapter_summary(ch)
-        opening = _chapter_text(ch)[:400]
+        text = _chapter_text(ch)
+        opening = text[:600]
+        # Also include chapter ending — this is where cliffhangers,
+        # emotional state changes, and plot turns live
+        closing = text[-400:] if len(text) > 1000 else ""
         entry = f"Ch{num} ({title}): {summary}"
         if opening:
             entry += f"\n  Opening: {opening}"
+        if closing:
+            entry += f"\n  Closing: ...{closing}"
         parts.append(entry)
         budget -= len(entry) + 2
         if budget <= 0:
@@ -407,9 +419,12 @@ async def execute_developmental_editor(context: ExecutionContext) -> Dict[str, A
     audience = constraints.get("audience", "Adult") if isinstance(constraints, dict) else "Adult"
 
     if llm and chapters:
-        chapter_map = _chapter_summaries_map(chapters, max_chars=18000)
+        chapter_map = _chapter_summaries_map(chapters, max_chars=30000)
         char_per_chapter = _extract_named_characters_per_chapter(chapters)
-        relationship_refs = _extract_relationship_references(chapters, max_chars=6000)
+        relationship_refs = _extract_relationship_references(chapters, max_chars=8000)
+        # Include actual prose samples so the editor can assess writing quality,
+        # voice consistency, and detect AI-telltale language — not just structural issues.
+        prose_samples = _sample_manuscript(chapters, max_chars=30000)
 
         system_prompt = """You are a professional developmental editor AI. Your sole function is to identify and resolve weaknesses in how a book has been developed. You do not write prose unless explicitly asked. You diagnose, flag, and prescribe fixes.
 
@@ -480,6 +495,9 @@ Emotional validation: {emotional}
 ## RELATIONSHIP REFERENCES ACROSS CHAPTERS
 {relationship_refs}
 
+## PROSE SAMPLES (representative excerpts from every chapter)
+{prose_samples}
+
 ## ASSESSMENT INSTRUCTIONS
 
 Evaluate ALL 8 improvement areas below. For each area, flag specific problems with chapter locations and prescribe concrete fixes.
@@ -515,6 +533,10 @@ Prescribe: cross-reference every stated trait against chapter structure; ensure 
 ### AREA 8: GENERIC TITLING
 Flag when: chapter titles interchangeable with other books in genre; titles summarize plot rather than create emotional invitation; book title too broad.
 Prescribe: flag every generic title; for each, generate 3 alternatives specific to this book's world or central relationship.
+
+### AREA 9: PROSE QUALITY & VOICE CONSISTENCY
+Flag when: AI-telltale phrases detected ("In a world where", "Little did she know", "sent shivers down", "a symphony of", "could not help but", "a dance of", "the weight of", "it was as if", "time seemed to stop", "a testament to", "with bated breath", "a wave of emotion", "the silence was deafening", "a newfound sense of"); narrative voice shifts tone or register between chapters without clear reason; excessive telling instead of showing; repetitive sentence structures or paragraph openings; bland/generic sensory details instead of specific/grounded ones; dialogue that all sounds the same regardless of character.
+Prescribe: cite exact AI phrases with chapter locations; identify voice drift with before/after examples; specify which chapters need prose polish; recommend concrete alternatives for generic language.
 
 Return ONLY valid JSON with this exact shape:
 {{
@@ -563,6 +585,14 @@ Return ONLY valid JSON with this exact shape:
     "generic_titles": [{{"chapter": 1, "current_title": "...", "alternatives": ["...", "...", "..."]}}],
     "book_title_assessment": "..."
   }},
+  "prose_quality_report": {{
+    "status": "passed|failed|warning",
+    "ai_telltale_phrases": [{{"phrase": "...", "chapters": [1], "replacement": "..."}}],
+    "voice_drift": [{{"chapter": 1, "description": "...", "prescription": "..."}}],
+    "show_dont_tell": [{{"chapter": 1, "example": "...", "rewrite": "..."}}],
+    "repetitive_patterns": ["..."],
+    "overall_prose_score": 0
+  }},
   "priority_fixes": [
     {{"priority": 1, "area": "...", "description": "...", "chapters_affected": [1], "must_resolve_before": "..."}}
   ],
@@ -574,7 +604,9 @@ Rules:
 - priority_fixes must be ordered by severity (character consistency issues first per the dependency rule).
 - Be specific: cite chapter numbers and exact contradicting references.
 - If an area has no issues, set status to "passed" with empty issues array.
-- Do not repeat the same finding across multiple areas."""
+- Do not repeat the same finding across multiple areas.
+- For prose_quality_report, overall_prose_score is 0-100 (100 = publication-ready prose).
+- AI-telltale phrases should each have a specific replacement suggestion."""
 
         return await llm.generate(
             prompt,
@@ -630,6 +662,14 @@ Rules:
             "status": "passed",
             "generic_titles": [],
             "book_title_assessment": "Title is distinctive and genre-appropriate."
+        },
+        "prose_quality_report": {
+            "status": "passed",
+            "ai_telltale_phrases": [],
+            "voice_drift": [],
+            "show_dont_tell": [],
+            "repetitive_patterns": [],
+            "overall_prose_score": 85
         },
         "priority_fixes": [],
         "developmental_letter": "The manuscript is well-developed with consistent characters, solid structure, and effective pacing. No critical developmental issues found at this stage. Recommend proceeding to originality and legal review."
@@ -842,30 +882,39 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
                             f"[major] Arc incomplete: {arc_notes}"
                         )
 
-        # Only LLM-rewrite chapters that have known issues. Chapters without
-        # issues pass through unchanged — this avoids wasting LLM calls on
-        # chapters that are already fine and prevents introducing new errors.
+        # Rewrite chapters with known issues AND quality-sweep unflagged chapters.
+        # Previous behavior only rewrote chapters with upstream flags, meaning
+        # 94% of the book that validation agents couldn't sample was never reviewed.
+        # Now every chapter gets at least a quality pass.
         chapters_by_num = {_chapter_number(ch): ch for ch in chapters if isinstance(ch, dict)}
         rewrite_nums = [n for n in sorted(chapter_issues.keys()) if n in chapters_by_num]
+        # Unflagged chapters that still need a quality sweep
+        unflagged_nums = [n for n in sorted(chapters_by_num.keys()) if n not in chapter_issues]
 
         revised: List[Dict[str, Any]] = []
         revision_log: List[Dict[str, Any]] = []
-        rewritten_set = set(rewrite_nums)
+        rewritten_set: set = set()
+
+        # Get global editorial context once
+        dev_letter = ""
+        if isinstance(dev_editor, dict) and dev_editor.get("developmental_letter"):
+            dev_letter = f"\nDevelopmental editor letter: {dev_editor['developmental_letter']}"
+        continuity_summary = (continuity.get("continuity_report", {}) or {}).get("recommendation", "No issues.")
+        emotional_notes = (emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "No notes.")
+        voice_spec = context.inputs.get("voice_specification", {})
+        voice_guide = voice_spec.get("style_guide", {}) if isinstance(voice_spec, dict) else {}
+
+        # ── Phase 1: Rewrite chapters with known issues (full rewrite) ──
         for num in rewrite_nums:
             ch = chapters_by_num[num]
             issues_for_ch = chapter_issues.get(num, [])
-            issues_block = ""
-            if issues_for_ch:
-                issues_block = "\n\n## SPECIFIC ISSUES TO FIX IN THIS CHAPTER:\n" + "\n".join(f"- {i}" for i in issues_for_ch)
+            issues_block = "\n\n## SPECIFIC ISSUES TO FIX IN THIS CHAPTER:\n" + "\n".join(f"- {i}" for i in issues_for_ch)
             try:
-                dev_letter = ""
-                if isinstance(dev_editor, dict) and dev_editor.get("developmental_letter"):
-                    dev_letter = f"\nDevelopmental editor letter: {dev_editor['developmental_letter']}"
                 prompt = f"""You are rewriting a chapter to fix known issues and improve clarity, pacing, and voice consistency while preserving plot facts.
 
 Global context from audits:
-Continuity audit summary: {(continuity.get("continuity_report", {}) or {}).get("recommendation", "No issues.")}
-Emotional validation notes: {(emotional.get("arc_fulfillment_check", {}) or {}).get("notes", "No notes.")}{dev_letter}
+Continuity audit summary: {continuity_summary}
+Emotional validation notes: {emotional_notes}{dev_letter}
 {issues_block}
 
 Return ONLY valid JSON:
@@ -882,20 +931,17 @@ TEXT:
 """
                 out = await llm.generate(prompt, response_format="json", temperature=0.4)
                 new_text = out.get("text") or _chapter_text(ch)
-                revised_ch = {
+                revised.append({
                     "number": num,
                     "title": _chapter_title(ch),
                     "text": new_text,
                     "summary": out.get("summary", _chapter_summary(ch) or "Updated chapter."),
                     "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
-                }
-                revised.append(revised_ch)
+                })
+                rewritten_set.add(num)
                 revision_log.append({"chapter": num, "changes": out.get("changes", "Revised prose and structure.")})
             except Exception as exc:
-                logger.warning(
-                    "structural_rewrite: Chapter %s rewrite failed, keeping original: %s",
-                    num, exc,
-                )
+                logger.warning("structural_rewrite: Chapter %s rewrite failed, keeping original: %s", num, exc)
                 t = _chapter_text(ch)
                 revised.append({
                     "number": num,
@@ -904,25 +950,94 @@ TEXT:
                     "summary": _chapter_summary(ch) or "Rewrite skipped.",
                     "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
                 })
+                rewritten_set.add(num)
                 revision_log.append({"chapter": num, "changes": f"Rewrite skipped: {exc}"})
 
-        # Carry forward chapters that weren't rewritten, in original order.
+        # ── Phase 2: Quality sweep unflagged chapters ──
+        # These chapters had no upstream issues flagged, but that's because
+        # the validation agents only sampled ~6-13% of the text. Run a
+        # lightweight quality check on each one so nothing slips through.
+        max_sweep = _limit_for_job(context, "max_sweep_chapters", 50)
+        for num in unflagged_nums[:max_sweep]:
+            ch = chapters_by_num[num]
+            text = _chapter_text(ch)
+            if not text or len(text.strip()) < 500:
+                # Too short to meaningfully review
+                revised.append({
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": text,
+                    "summary": _chapter_summary(ch) or "Unchanged.",
+                    "word_count": len(text.split()) if text else 0,
+                })
+                rewritten_set.add(num)
+                continue
+            try:
+                prompt = f"""You are a quality editor doing a sweep of a chapter that passed initial validation. Check for and fix:
+1. AI-telltale phrases ("In a world where", "Little did she know", "sent shivers down", etc.)
+2. Consecutive paragraphs starting the same way
+3. Told emotions instead of shown (e.g. "she was angry" vs showing physical reaction)
+4. Repetitive sentence structures or word echoes within 3 paragraphs
+5. Weak dialogue tags (overuse of adverbs, said-bookisms)
+6. Generic descriptions that could be in any book (replace with specific, grounded details)
+
+Style guide: {voice_guide}
+
+RULES:
+- Preserve ALL plot events, character actions, and dialogue meaning.
+- Only improve prose quality; do NOT change the story.
+- If the chapter is already strong, return it mostly unchanged.
+
+Return ONLY valid JSON:
+{{
+  "text": "...",
+  "summary": "...",
+  "changes": "brief description of what was improved, or 'No significant changes needed'"
+}}
+
+Chapter to review:
+TITLE: {_chapter_title(ch)}
+TEXT:
+{text}
+"""
+                out = await llm.generate(prompt, response_format="json", temperature=0.3)
+                new_text = out.get("text") or text
+                changes = out.get("changes", "Quality sweep completed.")
+                revised.append({
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": new_text,
+                    "summary": out.get("summary", _chapter_summary(ch) or "Quality sweep applied."),
+                    "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
+                })
+                rewritten_set.add(num)
+                revision_log.append({"chapter": num, "changes": f"Quality sweep: {changes}"})
+            except Exception as exc:
+                logger.warning("structural_rewrite: Chapter %s quality sweep failed: %s", num, exc)
+                revised.append({
+                    "number": num,
+                    "title": _chapter_title(ch),
+                    "text": text,
+                    "summary": _chapter_summary(ch) or "Unchanged.",
+                    "word_count": len(text.split()) if text else 0,
+                })
+                rewritten_set.add(num)
+
+        # Carry forward any chapters not processed (shouldn't happen, but safety net)
         for ch in chapters:
             if not isinstance(ch, dict):
                 continue
             num = _chapter_number(ch)
             if num in rewritten_set:
-                continue  # already in revised list
+                continue
             t = _chapter_text(ch)
-            revised.append(
-                {
-                    "number": num,
-                    "title": _chapter_title(ch),
-                    "text": t,
-                    "summary": _chapter_summary(ch) or "Unchanged.",
-                    "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
-                }
-            )
+            revised.append({
+                "number": num,
+                "title": _chapter_title(ch),
+                "text": t,
+                "summary": _chapter_summary(ch) or "Unchanged.",
+                "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
+            })
 
         # Sort revised chapters back into order.
         revised.sort(key=lambda c: c.get("number", 0))
@@ -1217,25 +1332,16 @@ async def execute_production_readiness(context: ExecutionContext) -> Dict[str, A
 
     # If we have an LLM, generate a structured QA report based on actual manuscript content.
     if llm and chapters:
-        sample_text = ""
-        # Keep token use bounded: sample opening + mid + ending snippets if present.
-        picks = []
-        if len(chapters) >= 1:
-            picks.append(chapters[0])
-        if len(chapters) >= 3:
-            picks.append(chapters[len(chapters) // 2])
-        if len(chapters) >= 2:
-            picks.append(chapters[-1])
-        for ch in picks:
-            if isinstance(ch, dict) and isinstance(ch.get("text"), str):
-                sample_text += f"\n\n---\nCHAPTER {ch.get('chapter_number') or ch.get('number')}: {ch.get('title','')}\n{ch.get('text')[:1800]}\n"
+        # Use the full _sample_manuscript for broad coverage instead of
+        # cherry-picking 3 chapters at 1800 chars each (which missed ~98%).
+        sample_text = _sample_manuscript(chapters, max_chars=40000)
 
         prompt = f"""You are a senior publishing editor producing a production-readiness QA report.
 
 Project constraints: {constraints}
 Release recommendation (if present): {release}
 
-Manuscript sample:
+Manuscript sample (representative excerpts from every chapter):
 {sample_text}
 
 Return ONLY valid JSON with this shape:
@@ -1573,27 +1679,82 @@ async def execute_final_proof(context: ExecutionContext) -> Dict[str, Any]:
     per_chapter_issues: List[Dict[str, Any]] = []
     consistency_findings: List[str] = []
 
-    # Simple repetition scan across entire manuscript (no LLM)
+    # ── Heuristic scan #1: Repetitive phrasing across entire manuscript ──
     phrase_counts: Dict[str, int] = {}
     for ch in chapters:
         if not isinstance(ch, dict):
             continue
         text = _chapter_text(ch)
-        # Normalize and extract 3-6 word phrases
         words = re.findall(r"[A-Za-z']+", text.lower())
-        for n in (3, 4):
+        for n in (3, 4, 5):
             for i in range(0, max(0, len(words) - n)):
                 phrase = " ".join(words[i : i + n])
                 if len(phrase) < 10:
                     continue
                 phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
 
-    repeated = sorted([(p, c) for p, c in phrase_counts.items() if c >= 18], key=lambda x: x[1], reverse=True)[:10]
+    # Threshold scales with book length: shorter books tolerate fewer repeats
+    total_words = sum(len(_chapter_text(ch).split()) for ch in chapters if isinstance(ch, dict))
+    repeat_threshold = max(8, min(18, total_words // 5000))
+    repeated = sorted(
+        [(p, c) for p, c in phrase_counts.items() if c >= repeat_threshold],
+        key=lambda x: x[1], reverse=True,
+    )[:15]
     if repeated:
         consistency_findings.append(
             "Repeated phrasing detected (consider rewriting): "
             + "; ".join([f"'{p}' x{c}" for p, c in repeated])
         )
+
+    # ── Heuristic scan #2: AI-telltale phrases across entire manuscript ──
+    ai_phrases = [
+        "in a world where", "little did she know", "little did he know",
+        "a symphony of", "sent shivers down", "pierced the silence",
+        "could not help but", "couldn't help but", "a dance of",
+        "the weight of the world", "it was as if", "time seemed to stop",
+        "a testament to", "in the grand tapestry", "with bated breath",
+        "a wave of emotion", "etched on her face", "etched on his face",
+        "the silence was deafening", "a newfound sense of",
+        "the air was thick with", "words hung in the air",
+        "her world came crashing", "his world came crashing",
+        "a flicker of", "a glimmer of hope",
+    ]
+    ai_hits: Dict[str, List[int]] = {}
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        text_lower = _chapter_text(ch).lower()
+        num = _chapter_number(ch)
+        for phrase in ai_phrases:
+            if phrase in text_lower:
+                ai_hits.setdefault(phrase, []).append(num)
+    if ai_hits:
+        ai_details = "; ".join(
+            f"'{p}' in Ch{','.join(str(n) for n in chs)}"
+            for p, chs in sorted(ai_hits.items(), key=lambda x: -len(x[1]))
+        )
+        consistency_findings.append(f"AI-telltale phrases found (replace with original prose): {ai_details}")
+
+    # ── Heuristic scan #3: Chapter transition coherence ──
+    # Check that each chapter's ending connects logically to the next
+    # chapter's opening (catches jarring jumps, dropped threads)
+    sorted_chapters = sorted(
+        [ch for ch in chapters if isinstance(ch, dict)],
+        key=lambda c: _chapter_number(c),
+    )
+    transition_pairs: List[Dict[str, str]] = []
+    for i in range(len(sorted_chapters) - 1):
+        ch_a = sorted_chapters[i]
+        ch_b = sorted_chapters[i + 1]
+        ending = _chapter_text(ch_a)[-500:] if len(_chapter_text(ch_a)) > 500 else _chapter_text(ch_a)
+        opening = _chapter_text(ch_b)[:500] if len(_chapter_text(ch_b)) > 500 else _chapter_text(ch_b)
+        if ending.strip() and opening.strip():
+            transition_pairs.append({
+                "from_ch": str(_chapter_number(ch_a)),
+                "to_ch": str(_chapter_number(ch_b)),
+                "ending": ending,
+                "opening": opening,
+            })
 
     # ── Cross-chapter consistency check (single LLM call) ──
     # Uses the relationship extractor + character map to catch issues that
@@ -1650,6 +1811,64 @@ Rules:
                                 break  # only count once for scoring
         except Exception as exc:
             logger.warning("final_proof: Cross-chapter consistency check failed: %s", exc)
+
+    # ── Chapter transition analysis (single LLM call) ──
+    # Check that each chapter ending connects logically to the next
+    # chapter opening — catches jarring POV jumps, dropped cliffhangers,
+    # time/setting contradictions at chapter boundaries.
+    if llm and transition_pairs:
+        try:
+            # Batch transitions into a single prompt to save API calls
+            transitions_text = ""
+            for tp in transition_pairs[:20]:  # cap at 20 transitions
+                transitions_text += f"\n--- Ch{tp['from_ch']} ENDING ---\n{tp['ending']}\n"
+                transitions_text += f"--- Ch{tp['to_ch']} OPENING ---\n{tp['opening']}\n"
+
+            transition_prompt = f"""You are checking chapter-to-chapter transitions in a novel manuscript. For each transition below, evaluate whether:
+
+1. **CONTINUITY**: The next chapter opening logically follows from the previous ending (characters, setting, timeline)
+2. **CLIFFHANGER PAYOFF**: If a chapter ends on a cliffhanger or revelation, the next chapter should address it within a reasonable window
+3. **TONE CONSISTENCY**: The narrative voice/tone doesn't shift jarringly without reason
+4. **SETTING/TIME**: No unexplained jumps in location or timeline that confuse the reader
+
+{transitions_text}
+
+Return ONLY valid JSON:
+{{
+  "transition_issues": [
+    {{"from_chapter": 1, "to_chapter": 2, "severity": "critical|major|minor", "type": "continuity|cliffhanger|tone|setting", "description": "...", "suggested_fix": "..."}}
+  ]
+}}
+
+Rules:
+- Only flag actual problems, not intentional time skips or POV changes that are clearly labeled.
+- Dropped cliffhangers (ending on a tense moment, next chapter ignores it entirely) are "major".
+- Unexplained setting/time contradictions are "critical".
+- Minor tone shifts are "minor"."""
+            transition_result = await llm.generate(transition_prompt, response_format="json", temperature=0.2, max_tokens=2500)
+            if isinstance(transition_result, dict):
+                for issue in transition_result.get("transition_issues", []):
+                    if isinstance(issue, dict) and issue.get("description"):
+                        from_ch = issue.get("from_chapter", "?")
+                        to_ch = issue.get("to_chapter", "?")
+                        consistency_findings.append(
+                            f"[{issue.get('severity', 'major')}] Transition Ch{from_ch}→Ch{to_ch}: "
+                            f"{issue['description']}"
+                        )
+                        # Score the receiving chapter
+                        if isinstance(to_ch, int):
+                            per_chapter_issues.append({
+                                "chapter": to_ch,
+                                "title": "",
+                                "issues": [{
+                                    "severity": issue.get("severity", "major"),
+                                    "location": f"Transition from Ch{from_ch}",
+                                    "description": issue["description"],
+                                    "suggested_fix": issue.get("suggested_fix", ""),
+                                }],
+                            })
+        except Exception as exc:
+            logger.warning("final_proof: Chapter transition analysis failed: %s", exc)
 
     # LLM-based proof per chapter (chunked)
     if llm and chapters:
