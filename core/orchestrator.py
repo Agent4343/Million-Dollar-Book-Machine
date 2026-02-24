@@ -701,9 +701,9 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         """Register a custom executor for an agent."""
         self.agent_executors[agent_id] = executor
 
-    def reset_agent(self, project: BookProject, agent_id: str) -> AgentState:
+    def reset_agent(self, project: BookProject, agent_id: str, allow_passed: bool = False) -> AgentState:
         """
-        Reset a FAILED agent back to PENDING so it can be retried.
+        Reset a FAILED (or optionally PASSED) agent back to PENDING so it can be retried.
 
         This also re-evaluates the layer status so that previously locked
         downstream layers can be re-locked if they depended on this agent.
@@ -711,20 +711,27 @@ Return ONLY corrected JSON (no markdown, no commentary)."""
         Args:
             project: The book project
             agent_id: Agent to reset
+            allow_passed: If True, also allow resetting PASSED agents (redo)
 
         Returns:
             The updated AgentState
 
         Raises:
-            ValueError: If the agent doesn't exist or is not in FAILED status
+            ValueError: If the agent doesn't exist or is not in a resettable status
         """
         agent_state = self._find_agent_state(project, agent_id)
         if not agent_state:
             raise ValueError(f"Agent not found in project: {agent_id}")
-        if agent_state.status not in (AgentStatus.FAILED, AgentStatus.RUNNING):
+
+        allowed_statuses = {AgentStatus.FAILED, AgentStatus.RUNNING}
+        if allow_passed:
+            allowed_statuses.add(AgentStatus.PASSED)
+
+        if agent_state.status not in allowed_statuses:
+            valid = ", ".join(s.value for s in allowed_statuses)
             raise ValueError(
                 f"Agent {agent_id} cannot be reset from {agent_state.status.value} status "
-                f"(must be FAILED or RUNNING)"
+                f"(must be {valid})"
             )
 
         agent_def = AGENT_REGISTRY.get(agent_id)

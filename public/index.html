@@ -673,7 +673,11 @@ The AI will sort everything into the right categories and fill in gaps." style="
                         </div>
                         <div class="card">
                             <h2>Agent Output</h2>
-                            <p id="selectedAgentName" style="color:#888;margin-bottom:0.5rem;">Select an agent to view output</p>
+                            <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;">
+                                <p id="selectedAgentName" style="color:#888;margin:0;">Select an agent to view output</p>
+                                <button id="redoAgentBtn" class="btn btn-small hidden" style="background:#e67e22;color:#fff;font-size:0.75rem;padding:0.2rem 0.6rem;" onclick="redoAgent()">Redo from here</button>
+                                <span id="redoStatus" style="font-size:0.75rem;color:#888;"></span>
+                            </div>
                             <div class="output-panel">
                                 <pre id="agentOutput">No output yet</pre>
                             </div>
@@ -955,9 +959,13 @@ The AI will sort everything into the right categories and fill in gaps." style="
             });
         }
 
+        let selectedAgentId = null;
+
         async function viewAgent(agentId) {
             if (!currentProject) return;
+            selectedAgentId = agentId;
             document.getElementById('selectedAgentName').textContent = agentId;
+            document.getElementById('redoStatus').textContent = '';
 
             const res = await fetch(`/api/projects/${currentProject}/agent/${agentId}/output`, {credentials: 'include'});
             const data = await res.json();
@@ -966,6 +974,40 @@ The AI will sort everything into the right categories and fill in gaps." style="
                 document.getElementById('agentOutput').textContent = JSON.stringify(data.output, null, 2);
             } else {
                 document.getElementById('agentOutput').textContent = data.message || 'No output yet';
+            }
+
+            // Show "Redo from here" button for passed agents
+            const redoBtn = document.getElementById('redoAgentBtn');
+            if (data.status === 'passed') {
+                redoBtn.classList.remove('hidden');
+            } else {
+                redoBtn.classList.add('hidden');
+            }
+        }
+
+        async function redoAgent() {
+            if (!currentProject || !selectedAgentId) return;
+            if (!confirm(`Redo "${selectedAgentId}" and all downstream agents? This will re-generate everything from this point forward.`)) return;
+
+            const statusEl = document.getElementById('redoStatus');
+            statusEl.textContent = 'Resetting...';
+            statusEl.style.color = '#f39c12';
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/redo-agent/${selectedAgentId}`, {
+                    method: 'POST',
+                    credentials: 'include',
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Redo failed');
+
+                statusEl.textContent = `Reset ${data.total_reset} agent(s). Run pipeline to regenerate.`;
+                statusEl.style.color = '#2ecc71';
+                document.getElementById('redoAgentBtn').classList.add('hidden');
+                await loadProjectPipeline();
+            } catch (err) {
+                statusEl.textContent = 'Failed: ' + err.message;
+                statusEl.style.color = '#e74c3c';
             }
         }
 

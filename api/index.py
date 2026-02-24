@@ -1100,6 +1100,75 @@ async def reset_agent(project_id: str, agent_id: str, auth: bool = Depends(requi
     }
 
 
+@app.post("/api/projects/{project_id}/redo-agent/{agent_id}")
+async def redo_agent(project_id: str, agent_id: str, auth: bool = Depends(require_auth)):
+    """Re-run a PASSED agent and reset all its downstream dependents.
+
+    Use this when an agent produced valid but unsatisfactory output
+    (e.g. chapter_blueprint returned too few chapters).  The agent and
+    every agent that depends on it are reset to PENDING so the pipeline
+    can regenerate from that point forward.
+    """
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        agent_state = orch.reset_agent(project, agent_id, allow_passed=True)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Also reset downstream agents that depend on this one
+    reset_downstream = []
+    changed = True
+    reset_ids = {agent_id}
+    while changed:
+        changed = False
+        for layer in project.layers.values():
+            for aid, astate in layer.agents.items():
+                if aid in reset_ids:
+                    continue
+                if astate.status not in (AgentStatus.PASSED, AgentStatus.FAILED):
+                    continue
+                agent_def = AGENT_REGISTRY.get(aid)
+                if not agent_def:
+                    continue
+                # If any dependency is being reset, reset this agent too
+                if any(dep in reset_ids for dep in agent_def.dependencies):
+                    astate.status = AgentStatus.PENDING
+                    astate.attempts = 0
+                    astate.last_error = None
+                    # Re-open the layer
+                    layer_obj = project.layers.get(agent_def.layer)
+                    if layer_obj and layer_obj.status == LayerStatus.COMPLETED:
+                        layer_obj.status = LayerStatus.IN_PROGRESS
+                        layer_obj.completed_at = None
+                    reset_ids.add(aid)
+                    reset_downstream.append(aid)
+                    changed = True
+
+    # Clear manuscript if draft_generation was reset
+    if "draft_generation" in reset_ids:
+        project.manuscript = {}
+
+    project.update_timestamp()
+
+    store = get_project_store()
+    try:
+        store.save_raw(project.project_id, orch.export_project_state(project))
+    except Exception as e:
+        logger.warning(f"Failed to persist project after redo: {e}")
+
+    return {
+        "agent_id": agent_id,
+        "status": agent_state.status.value,
+        "downstream_reset": reset_downstream,
+        "total_reset": len(reset_ids),
+        "message": f"Agent {agent_id} and {len(reset_downstream)} downstream agents reset. Ready to re-run pipeline.",
+    }
+
+
 @app.get("/api/projects/{project_id}/manuscript")
 async def get_manuscript(project_id: str, auth: bool = Depends(require_auth)):
     """Export the manuscript."""
