@@ -454,6 +454,36 @@
                         <label>Themes (comma separated)</label>
                         <input type="text" id="projectThemes" placeholder="e.g., redemption, identity, love">
 
+                        <details id="storyBibleSection" style="margin-top:1rem;border:1px solid rgba(230,126,34,0.4);border-radius:8px;padding:0.5rem 1rem;background:rgba(230,126,34,0.05);">
+                            <summary style="cursor:pointer;font-weight:bold;color:#e67e22;">Import Story Bible (skip Layers 0-7)</summary>
+                            <div style="margin-top:0.75rem;">
+                                <p style="font-size:0.85rem;color:#888;margin-bottom:0.75rem;">
+                                    Paste your story bible below — characters, world-building, plot outline, themes, anything you have.
+                                    The AI will organize it into the right pipeline stages and skip you straight to structural planning.
+                                </p>
+                                <textarea id="projectStoryBible" rows="12" placeholder="Paste your story bible here...
+
+Examples of what to include:
+- Character descriptions and backstories
+- World-building details and rules
+- Plot outline or synopsis
+- Themes and central conflicts
+- Relationship dynamics
+- Any notes on tone, style, or voice
+
+The AI will sort everything into the right categories and fill in gaps." style="font-size:0.9rem;line-height:1.5;"></textarea>
+                                <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;">
+                                    <label style="display:flex;align-items:center;gap:0.4rem;margin:0;cursor:pointer;font-size:0.85rem;color:#e67e22;">
+                                        <input type="checkbox" id="storyBibleEnabled" style="width:auto;margin:0;" onchange="toggleStoryBibleRequired()">
+                                        Use this story bible instead of running Layers 0-7
+                                    </label>
+                                </div>
+                                <p id="storyBibleHint" class="hidden" style="font-size:0.8rem;color:#2ecc71;margin-bottom:0.5rem;">
+                                    After creating the project, the AI will organize your story bible automatically.
+                                </p>
+                            </div>
+                        </details>
+
                         <details style="margin-top:1rem;border:1px solid #333;border-radius:8px;padding:0.5rem 1rem;">
                             <summary style="cursor:pointer;font-weight:bold;color:#8e44ad;">Publishing Metadata (for Kindle/KDP)</summary>
                             <div style="margin-top:0.75rem;">
@@ -525,6 +555,20 @@
                         <button class="btn btn-full-pipeline" id="runFullPipelineBtn" onclick="runFullPipeline()">
                             Run Full Pipeline (Background)
                         </button>
+
+                        <!-- Story Bible Import (for existing projects) -->
+                        <details id="pipelineStoryBible" style="margin-top:0.75rem;border:1px solid rgba(230,126,34,0.3);border-radius:8px;padding:0.5rem 1rem;background:rgba(230,126,34,0.05);">
+                            <summary style="cursor:pointer;font-weight:600;color:#e67e22;font-size:0.9rem;">Import Story Bible (skip to Layer 8)</summary>
+                            <div style="margin-top:0.5rem;">
+                                <p style="font-size:0.8rem;color:#888;margin-bottom:0.5rem;">Paste your story bible and the AI will organize it into Layers 0-7, skipping straight to plot structure.</p>
+                                <textarea id="pipelineStoryBibleText" rows="8" placeholder="Paste your story bible here — characters, world, plot, themes..." style="font-size:0.85rem;"></textarea>
+                                <button class="btn btn-primary btn-small" style="margin-top:0.5rem;background:linear-gradient(90deg,#e67e22,#d35400);" onclick="importStoryBibleFromPipeline()">
+                                    Organize with AI
+                                </button>
+                                <span id="storyBibleImportStatus" style="margin-left:0.5rem;font-size:0.8rem;color:#888;"></span>
+                            </div>
+                        </details>
+
                         <div id="jobControls" style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                             <button class="btn btn-secondary btn-small" id="resumeJobBtn" onclick="resumeLastJob()" disabled>Resume Job</button>
                             <button class="btn btn-danger btn-small" id="cancelJobBtn" onclick="cancelCurrentJob()" disabled>Cancel Job</button>
@@ -1216,10 +1260,20 @@
             if (res.ok) {
                 const data = await res.json();
                 currentProject = data.project_id;
+
+                // Check if story bible import is requested
+                const storyBibleEnabled = document.getElementById('storyBibleEnabled')?.checked;
+                const storyBibleText = (document.getElementById('projectStoryBible')?.value || '').trim();
+
                 document.getElementById('newProjectForm').reset();
                 await loadProjects();
                 await loadProjectPipeline();
                 showTab('pipeline');
+
+                // If story bible was provided, run the AI organizer
+                if (storyBibleEnabled && storyBibleText.length > 50) {
+                    await importStoryBible(currentProject, storyBibleText);
+                }
             }
         });
 
@@ -1915,6 +1969,73 @@
                     (chapter.text || 'No text');
             } catch (error) {
                 console.error('View chapter error:', error);
+            }
+        }
+
+        // =================================================================
+        // Story Bible Import
+        // =================================================================
+
+        function toggleStoryBibleRequired() {
+            const enabled = document.getElementById('storyBibleEnabled').checked;
+            const hint = document.getElementById('storyBibleHint');
+            hint.classList.toggle('hidden', !enabled);
+        }
+
+        async function importStoryBibleFromPipeline() {
+            if (!currentProject) { alert('No project selected'); return; }
+            const text = (document.getElementById('pipelineStoryBibleText')?.value || '').trim();
+            if (text.length < 50) {
+                alert('Please paste at least 50 characters of story bible content.');
+                return;
+            }
+            const statusEl = document.getElementById('storyBibleImportStatus');
+            statusEl.textContent = 'Organizing...';
+            statusEl.style.color = '#f39c12';
+            const success = await importStoryBible(currentProject, text);
+            if (success) {
+                statusEl.textContent = 'Done! Layers 0-7 populated.';
+                statusEl.style.color = '#2ecc71';
+                document.getElementById('pipelineStoryBibleText').value = '';
+            } else {
+                statusEl.textContent = 'Import failed.';
+                statusEl.style.color = '#e74c3c';
+            }
+        }
+
+        async function importStoryBible(projectId, storyBibleText) {
+            const statusEl = document.getElementById('progressStatus');
+            statusEl.textContent = 'AI is organizing your story bible...';
+
+            const btn = document.getElementById('runFullPipelineBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="running-indicator"></span>Organizing Story Bible...';
+
+            try {
+                const res = await fetch(`/api/projects/${projectId}/import-story-bible`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({ story_bible: storyBibleText })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Story bible import failed');
+                }
+
+                statusEl.textContent = `Story bible organized! ${data.agents_filled} agents populated. Ready for Layer ${data.next_layer}.`;
+                await loadProjectPipeline();
+                return true;
+            } catch (error) {
+                console.error('Story bible import error:', error);
+                statusEl.textContent = 'Story bible import failed: ' + error.message;
+                alert('Failed to import story bible: ' + error.message);
+                return false;
+            } finally {
+                btn.innerHTML = 'Run Full Pipeline (Background)';
+                btn.disabled = false;
             }
         }
 

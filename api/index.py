@@ -554,6 +554,304 @@ async def update_metadata(project_id: str, request: Request, auth: bool = Depend
     }
 
 
+# =============================================================================
+# Story Bible Import
+# =============================================================================
+
+_STORY_BIBLE_AGENTS = [
+    "orchestrator",
+    "market_intelligence",
+    "concept_definition",
+    "thematic_architecture",
+    "story_question",
+    "world_rules",
+    "character_architecture",
+    "relationship_dynamics",
+]
+
+_STORY_BIBLE_PROMPT = """You are an expert book development AI. A writer has provided a story bible — a freeform document containing their worldbuilding, characters, plot notes, themes, and any other creative material.
+
+Your job is to organize this story bible into the structured outputs that our book development pipeline expects for Layers 0-7. Extract what's there, infer what's missing based on the material provided, and produce complete JSON for each agent.
+
+## Writer's Story Bible:
+{story_bible}
+
+## Project Info:
+- Title: {title}
+- Genre: {genre}
+- Description: {description}
+- Target audience: {audience}
+- Themes: {themes}
+- Comparable titles: {comps}
+
+## Required Agent Outputs:
+
+Produce a single JSON object with these exact keys. Each key maps to one pipeline agent. Fill in everything you can extract from the story bible, and intelligently infer the rest based on the genre, themes, and material provided.
+
+{{
+  "market_intelligence": {{
+    "reader_avatar": {{
+      "demographics": "target reader demographics",
+      "psychographics": "values, fears, desires",
+      "reading_habits": "preferred formats and frequency",
+      "problems_to_solve": ["what readers want from this type of book"]
+    }},
+    "market_gap": {{
+      "underserved_need": "what existing books don't provide",
+      "timing_opportunity": "why now is the right time",
+      "gap_description": "the specific gap this fills"
+    }},
+    "positioning_angle": {{
+      "unique_value_proposition": "what makes this book different",
+      "key_differentiators": ["specific differentiator 1", "differentiator 2"],
+      "competitive_advantage": "core advantage"
+    }},
+    "comp_analysis": [
+      {{"title": "Comparable Book", "strengths": "what it does well", "weaknesses": "what it misses", "how_we_improve": "our angle"}}
+    ]
+  }},
+  "concept_definition": {{
+    "one_line_hook": "A single compelling sentence that sells the book",
+    "core_promise": "The emotional/intellectual promise to the reader",
+    "unique_engine": "The narrative mechanism that makes this story work",
+    "elevator_pitch": "2-3 sentence pitch"
+  }},
+  "thematic_architecture": {{
+    "primary_theme": "The main theme explored",
+    "counter_theme": "The opposing viewpoint or complication",
+    "value_conflict": "The core value tension (e.g., freedom vs. security)",
+    "thematic_question": "The question the book wrestles with"
+  }},
+  "story_question": {{
+    "central_dramatic_question": "Will [protagonist] [achieve goal] despite [obstacle]?",
+    "stakes_ladder": ["personal stake", "interpersonal stake", "universal stake"],
+    "binary_outcome": {{"success": "what happens if protagonist wins", "failure": "what happens if they lose"}},
+    "reader_investment": "Why the reader will care about the answer"
+  }},
+  "world_rules": {{
+    "physical_rules": {{
+      "possibilities": ["what's possible in this world"],
+      "impossibilities": ["what's impossible"],
+      "technology_level": "tech description",
+      "geography": "key geographical constraints"
+    }},
+    "social_rules": {{
+      "power_structures": "how society is organized",
+      "norms_and_taboos": ["social rules that matter"],
+      "economic_system": "how resources work"
+    }},
+    "power_rules": {{
+      "who_has_power": "description",
+      "how_power_is_gained": "description",
+      "limitations": ["limits on power"]
+    }},
+    "world_bible": {{
+      "history": "relevant history",
+      "culture": "key cultural facts",
+      "terminology": ["special terms used in this world"]
+    }},
+    "constraint_list": ["constraint that creates tension 1", "constraint 2"]
+  }},
+  "character_architecture": {{
+    "protagonist_profile": {{
+      "name": "character name",
+      "age": "age",
+      "role": "role in story",
+      "personality": "key traits",
+      "backstory": "relevant history",
+      "strengths": ["strength 1"],
+      "weaknesses": ["weakness 1"],
+      "voice": "how they speak"
+    }},
+    "protagonist_arc": {{
+      "starting_state": "who they are at the beginning",
+      "ending_state": "who they become",
+      "transformation": "what changes and why"
+    }},
+    "want_vs_need": {{
+      "want": "what the protagonist thinks they want",
+      "need": "what they actually need",
+      "conflict": "how want and need clash"
+    }},
+    "antagonist_profile": {{
+      "name": "name or description",
+      "motivation": "why they oppose the protagonist",
+      "methods": "how they create obstacles",
+      "humanity": "what makes them understandable"
+    }},
+    "antagonistic_force": "the broader force working against the protagonist",
+    "supporting_cast": [
+      {{"name": "name", "role": "story function", "relationship_to_protagonist": "connection", "arc": "how they change"}}
+    ],
+    "character_functions": {{
+      "mirror": "character who reflects protagonist's choices",
+      "mentor": "character who guides",
+      "catalyst": "character who forces change"
+    }}
+  }},
+  "relationship_dynamics": {{
+    "conflict_web": [
+      {{"characters": ["char1", "char2"], "conflict_type": "type", "evolution": "how it changes"}}
+    ],
+    "power_shifts": [
+      {{"description": "power shift event", "from": "char", "to": "char", "trigger": "what causes it"}}
+    ],
+    "dependency_arcs": [
+      {{"characters": ["char1", "char2"], "dependency": "what creates the bond", "evolution": "how it changes"}}
+    ],
+    "relationship_matrix": "Summary of key relationship dynamics"
+  }}
+}}
+
+IMPORTANT:
+- Extract as much as possible from the story bible. Don't ignore provided details.
+- For anything not explicitly in the story bible, make intelligent inferences based on genre, themes, and what IS provided.
+- Character names, places, and specific details from the story bible must be preserved exactly.
+- Return ONLY valid JSON. No markdown, no explanation, just the JSON object."""
+
+
+@app.post("/api/projects/{project_id}/import-story-bible")
+async def import_story_bible(project_id: str, request: Request, auth: bool = Depends(require_auth)):
+    """Import a story bible and use AI to organize it into Layers 0-7 agent outputs.
+
+    This lets users paste their existing worldbuilding, characters, and plot notes
+    and skip straight to the structural planning stages (Layer 8+).
+    """
+    from models.state import AgentOutput, GateResult, AgentStatus, LayerStatus
+    from core.orchestrator import ExecutionContext
+
+    orch = get_orchestrator()
+    project = orch.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    body = await request.json()
+    story_bible = body.get("story_bible", "").strip()
+    if not story_bible or len(story_bible) < 50:
+        raise HTTPException(status_code=400, detail="Story bible must be at least 50 characters")
+
+    # Get LLM client
+    llm = get_llm_client()
+    if llm is None:
+        raise HTTPException(status_code=503, detail="LLM client not available. Set ANTHROPIC_API_KEY.")
+
+    constraints = project.user_constraints or {}
+
+    # Build the prompt
+    prompt = _STORY_BIBLE_PROMPT.format(
+        story_bible=story_bible[:80000],  # Cap at 80k chars
+        title=project.title,
+        genre=constraints.get("genre", "fiction"),
+        description=constraints.get("description", ""),
+        audience=constraints.get("target_audience", "general readers"),
+        themes=", ".join(constraints.get("themes", [])) or "not specified",
+        comps=", ".join(constraints.get("comparable_titles", [])) or "not specified",
+    )
+
+    try:
+        result = await llm.generate(prompt, response_format="json", temperature=0.4)
+    except Exception as e:
+        logger.error("Story bible LLM call failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {e}")
+
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=500, detail="AI returned invalid response format")
+
+    # Store the raw story bible in user_constraints for reference
+    project.user_constraints["story_bible"] = story_bible[:80000]
+
+    # First, handle the orchestrator agent (it doesn't need LLM output)
+    from agents.strategic import execute_orchestrator
+    orch_context = ExecutionContext(
+        project=project,
+        inputs={"user_constraints": constraints},
+        agent_def=AGENT_REGISTRY["orchestrator"],
+        llm_client=llm,
+    )
+    orch_output_content = await execute_orchestrator(orch_context)
+
+    # Now populate each agent with the AI-organized outputs
+    agents_filled = 0
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    for agent_id in _STORY_BIBLE_AGENTS:
+        agent_state = orch._find_agent_state(project, agent_id)
+        if not agent_state:
+            continue
+
+        # Get the content for this agent
+        if agent_id == "orchestrator":
+            content = orch_output_content
+        else:
+            content = result.get(agent_id)
+            if not isinstance(content, dict):
+                # Try to use what we have, even if the key is missing
+                logger.warning("Story bible: missing or invalid output for %s, using placeholder", agent_id)
+                content = {"imported_from_story_bible": True, "note": "AI could not extract enough detail for this agent"}
+
+        # Create the agent output with a passing gate
+        agent_output = AgentOutput(
+            agent_id=agent_id,
+            content=content,
+            gate_result=GateResult(
+                passed=True,
+                message="Imported from story bible",
+            ),
+            metadata={
+                "source": "story_bible_import",
+                "timestamp": now_ts,
+            },
+            created_at=now_ts,
+        )
+
+        # Mark agent as passed
+        agent_state.status = AgentStatus.PASSED
+        agent_state.current_output = agent_output
+        agent_state.outputs.append(agent_output)
+        agent_state.attempts = 1
+        agents_filled += 1
+
+    # Mark layers 0-7 as completed and unlock layer 8
+    for layer_id in range(0, 8):
+        if layer_id in project.layers:
+            project.layers[layer_id].status = LayerStatus.COMPLETED
+            project.layers[layer_id].completed_at = now_ts
+
+    # Unlock layers 8+ that are now available
+    for layer_id in range(8, 21):
+        if layer_id in project.layers:
+            layer = project.layers[layer_id]
+            if layer.status == LayerStatus.LOCKED:
+                # Check if all deps for agents in this layer are met
+                all_deps_met = True
+                for agent_state in layer.agents.values():
+                    for dep_id in agent_state.dependencies:
+                        dep_state = orch._find_agent_state(project, dep_id)
+                        if not dep_state or dep_state.status != AgentStatus.PASSED:
+                            all_deps_met = False
+                            break
+                    if not all_deps_met:
+                        break
+                if all_deps_met:
+                    layer.status = LayerStatus.AVAILABLE
+            break  # Only unlock the first available layer
+
+    project.current_layer = 8
+    project.update_timestamp()
+
+    # Persist
+    store = get_project_store()
+    store.save_raw(project.project_id, orch.export_project_state(project))
+
+    return {
+        "success": True,
+        "agents_filled": agents_filled,
+        "agents": _STORY_BIBLE_AGENTS,
+        "next_layer": 8,
+        "message": f"Story bible organized into {agents_filled} agent outputs. Ready for Layer 8 (Plot Structure).",
+    }
+
+
 @app.get("/api/projects")
 async def list_projects(auth: bool = Depends(require_auth)):
     """List all projects."""
