@@ -182,26 +182,31 @@ CHAPTER_BLUEPRINT_PROMPT = """You are an outline architect. Create the detailed 
 {character_architecture}
 
 ## Target Word Count:
-{target_word_count}
+{target_word_count} total words for the book
+
+## Recommended Chapter Parameters:
+- Suggested number of chapters: {suggested_chapter_count}
+- Suggested average words per chapter: {suggested_words_per_chapter}
+- You may adjust chapter count up or down based on story needs, but the total word count across all chapters should approximately equal the target.
 
 ## Task:
 Create the complete chapter blueprint:
 
 For each chapter include:
-- Chapter number and title
+- Chapter number and title (make titles evocative and specific to this story, not generic)
 - Chapter goal (what must happen)
 - POV character
-- Opening hook
-- Key scenes
-- Closing hook
-- Word count target
+- Opening hook (the first line or image that draws readers in)
+- Key scenes (2-4 per chapter)
+- Closing hook (a revelation, question, or threat that pulls readers to the next chapter)
+- Word count target (adapt per chapter — action chapters can be shorter, setup chapters longer)
 
 For each scene include:
-- Scene question (what's at stake)
+- Scene question (what's at stake in this specific scene)
 - Characters present
-- Location
-- Conflict type
-- Outcome
+- Location (specific, grounded in the world)
+- Conflict type (external, internal, interpersonal, environmental)
+- Outcome (how the scene changes the character's situation)
 
 ## Hard Requirements (must comply)
 - Return ONLY valid JSON (no markdown).
@@ -209,6 +214,7 @@ For each scene include:
 - Each chapter must have at least 1 scene.
 - Each scene must have a numeric word_target.
 - For each chapter: sum(scene.word_target) should be close to chapter.word_target (within ±35%).
+- Total of all chapter word_targets should approximately equal {target_word_count}.
 
 ## Output Format (JSON):
 {{
@@ -221,7 +227,7 @@ For each scene include:
             "pov": "<string>",
             "opening_hook": "<string>",
             "closing_hook": "<string>",
-            "word_target": 3000,
+            "word_target": {suggested_words_per_chapter},
             "scenes": [
                 {{
                     "scene_number": 1,
@@ -241,6 +247,8 @@ For each scene include:
     "hooks": {{"chapter_hooks": ["<string>"], "scene_hooks": ["<string>"]}},
     "pov_assignments": {{"1": "<string>", "2": "<string>"}}
 }}
+
+IMPORTANT: Do NOT include ellipses like "..." in the returned JSON. Output complete, valid JSON only.
 """
 
 VOICE_SPECIFICATION_PROMPT = """You are a voice architect. Define the narrative voice and style rules.
@@ -345,33 +353,37 @@ DRAFT_GENERATION_PROMPT = """You are a novelist. Write Chapter {chapter_number}:
 ## World Rules:
 {world_rules}
 
-## Previous Chapter Summary (if applicable):
+## Story Context (recent chapter summaries):
 {previous_summary}
 
 ## Task:
 Write the complete chapter following:
 - The scene blueprint exactly
 - The voice specification rules
-- Character consistency
+- Character consistency — characters must reflect their state from previous chapters
 - World rule compliance
 
 Write engaging, publication-quality prose that:
-- Opens with the specified hook
-- Executes each scene's goal
-- Closes with the specified hook
-- Hits the word target approximately
+- Opens with the specified opening hook
+- Executes each scene's goal while maintaining tension and character consistency
+- Closes with the specified closing hook to pull readers forward
+- Hits the word target of approximately {word_target} words
 - Uses * * * on its own line for scene breaks within the chapter
 
 ## PROSE QUALITY RULES (CRITICAL)
 - NEVER use AI-telltale phrases: "In a world where", "Little did she know",
   "A symphony of", "sent shivers down", "pierced the silence", "could not help but",
-  "a dance of", "the weight of", "it was as if", "time seemed to stop"
+  "a dance of", "the weight of", "it was as if", "time seemed to stop",
+  "the silence was deafening", "a chill ran down", "little did they know",
+  "with bated breath", "the air was thick with tension"
 - NEVER start consecutive paragraphs the same way
-- Use concrete, specific details not vague abstractions
+- Use concrete, specific details (brand names, textures, temperatures) not vague abstractions
 - Dialogue: real speech with interruptions, incomplete thoughts, subtext
 - Vary paragraph length dramatically: one-line gut-punches mixed with flowing passages
 - Physical reactions before emotional labels (racing pulse before "she was afraid")
-- Internal monologue should feel raw and unfiltered
+- Internal monologue should feel raw and unfiltered, not polished
+- Every chapter must have at least ONE moment that makes the reader's breath catch
+- Scene breaks should use * * * on their own line
 
 ## Output the chapter text directly.
 """
@@ -471,25 +483,52 @@ async def execute_pacing_design(context: ExecutionContext) -> Dict[str, Any]:
 
 
 async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]:
-    """Execute chapter blueprint agent."""
+    """Execute chapter blueprint agent.
+
+    Calculates adaptive chapter count and word targets based on the
+    user's target_word_count, so the LLM produces the right number
+    of chapters at the right length for any book size (40K-120K words).
+    """
     llm = context.llm_client
     constraints = context.inputs.get("user_constraints", {})
+
+    # Calculate adaptive chapter parameters from target word count
+    target_word_count = int(constraints.get("target_word_count", 80000) or 80000)
+
+    # Adaptive chapter sizing: aim for 3000-5000 words per chapter
+    # depending on total book length
+    if target_word_count <= 50000:
+        avg_words_per_chapter = 3000
+    elif target_word_count <= 80000:
+        avg_words_per_chapter = 3500
+    elif target_word_count <= 100000:
+        avg_words_per_chapter = 4000
+    else:
+        avg_words_per_chapter = 4500
+
+    suggested_chapter_count = max(8, min(35, round(target_word_count / avg_words_per_chapter)))
 
     prompt = CHAPTER_BLUEPRINT_PROMPT.format(
         plot_structure=context.inputs.get("plot_structure", {}),
         pacing_design=context.inputs.get("pacing_design", {}),
         character_architecture=context.inputs.get("character_architecture", {}),
-        target_word_count=constraints.get("target_word_count", 80000)
+        target_word_count=target_word_count,
+        suggested_chapter_count=suggested_chapter_count,
+        suggested_words_per_chapter=avg_words_per_chapter
     )
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
         return response
     else:
-        # Generate placeholder chapter outline
+        # Generate placeholder chapter outline with adaptive sizing
+        num_chapters = suggested_chapter_count
         chapters = []
-        for i in range(1, 26):  # 25 chapters
-            act = 1 if i <= 6 else (2 if i <= 18 else 3)
+        act1_end = max(1, round(num_chapters * 0.25))
+        act2_end = max(act1_end + 1, round(num_chapters * 0.75))
+
+        for i in range(1, num_chapters + 1):
+            act = 1 if i <= act1_end else (2 if i <= act2_end else 3)
             chapters.append({
                 "number": i,
                 "title": f"Chapter {i}",
@@ -498,7 +537,7 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
                 "pov": "Protagonist",
                 "opening_hook": f"[Hook for chapter {i}]",
                 "closing_hook": f"[Closing hook for chapter {i}]",
-                "word_target": 3200,
+                "word_target": avg_words_per_chapter,
                 "scenes": [
                     {
                         "scene_number": 1,
@@ -507,7 +546,7 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
                         "location": "[Location]",
                         "conflict_type": "internal" if i % 2 == 0 else "external",
                         "outcome": "[Outcome]",
-                        "word_target": 1600
+                        "word_target": avg_words_per_chapter // 2
                     },
                     {
                         "scene_number": 2,
@@ -516,7 +555,7 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
                         "location": "[Location]",
                         "conflict_type": "interpersonal",
                         "outcome": "[Outcome]",
-                        "word_target": 1600
+                        "word_target": avg_words_per_chapter // 2
                     }
                 ]
             })
@@ -693,10 +732,23 @@ async def execute_draft_generation(
 
             for attempt in range(1, _DRAFT_CHAPTER_MAX_RETRIES + 1):
                 try:
-                    # Build prompt fresh each attempt so previous_summary stays current.
-                    previous_summary = ""
+                    # Build sliding window of previous chapter summaries for continuity.
+                    # Using up to 3 recent summaries prevents character/plot "resets"
+                    # in longer books while keeping token use bounded.
+                    previous_summary = "This is the first chapter."
                     if chapters:
-                        previous_summary = f"Previous chapter ended with: {chapters[-1].get('summary', '')}"
+                        context_window = 3
+                        recent = chapters[-context_window:]
+                        summary_parts = []
+                        for prev_ch in recent:
+                            pnum = prev_ch.get("number", "?")
+                            psum = prev_ch.get("summary", "")
+                            if psum:
+                                summary_parts.append(f"Chapter {pnum}: {psum}")
+                        previous_summary = "\n".join(summary_parts) if summary_parts else f"Previous chapter ended with: {chapters[-1].get('summary', '')}"
+
+                    # Get the word target from the blueprint for this chapter
+                    word_target = chapter.get("word_target", 3000)
 
                     prompt = DRAFT_GENERATION_PROMPT.format(
                         chapter_number=chapter_num,
@@ -705,13 +757,25 @@ async def execute_draft_generation(
                         chapter_blueprint=chapter,
                         character_architecture=context.inputs.get("character_architecture", {}),
                         world_rules=context.inputs.get("world_rules", {}),
-                        previous_summary=previous_summary
+                        previous_summary=previous_summary,
+                        word_target=word_target
                     )
 
                     timeout = _DRAFT_CHAPTER_TIMEOUT
                     chapter_text = await asyncio.wait_for(llm.generate(prompt), timeout=timeout)
                     summary = await asyncio.wait_for(
-                        llm.generate(f"Summarize this chapter in 2 sentences:\n{chapter_text[:2000]}"),
+                        llm.generate(
+                            f"""Summarize this chapter in 2-3 sentences for the next chapter's writer. Focus on:
+1. Key plot developments and how they change the situation
+2. Where each major character ends up (physically and emotionally)
+3. Any cliffhangers, unresolved tensions, or hooks for the next chapter
+
+Chapter text (first 4000 chars):
+{chapter_text[:4000]}
+
+Summary:""",
+                            max_tokens=300,
+                        ),
                         timeout=timeout,
                     )
                     # Guard: ensure summary is always a string (LLM might

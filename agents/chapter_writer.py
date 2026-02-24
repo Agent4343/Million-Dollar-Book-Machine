@@ -27,10 +27,13 @@ CHAPTER_WRITING_PROMPT = """You are an expert novelist writing Chapter {chapter_
 ## CHARACTER REFERENCE
 {character_reference}
 
+## CHARACTER STATE (entering this chapter)
+{character_state}
+
 ## WORLD RULES
 {world_rules}
 
-## PREVIOUS CHAPTER SUMMARY
+## STORY CONTEXT (recent chapters)
 {previous_summary}
 
 ## THEMATIC FOCUS
@@ -134,17 +137,40 @@ async def execute_chapter_writer(
     for char in supporting[:3]:  # Limit to avoid token overflow
         character_reference += f"- {char.get('name', '?')}: {char.get('function', 'N/A')}\n"
 
-    # Get previous chapter summary if available
-    previous_summary = "This is the first chapter."
+    # Get sliding window of previous chapter summaries for continuity
+    previous_summary = "This is the first chapter. No prior context needed."
+    character_state = "No prior character state — this is the opening."
     if chapter_number > 1:
-        # Check if we have previous chapters in manuscript
         manuscript = context.project.manuscript
         prev_chapters = manuscript.get("chapters", [])
+        # Build a map of chapter number -> chapter data
+        prev_by_num = {}
         for prev_ch in prev_chapters:
             prev_num = prev_ch.get("number") or prev_ch.get("chapter_number")
-            if prev_num == chapter_number - 1:
-                previous_summary = prev_ch.get("summary", "Previous chapter completed.")
-                break
+            if prev_num:
+                prev_by_num[prev_num] = prev_ch
+
+        # Sliding window: include up to 3 previous chapter summaries
+        # This gives the LLM much better continuity for longer books
+        context_window = 3
+        summaries = []
+        for prev_num in range(max(1, chapter_number - context_window), chapter_number):
+            prev_ch = prev_by_num.get(prev_num)
+            if prev_ch:
+                ch_summary = prev_ch.get("summary", "")
+                if ch_summary:
+                    summaries.append(f"Chapter {prev_num}: {ch_summary}")
+
+        if summaries:
+            previous_summary = "\n".join(summaries)
+        else:
+            previous_summary = "Previous chapter completed — summary not available."
+
+        # Build character state from the most recent chapter's summary
+        # This tracks where characters are emotionally and physically
+        last_ch = prev_by_num.get(chapter_number - 1)
+        if last_ch:
+            character_state = _build_character_state(prev_by_num, chapter_number, protagonist, supporting)
 
     # Get thematic focus
     thematic = context.inputs.get("thematic_architecture", {})
@@ -168,6 +194,7 @@ async def execute_chapter_writer(
         word_target=word_target,
         scenes=scenes_text,
         character_reference=character_reference,
+        character_state=character_state,
         world_rules=_format_world_rules(context.inputs.get("world_rules", {})),
         previous_summary=previous_summary,
         thematic_focus=thematic_focus
@@ -239,6 +266,41 @@ Summary:"""
             "pov": chapter_data.get("pov", "Unknown"),
             "scenes_written": len(chapter_data.get("scenes", []))
         }
+
+
+def _build_character_state(
+    prev_by_num: Dict[int, Dict[str, Any]],
+    current_chapter: int,
+    protagonist: Dict[str, Any],
+    supporting: list,
+) -> str:
+    """Build a character state summary from recent chapters for continuity.
+
+    Extracts what we know about where characters are emotionally and physically
+    based on the summaries of the last few chapters. This prevents characters
+    from 'resetting' between chapters in longer books.
+    """
+    lines = []
+    # Use last 2 chapters' summaries to infer state
+    recent_summaries = []
+    for num in range(max(1, current_chapter - 2), current_chapter):
+        ch = prev_by_num.get(num)
+        if ch and ch.get("summary"):
+            recent_summaries.append(ch["summary"])
+
+    protag_name = protagonist.get("name", "Protagonist")
+    lines.append(f"**{protag_name}** (protagonist): Based on recent events — " +
+                 (recent_summaries[-1] if recent_summaries else "status unknown"))
+
+    # Note supporting cast that appeared in recent chapter scenes
+    for char in supporting[:4]:
+        char_name = char.get("name", "Unknown")
+        lines.append(f"**{char_name}**: {char.get('function', 'supporting role')}")
+
+    if not recent_summaries:
+        return "Character states not yet established."
+
+    return "\n".join(lines)
 
 
 def _format_voice_spec(voice_spec: Dict[str, Any]) -> str:
