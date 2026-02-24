@@ -343,7 +343,12 @@ def generate_docx(project, include_outline: bool = False, chapters_override: Opt
         doc.add_heading("No Content Yet", level=1)
         doc.add_paragraph("Run the pipeline to generate your book outline, then use the Chapter Writer to create full chapters.")
 
-    # === Back Matter (optional) ===
+    # === Back Matter (standard order: About Author, Acknowledgements, Newsletter) ===
+    if sup.get("about_author"):
+        doc.add_heading("About the Author", level=1)
+        doc.add_paragraph(sup["about_author"])
+        doc.add_page_break()
+
     if sup.get("acknowledgements"):
         doc.add_heading("Acknowledgements", level=1)
         doc.add_paragraph(sup["acknowledgements"])
@@ -355,11 +360,6 @@ def generate_docx(project, include_outline: bool = False, chapters_override: Opt
             doc.add_paragraph(sup["newsletter_cta"])
         if sup.get("newsletter_url"):
             doc.add_paragraph(sup["newsletter_url"])
-        doc.add_page_break()
-
-    if sup.get("about_author"):
-        doc.add_heading("About the Author", level=1)
-        doc.add_paragraph(sup["about_author"])
         doc.add_page_break()
 
     # Save to bytes
@@ -553,7 +553,7 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
         uid="style_kindle",
         file_name="style/kindle.css",
         media_type="text/css",
-        content=_KINDLE_CSS,
+        content=_KINDLE_CSS.encode("utf-8"),
     )
     book.add_item(kindle_css)
 
@@ -561,28 +561,18 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
     cover_data = _load_cover_image(fm.get("cover_image_path", ""))
     if cover_data:
         cover_path = fm["cover_image_path"]
-        media_type = _cover_media_type(cover_path)
         ext = cover_path.rsplit(".", 1)[-1].lower() if "." in cover_path else "jpg"
         cover_filename = f"images/cover.{ext}"
-        cover_image = epub.EpubItem(
-            uid="cover-image",
-            file_name=cover_filename,
-            media_type=media_type,
-            content=cover_data,
-        )
-        book.add_item(cover_image)
+        # set_cover() creates both the image item and cover XHTML page
+        # internally — do NOT add a manual EpubItem or cover page, as that
+        # creates duplicates that corrupt the EPUB manifest.
         book.set_cover(cover_filename, cover_data)
 
-        # Cover page XHTML
-        cover_page = epub.EpubHtml(title="Cover", file_name="cover.xhtml", lang="en")
-        cover_page.content = _make_xhtml("Cover",
-            f'<div style="text-align:center;">'
-            f'<img src="{cover_filename}" alt="Cover" style="max-width:100%; max-height:100%;"/>'
-            f'</div>')
-        book.add_item(cover_page)
-
     # --- Spine items (ordered reading list) ---
+    # epub_chapters collects all spine pages; toc_items collects only those
+    # that should appear in the reader-facing Table of Contents.
     epub_chapters: List[Any] = []
+    toc_items: List[Any] = []
 
     # Title page
     title_body = (
@@ -648,14 +638,24 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
             ch.content = _make_xhtml(f"Chapter {ch_num}", body_html)
             book.add_item(ch)
             epub_chapters.append(ch)
+            toc_items.append(ch)
     else:
         empty_ch = epub.EpubHtml(title="No Content", file_name="empty.xhtml", lang="en")
         empty_ch.content = _make_xhtml("No Content",
             '<h1>No Chapters Written</h1><p class="first">Use the pipeline to generate your manuscript.</p>')
         book.add_item(empty_ch)
         epub_chapters.append(empty_ch)
+        toc_items.append(empty_ch)
 
-    # --- Back matter ---
+    # --- Back matter (standard order: About Author, Acknowledgements, Newsletter CTA) ---
+    if sup.get("about_author"):
+        about = epub.EpubHtml(title="About the Author", file_name="about_author.xhtml", lang="en")
+        about.content = _make_xhtml("About the Author",
+            f'<h1>About the Author</h1>\n<p class="first">{html.escape(sup["about_author"])}</p>')
+        book.add_item(about)
+        epub_chapters.append(about)
+        toc_items.append(about)
+
     if sup.get("acknowledgements"):
         acks = epub.EpubHtml(title="Acknowledgements", file_name="acknowledgements.xhtml", lang="en")
         acks.content = _make_xhtml("Acknowledgements",
@@ -675,19 +675,14 @@ def generate_epub(project, chapters_override: Optional[List[Dict[str, Any]]] = N
         book.add_item(news)
         epub_chapters.append(news)
 
-    if sup.get("about_author"):
-        about = epub.EpubHtml(title="About the Author", file_name="about_author.xhtml", lang="en")
-        about.content = _make_xhtml("About the Author",
-            f'<h1>About the Author</h1>\n<p class="first">{html.escape(sup["about_author"])}</p>')
-        book.add_item(about)
-        epub_chapters.append(about)
-
     # --- Link CSS to every page ---
     for page in epub_chapters:
         page.add_item(kindle_css)
 
     # --- Table of Contents ---
-    book.toc = tuple(epub_chapters)
+    # Only chapters and major back matter appear in the TOC — front matter
+    # (copyright, dedication, also-by) is excluded for a professional look.
+    book.toc = tuple(toc_items)
 
     # --- Navigation ---
     book.add_item(epub.EpubNcx())
@@ -725,7 +720,13 @@ def generate_kindle_mobi(project) -> Optional[bytes]:
 def get_word_count(project) -> int:
     """Calculate total word count of written chapters."""
     chapters = project.manuscript.get('chapters', [])
-    return sum(ch.get('word_count', 0) for ch in chapters)
+    total = 0
+    for ch in chapters:
+        wc = ch.get('word_count', 0)
+        if not wc and ch.get('text'):
+            wc = len(ch['text'].split())
+        total += wc
+    return total
 
 
 def get_chapter_summary(project) -> List[Dict[str, Any]]:
