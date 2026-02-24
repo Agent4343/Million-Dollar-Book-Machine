@@ -1229,6 +1229,28 @@ async def get_chapter(project_id: str, chapter_number: int, auth: bool = Depends
 # Export Endpoints
 # =============================================================================
 
+@app.get("/api/projects/{project_id}/export/story-bible")
+async def export_story_bible(project_id: str, auth: bool = Depends(require_auth)):
+    """Export the complete story bible as a downloadable markdown file.
+
+    The story bible contains all world-building, characters, relationships,
+    plot structure, chapter blueprint, and voice guide — everything the
+    pipeline built before writing chapters.
+    """
+    project = get_orchestrator().get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    markdown = generate_outline_markdown(project)
+    filename = f"{project.title.replace(' ', '_')}_Story_Bible.md"
+
+    return StreamingResponse(
+        iter([markdown.encode("utf-8")]),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/projects/{project_id}/export/outline")
 async def export_outline(project_id: str, auth: bool = Depends(require_auth)):
     """Export project as structured markdown outline."""
@@ -1593,6 +1615,68 @@ def generate_outline_markdown(project) -> str:
                     lines.append(f"**{level.replace('_', ' ').title()}:** {data.get('risk', 'N/A')} → {data.get('consequence', 'N/A')}")
             lines.append("")
 
+    # World Rules
+    if "world_rules" in outputs:
+        wr = outputs["world_rules"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## World Rules & Setting")
+        lines.append("")
+
+        if wr.get("setting"):
+            st = wr["setting"]
+            if isinstance(st, dict):
+                for k, v in st.items():
+                    lines.append(f"**{k.replace('_', ' ').title()}:** {v}")
+                    lines.append("")
+            elif isinstance(st, str):
+                lines.append(st)
+                lines.append("")
+
+        if wr.get("technology_level"):
+            lines.append(f"**Technology:** {wr['technology_level']}")
+            lines.append("")
+        if wr.get("social_norms"):
+            norms = wr["social_norms"]
+            if isinstance(norms, list):
+                lines.append("### Social Norms & Rules")
+                for norm in norms:
+                    lines.append(f"- {norm}")
+                lines.append("")
+            elif isinstance(norms, dict):
+                lines.append("### Social Norms & Rules")
+                for k, v in norms.items():
+                    lines.append(f"- **{k.replace('_', ' ').title()}:** {v}")
+                lines.append("")
+        if wr.get("power_structures"):
+            lines.append("### Power Structures")
+            ps_data = wr["power_structures"]
+            if isinstance(ps_data, list):
+                for item in ps_data:
+                    lines.append(f"- {item}")
+            elif isinstance(ps_data, dict):
+                for k, v in ps_data.items():
+                    lines.append(f"- **{k.replace('_', ' ').title()}:** {v}")
+            lines.append("")
+        if wr.get("geography"):
+            lines.append(f"**Geography:** {wr['geography']}")
+            lines.append("")
+
+        # Dump any remaining top-level keys as a catch-all
+        _shown_wr = {"setting", "technology_level", "social_norms", "power_structures", "geography"}
+        for k, v in wr.items():
+            if k not in _shown_wr and v and k != "_status":
+                lines.append(f"### {k.replace('_', ' ').title()}")
+                if isinstance(v, list):
+                    for item in v:
+                        lines.append(f"- {item}" if isinstance(item, str) else f"- {item}")
+                elif isinstance(v, dict):
+                    for dk, dv in v.items():
+                        lines.append(f"**{dk.replace('_', ' ').title()}:** {dv}")
+                else:
+                    lines.append(str(v))
+                lines.append("")
+
     # Characters
     if "character_architecture" in outputs:
         ca = outputs["character_architecture"]
@@ -1645,6 +1729,79 @@ def generate_outline_markdown(project) -> str:
             for char in ca["supporting_cast"]:
                 lines.append(f"- **{char.get('name', '?')}:** {char.get('function', 'N/A')}")
             lines.append("")
+
+    # Relationship Dynamics
+    if "relationship_dynamics" in outputs:
+        rd = outputs["relationship_dynamics"]
+        lines.append("---")
+        lines.append("")
+        lines.append("## Relationship Dynamics")
+        lines.append("")
+
+        if rd.get("central_relationship"):
+            cr = rd["central_relationship"]
+            if isinstance(cr, dict):
+                lines.append("### Central Relationship")
+                for k, v in cr.items():
+                    if isinstance(v, list):
+                        lines.append(f"**{k.replace('_', ' ').title()}:**")
+                        for item in v:
+                            lines.append(f"  - {item}")
+                    else:
+                        lines.append(f"**{k.replace('_', ' ').title()}:** {v}")
+                    lines.append("")
+
+        if rd.get("relationship_arc"):
+            ra = rd["relationship_arc"]
+            lines.append("### Relationship Arc")
+            if isinstance(ra, list):
+                for stage in ra:
+                    if isinstance(stage, dict):
+                        lines.append(f"- **{stage.get('stage', '?')}:** {stage.get('description', 'N/A')}")
+                    else:
+                        lines.append(f"- {stage}")
+            elif isinstance(ra, dict):
+                for k, v in ra.items():
+                    lines.append(f"- **{k.replace('_', ' ').title()}:** {v}")
+            lines.append("")
+
+        if rd.get("power_dynamic"):
+            lines.append(f"### Power Dynamic")
+            pd = rd["power_dynamic"]
+            if isinstance(pd, dict):
+                for k, v in pd.items():
+                    lines.append(f"**{k.replace('_', ' ').title()}:** {v}")
+                    lines.append("")
+            else:
+                lines.append(str(pd))
+                lines.append("")
+
+        if rd.get("conflict_sources"):
+            lines.append("### Sources of Conflict")
+            cs = rd["conflict_sources"]
+            if isinstance(cs, list):
+                for src in cs:
+                    lines.append(f"- {src}")
+            lines.append("")
+
+        # Dump remaining keys
+        _shown_rd = {"central_relationship", "relationship_arc", "power_dynamic", "conflict_sources"}
+        for k, v in rd.items():
+            if k not in _shown_rd and v and k != "_status":
+                lines.append(f"### {k.replace('_', ' ').title()}")
+                if isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict):
+                            for dk, dv in item.items():
+                                lines.append(f"  - **{dk.replace('_', ' ').title()}:** {dv}")
+                        else:
+                            lines.append(f"- {item}")
+                elif isinstance(v, dict):
+                    for dk, dv in v.items():
+                        lines.append(f"**{dk.replace('_', ' ').title()}:** {dv}")
+                else:
+                    lines.append(str(v))
+                lines.append("")
 
     # Plot Structure
     if "plot_structure" in outputs:

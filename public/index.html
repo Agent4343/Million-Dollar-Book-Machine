@@ -566,6 +566,7 @@
                                 <div class="export-buttons">
                                     <button class="btn btn-export btn-small" onclick="exportDocx()">Word Document (.docx)</button>
                                     <button class="btn btn-export btn-small" onclick="exportEpub()">Kindle/EPUB (.epub)</button>
+                                    <button class="btn btn-export btn-small" onclick="exportStoryBible()" style="background:linear-gradient(90deg,#e67e22,#d35400);">Story Bible (MD)</button>
                                     <button class="btn btn-secondary btn-small" onclick="exportOutline()">Outline (MD)</button>
                                     <button class="btn btn-secondary btn-small" onclick="exportManuscript()">Manuscript (MD)</button>
                                 </div>
@@ -1468,6 +1469,35 @@
         // =================================================================
         // Export Functions
         // =================================================================
+
+        async function exportStoryBible() {
+            if (!currentProject) {
+                alert('No project selected');
+                return;
+            }
+
+            const statusEl = document.getElementById('exportStatus');
+            statusEl.textContent = 'Downloading story bible...';
+
+            try {
+                const res = await fetch(`/api/projects/${currentProject}/export/story-bible`, {credentials: 'include'});
+                if (!res.ok) throw new Error('Export failed');
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Story_Bible.md`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                statusEl.textContent = 'Story bible downloaded!';
+            } catch (error) {
+                console.error('Story bible export error:', error);
+                statusEl.textContent = 'Failed to export story bible. Run the pipeline first.';
+            }
+        }
 
         async function exportOutline() {
             if (!currentProject) {
