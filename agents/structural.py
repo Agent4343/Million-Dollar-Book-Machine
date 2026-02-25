@@ -361,6 +361,9 @@ DRAFT_GENERATION_PROMPT = """You are a novelist. Write Chapter {chapter_number}:
 ## Character Reference:
 {character_architecture}
 
+## Dialogue Voice Profiles (CRITICAL — each character MUST sound distinct):
+{dialogue_voices}
+
 ## World Rules:
 {world_rules}
 
@@ -403,6 +406,13 @@ Write engaging, publication-quality prose that:
   "settled like a weight", "burned in his chest", "cut through him like",
   "tasted like ash", "tasted like poison", "tasted bitter"
 - CHECK THE BANNED PHRASES LIST IN STORY STATE. Do NOT reuse any phrase listed there.
+- DIALOGUE VOICE RULES (CRITICAL):
+  - Each character MUST speak differently. Check the DIALOGUE VOICE PROFILES above.
+  - Use the character's vocabulary level, sentence patterns, and verbal tics.
+  - A reader should be able to identify the speaker WITHOUT dialogue tags.
+  - Under stress, apply that character's stress speech pattern.
+  - NEVER have two characters speak with the same rhythm or vocabulary level.
+  - Minimize dialogue tags — use action beats instead ("He slammed the folder shut. 'We're done here.'")
 - NEVER start consecutive paragraphs the same way
 - Use concrete, specific details (brand names, textures, temperatures) not vague abstractions
 - Dialogue: real speech with interruptions, incomplete thoughts, subtext
@@ -943,12 +953,19 @@ async def execute_draft_generation(
                     # Get the word target from the blueprint for this chapter
                     word_target = chapter.get("word_target", 3000)
 
+                    # Extract dialogue voice profiles from character architecture.
+                    char_arch = context.inputs.get("character_architecture", {})
+                    dialogue_voices = char_arch.get("dialogue_voices", {}) if isinstance(char_arch, dict) else {}
+                    if not dialogue_voices:
+                        dialogue_voices = "No dialogue voice profiles available. Differentiate characters by vocabulary, sentence length, and speech patterns."
+
                     prompt = DRAFT_GENERATION_PROMPT.format(
                         chapter_number=chapter_num,
                         chapter_title=chapter_title,
                         voice_specification=context.inputs.get("voice_specification", {}),
                         chapter_blueprint=chapter,
-                        character_architecture=context.inputs.get("character_architecture", {}),
+                        character_architecture=char_arch,
+                        dialogue_voices=dialogue_voices,
                         world_rules=context.inputs.get("world_rules", {}),
                         previous_summary=previous_summary,
                         story_state=story_state_text,
@@ -1043,6 +1060,43 @@ Rules:
                         chapter_scores[str(chapter_num)] = 85
 
                     word_count = len(chapter_text.split())
+
+                    # ── Word count enforcement ──
+                    # If chapter is significantly short (<75% of target), expand it.
+                    # If significantly long (>135% of target), flag but keep (trimming
+                    # risks cutting important content; downstream editors can tighten).
+                    if word_target and word_count < int(word_target * 0.75):
+                        try:
+                            deficit = word_target - word_count
+                            expand_prompt = f"""The chapter below is {word_count} words but the target is {word_target} words ({deficit} words short).
+
+Expand the chapter by deepening existing scenes — add:
+- More sensory details and physical grounding
+- Deeper internal monologue during key emotional moments
+- Additional dialogue exchanges that reveal character
+- Transitional beats between scenes that build atmosphere
+
+Do NOT add new plot events or change the story. Just enrich what's already there.
+Maintain the exact same voice and style.
+
+Chapter text:
+{chapter_text}
+
+Return the COMPLETE expanded chapter text (not JSON, just the prose)."""
+                            expanded = await asyncio.wait_for(
+                                llm.generate(expand_prompt, max_tokens=16000),
+                                timeout=timeout,
+                            )
+                            if isinstance(expanded, str) and len(expanded.split()) > word_count:
+                                chapter_text = expanded
+                                word_count = len(chapter_text.split())
+                                logger.info(
+                                    "draft_generation: Chapter %s expanded from %d to %d words (target: %d)",
+                                    chapter_num, word_count - deficit, word_count, word_target,
+                                )
+                        except Exception as exc:
+                            logger.warning("draft_generation: Chapter %s expansion failed: %s", chapter_num, exc)
+
                     chapters.append({
                         "number": chapter_num,
                         "title": chapter_title,

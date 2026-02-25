@@ -69,16 +69,16 @@ def _chapter_summary(ch: Dict[str, Any]) -> str:
     return s if isinstance(s, str) and s.strip() else ""
 
 
-def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 40000) -> str:
+def _sample_manuscript(chapters: List[Dict[str, Any]], max_chars: int = 60000) -> str:
     """Bounded manuscript sample for analysis prompts.
 
     Samples every chapter with an adaptive per-chapter budget so that
     quality validation sees representative text from across the entire
     book, not just the first, middle, and last chapters.
 
-    Default budget increased from 18K to 40K chars to cover ~13% of an
-    80K-word book (vs. 6% before).  For a 14-chapter book this gives
-    ~2,800 chars per chapter — enough to catch most prose-level issues.
+    Default budget increased to 60K chars (~20% of an 80K-word book).
+    For a 20-chapter book this gives ~3,000 chars per chapter — enough
+    to catch most prose-level and structural issues.
     """
     if not chapters:
         return ""
@@ -191,7 +191,65 @@ def _heuristic_chapter_issues(text: str) -> List[str]:
         if overused:
             issues.append(f"Repetitive sentence starts: {', '.join(overused)}")
 
+    # Check 5: Excessive "said" dialogue tags (>80% of all tags)
+    said_count = len(re.findall(r'\b(said|says)\b', text_lower))
+    other_tags = len(re.findall(
+        r'\b(whispered|shouted|muttered|murmured|snapped|growled|hissed|stammered|'
+        r'replied|answered|asked|demanded|insisted|pleaded|exclaimed|sighed|groaned)\b',
+        text_lower
+    ))
+    total_tags = said_count + other_tags
+    if total_tags >= 8 and said_count > 0 and (other_tags == 0 or said_count / total_tags > 0.85):
+        issues.append(f"Dialogue tag monotony: {said_count}/{total_tags} tags are 'said' — use action beats instead")
+
+    # Check 6: Within-paragraph word repetition (same non-trivial word 3+ times)
+    _trivial = {"the", "a", "an", "and", "but", "or", "in", "on", "at", "to", "of",
+                "is", "was", "were", "are", "be", "been", "being", "have", "has", "had",
+                "do", "did", "does", "will", "would", "could", "should", "can", "may",
+                "for", "with", "from", "by", "as", "it", "its", "this", "that", "his",
+                "her", "he", "she", "they", "them", "their", "not", "no", "so", "if"}
+    for i, para in enumerate(paras[:50]):  # cap to avoid perf issues on huge chapters
+        words = re.findall(r"[a-z']+", para.lower())
+        if len(words) < 20:
+            continue
+        word_freq: Dict[str, int] = {}
+        for w in words:
+            if w not in _trivial and len(w) > 3:
+                word_freq[w] = word_freq.get(w, 0) + 1
+        repeated = [f"'{w}' x{c}" for w, c in word_freq.items() if c >= 4]
+        if repeated:
+            issues.append(f"Word repetition in paragraph {i+1}: {', '.join(repeated[:3])}")
+            break  # One example is enough to trigger a sweep
+
+    # Check 7: Overlong paragraphs (>300 words without dialogue)
+    for i, para in enumerate(paras[:50]):
+        if '"' in para or "'" in para:
+            continue  # Skip dialogue-heavy paragraphs
+        if len(para.split()) > 300:
+            issues.append(f"Overlong paragraph ({len(para.split())} words) at paragraph {i+1} — consider breaking up")
+            break
+
     return issues
+
+
+def _full_manuscript_heuristic_scan(chapters: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+    """Run heuristic quality checks on EVERY chapter in the manuscript.
+
+    Returns a dict mapping chapter number to list of issues.
+    This is pure Python — zero LLM cost — so it scans the full book.
+    """
+    results: Dict[int, List[str]] = {}
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        num = _chapter_number(ch)
+        text = _chapter_text(ch)
+        if not text or len(text.strip()) < 200:
+            continue
+        issues = _heuristic_chapter_issues(text)
+        if issues:
+            results[num] = issues
+    return results
 
 
 # Relationship keywords used to extract cross-chapter character references.
@@ -509,7 +567,19 @@ async def execute_developmental_editor(context: ExecutionContext) -> Dict[str, A
         relationship_refs = _extract_relationship_references(chapters, max_chars=8000)
         # Include actual prose samples so the editor can assess writing quality,
         # voice consistency, and detect AI-telltale language — not just structural issues.
-        prose_samples = _sample_manuscript(chapters, max_chars=30000)
+        prose_samples = _sample_manuscript(chapters, max_chars=40000)
+
+        # Run full-manuscript heuristic scan (pure Python, zero LLM cost).
+        # This gives the dev editor visibility into EVERY chapter's prose quality,
+        # not just the ~20% that fits in the prose_samples budget.
+        heuristic_report = _full_manuscript_heuristic_scan(chapters)
+        heuristic_summary = ""
+        if heuristic_report:
+            lines = []
+            for ch_num in sorted(heuristic_report.keys()):
+                issues = heuristic_report[ch_num]
+                lines.append(f"Ch{ch_num}: {'; '.join(issues)}")
+            heuristic_summary = "\n".join(lines)
 
         system_prompt = """You are a professional developmental editor AI. Your sole function is to identify and resolve weaknesses in how a book has been developed. You do not write prose unless explicitly asked. You diagnose, flag, and prescribe fixes.
 
@@ -582,6 +652,9 @@ Emotional validation: {emotional}
 
 ## PROSE SAMPLES (representative excerpts from every chapter)
 {prose_samples}
+
+## FULL-MANUSCRIPT HEURISTIC SCAN (Python analysis of EVERY chapter — zero sampling bias)
+{heuristic_summary}
 
 ## ASSESSMENT INSTRUCTIONS
 
@@ -972,6 +1045,17 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
         # 94% of the book that validation agents couldn't sample was never reviewed.
         # Now every chapter gets at least a quality pass.
         chapters_by_num = {_chapter_number(ch): ch for ch in chapters if isinstance(ch, dict)}
+
+        # Run full-manuscript heuristic scan (pure Python, zero cost) to catch
+        # issues that upstream LLM-based audits missed due to sampling limits.
+        # This ensures EVERY chapter is checked, not just the 13% that fit in
+        # the _sample_manuscript budget.
+        heuristic_scan = _full_manuscript_heuristic_scan(chapters)
+        for ch_num, h_issues in heuristic_scan.items():
+            if ch_num not in chapter_issues:
+                chapter_issues[ch_num] = [f"[heuristic] {i}" for i in h_issues]
+            # Don't duplicate — upstream issues take priority
+
         rewrite_nums = [n for n in sorted(chapter_issues.keys()) if n in chapters_by_num]
         # Unflagged chapters that still need a quality sweep
         unflagged_nums = [n for n in sorted(chapters_by_num.keys()) if n not in chapter_issues]
@@ -989,13 +1073,34 @@ async def execute_structural_rewrite(context: ExecutionContext) -> Dict[str, Any
         voice_spec = context.inputs.get("voice_specification", {})
         voice_guide = voice_spec.get("style_guide", {}) if isinstance(voice_spec, dict) else {}
 
-        # ── Phase 1: Rewrite chapters with known issues (full rewrite) ──
+        # ── Phase 1: Multi-pass rewrite of chapters with known issues ──
+        # Each flagged chapter gets rewritten, then re-evaluated with heuristics.
+        # If heuristic issues remain after rewrite, it gets another pass (up to 3).
+        # This closes the gap where a single rewrite fixes structural issues but
+        # introduces new prose problems (AI phrases, repetition, etc.).
+        _REWRITE_MAX_PASSES = int((context.inputs.get("user_constraints", {}) or {}).get("max_rewrite_passes") or 3)
         for num in rewrite_nums:
             ch = chapters_by_num[num]
+            current_text = _chapter_text(ch)
+            current_summary = _chapter_summary(ch)
             issues_for_ch = chapter_issues.get(num, [])
-            issues_block = "\n\n## SPECIFIC ISSUES TO FIX IN THIS CHAPTER:\n" + "\n".join(f"- {i}" for i in issues_for_ch)
-            try:
-                prompt = f"""You are rewriting a chapter to fix known issues and improve clarity, pacing, and voice consistency while preserving plot facts.
+            total_changes = []
+
+            for rewrite_pass in range(1, _REWRITE_MAX_PASSES + 1):
+                # Build issue context: on pass 1, use upstream audit issues.
+                # On subsequent passes, use heuristic findings from the previous rewrite.
+                if rewrite_pass == 1:
+                    issues_block = "\n\n## SPECIFIC ISSUES TO FIX IN THIS CHAPTER:\n" + "\n".join(f"- {i}" for i in issues_for_ch)
+                else:
+                    heuristic_flags = _heuristic_chapter_issues(current_text)
+                    if not heuristic_flags:
+                        # Chapter is now clean — no more passes needed
+                        logger.info("structural_rewrite: Chapter %s clean after pass %d", num, rewrite_pass - 1)
+                        break
+                    issues_block = "\n\n## REMAINING ISSUES (pass {}/{}):".format(rewrite_pass, _REWRITE_MAX_PASSES) + "\n" + "\n".join(f"- {f}" for f in heuristic_flags)
+
+                try:
+                    prompt = f"""You are rewriting a chapter to fix known issues and improve clarity, pacing, and voice consistency while preserving plot facts.
 
 Global context from audits:
 Continuity audit summary: {continuity_summary}
@@ -1012,31 +1117,28 @@ Return ONLY valid JSON:
 Chapter to rewrite:
 TITLE: {_chapter_title(ch)}
 TEXT:
-{_chapter_text(ch)}
+{current_text}
 """
-                out = await llm.generate(prompt, response_format="json", temperature=0.4)
-                new_text = out.get("text") or _chapter_text(ch)
-                revised.append({
-                    "number": num,
-                    "title": _chapter_title(ch),
-                    "text": new_text,
-                    "summary": out.get("summary", _chapter_summary(ch) or "Updated chapter."),
-                    "word_count": len(new_text.split()) if isinstance(new_text, str) else 0,
-                })
-                rewritten_set.add(num)
-                revision_log.append({"chapter": num, "changes": out.get("changes", "Revised prose and structure.")})
-            except Exception as exc:
-                logger.warning("structural_rewrite: Chapter %s rewrite failed, keeping original: %s", num, exc)
-                t = _chapter_text(ch)
-                revised.append({
-                    "number": num,
-                    "title": _chapter_title(ch),
-                    "text": t,
-                    "summary": _chapter_summary(ch) or "Rewrite skipped.",
-                    "word_count": len(t.split()) if t else int(ch.get("word_count") or 0),
-                })
-                rewritten_set.add(num)
-                revision_log.append({"chapter": num, "changes": f"Rewrite skipped: {exc}"})
+                    out = await llm.generate(prompt, response_format="json", temperature=0.4)
+                    new_text = out.get("text") or current_text
+                    if isinstance(new_text, str) and len(new_text.split()) > 100:
+                        current_text = new_text
+                        current_summary = out.get("summary", current_summary or "Updated chapter.")
+                    total_changes.append(out.get("changes", f"Pass {rewrite_pass} revision."))
+                except Exception as exc:
+                    logger.warning("structural_rewrite: Chapter %s pass %d failed: %s", num, rewrite_pass, exc)
+                    total_changes.append(f"Pass {rewrite_pass} failed: {exc}")
+                    break  # Don't retry if the LLM call itself fails
+
+            revised.append({
+                "number": num,
+                "title": _chapter_title(ch),
+                "text": current_text,
+                "summary": current_summary or "Updated chapter.",
+                "word_count": len(current_text.split()) if isinstance(current_text, str) else 0,
+            })
+            rewritten_set.add(num)
+            revision_log.append({"chapter": num, "passes": len(total_changes), "changes": " | ".join(total_changes)})
 
         # ── Phase 2: Heuristic-gated quality sweep of unflagged chapters ──
         # Run FREE Python heuristics first on each chapter. Only chapters

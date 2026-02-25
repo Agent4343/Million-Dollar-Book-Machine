@@ -135,6 +135,18 @@ Design the character system:
    - Shapeshifter
    - Threshold guardian
 
+8. **Dialogue Voice Profiles** (CRITICAL for distinct character voices):
+   For EVERY named character (protagonist, antagonist, and each supporting cast member), define:
+   - Vocabulary level (formal/informal/street/academic/archaic/technical)
+   - Sentence patterns (short/clipped, flowing/eloquent, rambling, precise)
+   - Verbal tics or catchphrases (a word or phrase they overuse)
+   - What they NEVER say (speech patterns that would be out of character)
+   - How they speak under stress (shorter? louder? more formal? deflect with humor?)
+   - Education/background markers in speech (slang, jargon, dialect hints)
+
+   These profiles ensure each character sounds DISTINCT in dialogue. A reader should be
+   able to identify the speaker without dialogue tags.
+
 ## Output Format (JSON):
 {{
     "protagonist_profile": {{
@@ -175,6 +187,17 @@ Design the character system:
         "ally": "...",
         "shapeshifter": "...",
         "threshold_guardian": "..."
+    }},
+    "dialogue_voices": {{
+        "<character_name>": {{
+            "vocabulary_level": "formal|informal|street|academic|archaic|technical|mixed",
+            "sentence_patterns": "short and clipped|flowing and eloquent|rambling|precise and measured|fragmented",
+            "verbal_tics": ["word or phrase they overuse or repeat"],
+            "never_says": ["speech patterns out of character for them"],
+            "under_stress": "How their speech changes under pressure",
+            "background_markers": "Slang, jargon, dialect, or education markers",
+            "example_line": "A single line of dialogue that captures their voice perfectly"
+        }}
     }}
 }}
 """
@@ -359,6 +382,26 @@ async def execute_character_architecture(context: ExecutionContext) -> Dict[str,
                 "ally": "Friend who speaks truth",
                 "shapeshifter": "Character with hidden agenda",
                 "threshold_guardian": "Gatekeeper to new world"
+            },
+            "dialogue_voices": {
+                "[Protagonist Name]": {
+                    "vocabulary_level": "informal",
+                    "sentence_patterns": "short and clipped",
+                    "verbal_tics": ["Look,", "I just—"],
+                    "never_says": ["flowery language", "long speeches"],
+                    "under_stress": "Gets quieter, more terse, trails off",
+                    "background_markers": "Working class, avoids fancy words",
+                    "example_line": "Look, I don't need your help. I just— forget it."
+                },
+                "[Antagonist Name]": {
+                    "vocabulary_level": "formal",
+                    "sentence_patterns": "flowing and eloquent",
+                    "verbal_tics": ["You see,", "Naturally"],
+                    "never_says": ["slang", "contractions when making a point"],
+                    "under_stress": "Becomes icily precise, drops the charm",
+                    "background_markers": "Ivy League, power vocabulary",
+                    "example_line": "You see, the problem with idealists is they always underestimate the cost of conviction."
+                }
             }
         }
 
