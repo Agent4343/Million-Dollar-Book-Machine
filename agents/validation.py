@@ -1338,24 +1338,52 @@ async def execute_final_validation(context: ExecutionContext) -> Dict[str, Any]:
     llm = context.llm_client
     chapters = _best_available_chapters(context)
     if llm and chapters:
-        prompt = f"""You are the final QA gate for publication readiness.
+        # Extract the final ~20% of the manuscript for resolution analysis
+        final_portion = chapters[-(max(1, len(chapters) // 5)):]
+        final_text = "\n\n".join(
+            (ch.get("text") or ch.get("summary") or "")[:3000]
+            for ch in final_portion if isinstance(ch, dict)
+        )
+
+        prompt = f"""You are the final QA gate for publication readiness. Evaluate PROMISE FULFILLMENT, RESOLUTION QUALITY, and STRUCTURAL VARIETY.
 
 Core promise: {core_promise}
 Theme: {theme}
 
-Manuscript sample:
+Manuscript sample (full book):
 {_sample_manuscript(chapters)}
+
+Final chapters (resolution):
+{final_text[:8000]}
 
 Return ONLY valid JSON:
 {{
   "concept_match_score": 0,
   "theme_payoff_check": {{"theme_delivered": true, "thematic_question_addressed": true, "value_conflict_resolved": true}},
   "promise_fulfillment": {{"core_promise_delivered": true, "reader_expectation_met": true, "emotional_payoff_achieved": true}},
+  "resolution_quality": {{
+    "protagonist_pays_permanent_cost": true,
+    "cost_description": "What permanent sacrifice/loss did the protagonist endure?",
+    "victory_feels_earned": true,
+    "loose_ends_addressed": true,
+    "too_clean": false,
+    "notes": "..."
+  }},
+  "structural_variety": {{
+    "repetitive_plot_cycles": false,
+    "character_arcs_progress": true,
+    "pacing_varied": true,
+    "notes": "..."
+  }},
   "release_recommendation": {{"approved": true, "confidence": 0, "notes": "..."}}
 }}
 
 Rules:
 - Scores/confidence are 0-100.
+- resolution_quality.too_clean = true if the protagonist wins with zero permanent loss — this is a BLOCKER.
+- protagonist_pays_permanent_cost = true if they suffered irreversible loss (ally death, permanent injury, sacrificed something dear). Happy endings are fine but must be EARNED through real sacrifice.
+- structural_variety.repetitive_plot_cycles = true if the same sequence (e.g., infiltrate-discovered-escape) repeats 3+ times. This is a BLOCKER.
+- character_arcs_progress = true if major characters grow without re-learning the same lessons.
 - If approved=false, explain blockers in notes."""
         return await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=2000)
 

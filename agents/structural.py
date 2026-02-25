@@ -208,6 +208,16 @@ For each scene include:
 - Conflict type (external, internal, interpersonal, environmental)
 - Outcome (how the scene changes the character's situation)
 
+## STRUCTURAL VARIETY RULES (CRITICAL — prevents repetitive books)
+- NO more than 2 chapters in the entire book may share the same PRIMARY conflict type.
+  For example: max 2 chase/escape chapters, max 2 infiltration chapters, max 2 interrogation chapters.
+- VARY chapter structures: if Chapter N is action-heavy, Chapter N+1 must be dialogue-driven, investigative, or reflective. Never have 3+ consecutive action chapters.
+- Each character's emotional arc must PROGRESS MONOTONICALLY across the book. A character who learns to trust in Chapter 5 must NOT re-learn to trust in Chapter 12. Growth should BUILD on previous growth.
+- The antagonist must ESCALATE across appearances: each time they appear, they reveal new information, employ new tactics, or demonstrate new capabilities. No recycled villain speeches.
+- VARY how chapters end: alternate between cliffhangers, quiet revelations, emotional shifts, and ominous foreshadowing. Don't end every chapter with a chase or discovery.
+- Include at least 3 "breather" chapters (lower tension, character development, relationship building) distributed across the middle third of the book.
+- For each chapter, specify a PRIMARY scene type from this list: chase, infiltration, escape, confrontation, quiet_reflection, discovery, betrayal, romance, interrogation, battle, planning, investigation, trial, celebration, mourning, travel, training, disguise, negotiation, ambush, rescue, confession.
+
 ## Hard Requirements (must comply)
 - Return ONLY valid JSON (no markdown).
 - Chapter numbers must be contiguous and increasing starting at 1 (1..N).
@@ -224,6 +234,7 @@ For each scene include:
             "title": "<string>",
             "act": 1,
             "chapter_goal": "<string>",
+            "primary_scene_type": "<chase|infiltration|escape|confrontation|quiet_reflection|discovery|betrayal|romance|interrogation|battle|planning|investigation|trial|celebration|mourning|travel|training|disguise|negotiation|ambush|rescue|confession>",
             "pov": "<string>",
             "opening_hook": "<string>",
             "closing_hook": "<string>",
@@ -356,6 +367,9 @@ DRAFT_GENERATION_PROMPT = """You are a novelist. Write Chapter {chapter_number}:
 ## Story Context (recent chapter summaries):
 {previous_summary}
 
+## Running Story State (CRITICAL — read carefully):
+{story_state}
+
 ## Task:
 Write the complete chapter following:
 - The scene blueprint exactly
@@ -370,12 +384,25 @@ Write engaging, publication-quality prose that:
 - Hits the word target of approximately {word_target} words
 - Uses * * * on its own line for scene breaks within the chapter
 
+## STRUCTURAL INTEGRITY RULES (CRITICAL — prevents repetitive books)
+- CHECK THE STORY STATE ABOVE. It tracks scene types, character arcs, and phrases already used.
+- DO NOT repeat scene types that have already appeared 2+ times (e.g., if there have been 2 chase scenes, do NOT write another chase even if the blueprint suggests one — find a creative alternative that achieves the same plot goal).
+- CHARACTER ARCS MUST PROGRESS FORWARD. If a character already learned a lesson (e.g., "learned to trust"), they CANNOT re-learn it. Build on what they've already achieved. Show growth, not loops.
+- The antagonist MUST say new things. Check what they've already revealed/monologued about and advance their argument or reveal new information.
+- Each chapter must feel STRUCTURALLY DIFFERENT from the previous one. If the last chapter was action-heavy, this one should emphasize dialogue, investigation, or internal reflection.
+
 ## PROSE QUALITY RULES (CRITICAL)
 - NEVER use AI-telltale phrases: "In a world where", "Little did she know",
   "A symphony of", "sent shivers down", "pierced the silence", "could not help but",
   "a dance of", "the weight of", "it was as if", "time seemed to stop",
   "the silence was deafening", "a chill ran down", "little did they know",
   "with bated breath", "the air was thick with tension"
+- NEVER use these overused phrases: "like a physical blow", "hit him like",
+  "struck her like", "something shifted", "blood ran cold", "blood turned to ice",
+  "the words hung between them", "crashed over him like a wave",
+  "settled like a weight", "burned in his chest", "cut through him like",
+  "tasted like ash", "tasted like poison", "tasted bitter"
+- CHECK THE BANNED PHRASES LIST IN STORY STATE. Do NOT reuse any phrase listed there.
 - NEVER start consecutive paragraphs the same way
 - Use concrete, specific details (brand names, textures, temperatures) not vague abstractions
 - Dialogue: real speech with interruptions, incomplete thoughts, subtext
@@ -387,6 +414,156 @@ Write engaging, publication-quality prose that:
 
 ## Output the chapter text directly.
 """
+
+
+# =============================================================================
+# STORY STATE TRACKING — prevents repetitive plots and looping character arcs
+# =============================================================================
+
+_STORY_STATE_EXTRACTION_PROMPT = """Analyze this chapter and extract structured story state.
+
+Chapter {chapter_number}:
+{chapter_text}
+
+Return ONLY valid JSON:
+{{
+  "scene_types": ["<type>"],
+  "character_arc_movements": {{"<character_name>": "<arc_position>"}},
+  "antagonist_reveals": ["<what villain revealed or argued>"],
+  "chapter_structure": "<action_heavy|dialogue_heavy|introspection|investigation|romance|mixed>",
+  "tension_level": 7,
+  "notable_phrases": ["<memorable or distinctive phrases used>"]
+}}
+
+scene_types must be from: chase, infiltration, escape, confrontation, quiet_reflection, discovery, betrayal, romance, interrogation, battle, planning, investigation, trial, celebration, mourning, travel, training, disguise, negotiation, ambush, rescue, confession
+
+character_arc_movements: for each major character, describe their emotional/psychological state at END of chapter in 3-5 words.
+
+antagonist_reveals: only include if the antagonist/villain appears. What NEW information or argument did they present?
+
+notable_phrases: list 3-5 distinctive metaphors, similes, or turns of phrase used in this chapter.
+"""
+
+
+import re as _re
+from collections import Counter as _Counter
+
+
+def _extract_ngrams(text: str, n: int = 4) -> list:
+    """Extract n-grams from text for phrase deduplication."""
+    words = text.lower().split()
+    return [" ".join(words[i:i + n]) for i in range(len(words) - n + 1)]
+
+
+def _accumulate_story_state(
+    state: dict, ch_state: dict, chapter_num: int, chapter_text: str
+) -> None:
+    """Merge one chapter's extracted state into the running accumulator."""
+    # Scene types
+    for st in ch_state.get("scene_types", []):
+        if isinstance(st, str):
+            state["scene_types_used"].append(f"Ch{chapter_num}:{st}")
+
+    # Character arcs
+    for char_name, arc_pos in (ch_state.get("character_arc_movements") or {}).items():
+        if not isinstance(char_name, str):
+            continue
+        if char_name not in state["character_arcs"]:
+            state["character_arcs"][char_name] = []
+        state["character_arcs"][char_name].append(f"Ch{chapter_num}: {arc_pos}")
+
+    # Antagonist reveals
+    for reveal in ch_state.get("antagonist_reveals", []):
+        if isinstance(reveal, str) and reveal.strip():
+            state["antagonist_reveals"].append(f"Ch{chapter_num}: {reveal}")
+
+    # Chapter structure
+    structure = ch_state.get("chapter_structure", "mixed")
+    state["chapter_structures"].append(f"Ch{chapter_num}:{structure}")
+
+    # Tension level
+    tension = ch_state.get("tension_level", 5)
+    if isinstance(tension, int):
+        state["tension_levels"].append(tension)
+
+    # Notable phrases — add LLM-extracted ones plus heuristic n-gram detection
+    for phrase in ch_state.get("notable_phrases", []):
+        if isinstance(phrase, str) and phrase.strip():
+            state["notable_phrases"].append(phrase.strip().lower())
+
+    # Heuristic: extract overused 4-grams from this chapter
+    _add_frequent_ngrams(state, chapter_text)
+
+
+def _accumulate_story_state_heuristic(
+    state: dict, chapter_num: int, chapter_text: str
+) -> None:
+    """Fallback: extract story state without LLM when extraction call fails."""
+    state["chapter_structures"].append(f"Ch{chapter_num}:unknown")
+    state["tension_levels"].append(5)
+    _add_frequent_ngrams(state, chapter_text)
+
+
+def _add_frequent_ngrams(state: dict, text: str) -> None:
+    """Find frequently-used 4-grams in a chapter and add to banned phrases."""
+    ngrams = _extract_ngrams(text, 4)
+    counts = _Counter(ngrams)
+    for phrase, count in counts.most_common(10):
+        if count >= 2 and phrase not in state["notable_phrases"]:
+            state["notable_phrases"].append(phrase)
+
+
+def _build_story_state(state: dict) -> str:
+    """Format the running story state for injection into the chapter prompt."""
+    if not any(state.values()):
+        return "This is the first chapter. No story state accumulated yet."
+
+    parts = []
+
+    # Scene types used
+    type_counts = _Counter(
+        entry.split(":")[-1] for entry in state.get("scene_types_used", [])
+    )
+    if type_counts:
+        overused = [f"{t} ({c}x)" for t, c in type_counts.most_common() if c >= 2]
+        parts.append(f"SCENE TYPES ALREADY USED: {', '.join(f'{t} ({c}x)' for t, c in type_counts.most_common())}")
+        if overused:
+            parts.append(f"WARNING — OVERUSED SCENE TYPES (DO NOT REPEAT): {', '.join(overused)}")
+
+    # Character arcs
+    arcs = state.get("character_arcs", {})
+    if arcs:
+        arc_lines = []
+        for char, positions in arcs.items():
+            arc_lines.append(f"  {char}: {' → '.join(positions)}")
+        parts.append("CHARACTER ARC PROGRESSION (must advance, NEVER loop back):\n" + "\n".join(arc_lines))
+
+    # Antagonist reveals
+    reveals = state.get("antagonist_reveals", [])
+    if reveals:
+        parts.append(f"ANTAGONIST HAS ALREADY REVEALED/ARGUED (must say NEW things):\n  " + "\n  ".join(reveals[-8:]))
+
+    # Chapter structures
+    structures = state.get("chapter_structures", [])
+    if structures:
+        parts.append(f"PREVIOUS CHAPTER STRUCTURES: {', '.join(structures[-5:])}")
+        last = structures[-1].split(":")[-1] if structures else ""
+        if last:
+            parts.append(f"LAST CHAPTER WAS: {last} — this chapter MUST be structurally different")
+
+    # Tension curve
+    tensions = state.get("tension_levels", [])
+    if tensions:
+        parts.append(f"TENSION CURVE SO FAR: {' → '.join(str(t) for t in tensions)}")
+
+    # Banned phrases
+    phrases = state.get("notable_phrases", [])
+    if phrases:
+        # Show the most recent/relevant ones (cap at 40 to avoid token bloat)
+        shown = phrases[-40:]
+        parts.append(f"BANNED PHRASES (already used — DO NOT reuse):\n  " + "\n  ".join(f'"{p}"' for p in shown))
+
+    return "\n\n".join(parts)
 
 
 # =============================================================================
@@ -662,6 +839,17 @@ async def execute_draft_generation(
     chapter_scores: Dict[str, int] = {}
     failed_chapters: List[Dict[str, Any]] = []
 
+    # Running story state accumulator — tracks beats, arcs, phrases across
+    # ALL chapters to prevent repetitive plots and looping character arcs.
+    story_state: Dict[str, Any] = {
+        "scene_types_used": [],       # e.g. ["chase", "infiltration", "quiet_reflection"]
+        "character_arcs": {},          # e.g. {"Silas": ["distrustful", "beginning_to_trust"]}
+        "antagonist_reveals": [],      # what the villain has said/revealed
+        "notable_phrases": [],         # phrases to avoid reusing
+        "tension_levels": [],          # per-chapter tension (1-10)
+        "chapter_structures": [],      # e.g. ["action_heavy", "dialogue_heavy", "introspection"]
+    }
+
     # ── Resume from previous attempt ──
     # If a prior attempt generated chapters but failed the gate, the
     # orchestrator now preserves that output.  Carry forward any
@@ -733,11 +921,11 @@ async def execute_draft_generation(
             for attempt in range(1, _DRAFT_CHAPTER_MAX_RETRIES + 1):
                 try:
                     # Build sliding window of previous chapter summaries for continuity.
-                    # Using up to 3 recent summaries prevents character/plot "resets"
-                    # in longer books while keeping token use bounded.
+                    # Using up to 5 recent summaries (increased from 3) to reduce
+                    # character/plot "resets" in longer books.
                     previous_summary = "This is the first chapter."
                     if chapters:
-                        context_window = 3
+                        context_window = 5
                         recent = chapters[-context_window:]
                         summary_parts = []
                         for prev_ch in recent:
@@ -746,6 +934,11 @@ async def execute_draft_generation(
                             if psum:
                                 summary_parts.append(f"Chapter {pnum}: {psum}")
                         previous_summary = "\n".join(summary_parts) if summary_parts else f"Previous chapter ended with: {chapters[-1].get('summary', '')}"
+
+                    # Build running story state from ALL previous chapters.
+                    # This prevents repetitive plot patterns, character arc loops,
+                    # and overused phrases across the entire book.
+                    story_state_text = _build_story_state(story_state)
 
                     # Get the word target from the blueprint for this chapter
                     word_target = chapter.get("word_target", 3000)
@@ -758,6 +951,7 @@ async def execute_draft_generation(
                         character_architecture=context.inputs.get("character_architecture", {}),
                         world_rules=context.inputs.get("world_rules", {}),
                         previous_summary=previous_summary,
+                        story_state=story_state_text,
                         word_target=word_target
                     )
 
@@ -782,6 +976,27 @@ Summary:""",
                     # return JSON despite not being asked for it).
                     if not isinstance(summary, str) or not summary.strip():
                         summary = str(summary) if summary else f"Chapter {chapter_num} summary"
+
+                    # Extract structured story state from this chapter for the
+                    # running accumulator.  Uses a single fast LLM call.
+                    try:
+                        ch_state = await asyncio.wait_for(
+                            llm.generate(
+                                _STORY_STATE_EXTRACTION_PROMPT.format(
+                                    chapter_number=chapter_num,
+                                    chapter_text=chapter_text[:5000],
+                                ),
+                                response_format="json",
+                                max_tokens=600,
+                                temperature=0.1,
+                            ),
+                            timeout=timeout,
+                        )
+                        if isinstance(ch_state, dict):
+                            _accumulate_story_state(story_state, ch_state, chapter_num, chapter_text)
+                    except Exception:
+                        # Non-fatal: fall back to heuristic extraction
+                        _accumulate_story_state_heuristic(story_state, chapter_num, chapter_text)
 
                     # Optional: evaluate outline adherence (saves 1 LLM call per chapter when disabled)
                     if _DRAFT_ADHERENCE_CHECK:

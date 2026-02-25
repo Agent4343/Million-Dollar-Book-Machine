@@ -135,6 +135,50 @@ def validate_agent_output(
                 normalized_content,
             )
 
+        # Beat variety check: no more than 2 chapters with the same primary_scene_type.
+        # Also reject 3+ consecutive action-heavy chapters.
+        scene_type_counts: Dict[str, int] = {}
+        for ch in outline:
+            if not isinstance(ch, dict):
+                continue
+            pst = ch.get("primary_scene_type", "")
+            if isinstance(pst, str) and pst.strip():
+                key = pst.strip().lower()
+                scene_type_counts[key] = scene_type_counts.get(key, 0) + 1
+
+        overused_types = {t: c for t, c in scene_type_counts.items() if c > 2}
+        if overused_types:
+            return (
+                False,
+                f"Blueprint has overused scene types (max 2 per type): "
+                f"{', '.join(f'{t} ({c}x)' for t, c in overused_types.items())}. "
+                f"Vary the chapter structures for a more engaging book.",
+                {"errors": [{"msg": "overused_scene_types", "types": overused_types}]},
+                normalized_content,
+            )
+
+        # Check for 3+ consecutive action-heavy chapters
+        ACTION_TYPES = {"chase", "escape", "battle", "ambush", "infiltration", "confrontation", "rescue"}
+        consecutive_action = 0
+        max_consecutive = 0
+        for ch in outline:
+            if not isinstance(ch, dict):
+                continue
+            pst = (ch.get("primary_scene_type") or "").strip().lower()
+            if pst in ACTION_TYPES:
+                consecutive_action += 1
+                max_consecutive = max(max_consecutive, consecutive_action)
+            else:
+                consecutive_action = 0
+        if max_consecutive >= 3:
+            return (
+                False,
+                f"Blueprint has {max_consecutive} consecutive action chapters. "
+                f"Insert breather/reflection chapters between action sequences.",
+                {"errors": [{"msg": "too_many_consecutive_action", "count": max_consecutive}]},
+                normalized_content,
+            )
+
         # Minimum chapter count: the LLM sometimes returns far fewer chapters
         # than requested.  An 80k-word book at 3500 words/chapter needs ~23
         # chapters, not 3.  Require at least 40% of the expected count.
