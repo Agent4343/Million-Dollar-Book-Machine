@@ -16,6 +16,7 @@ import logging
 import re
 from typing import Dict, Any, List
 from core.orchestrator import ExecutionContext
+from agents.modes import build_mode_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +447,7 @@ Rules:
 - Mark abandoned subplots as severity "major".
 - Be specific: cite chapter numbers and exact contradicting references.
 - continuity_report counts must match the issues you listed."""
+        prompt += build_mode_instructions("continuity_audit", context.inputs.get("user_constraints", {}))
         return await llm.generate(prompt, response_format="json", temperature=0.2, max_tokens=4000)
 
     return {
@@ -508,6 +510,7 @@ Rules:
 - Scores are 0-10.
 - If a score is low, the notes must explain why and what to improve.
 - If supporting_arcs_resolved is false, name the unresolved arcs in notes."""
+        prompt += build_mode_instructions("emotional_validation", context.inputs.get("user_constraints", {}))
         return await llm.generate(prompt, response_format="json", temperature=0.3, max_tokens=2500)
 
     return {
@@ -765,6 +768,10 @@ Rules:
 - Do not repeat the same finding across multiple areas.
 - For prose_quality_report, overall_prose_score is 0-100 (100 = publication-ready prose).
 - AI-telltale phrases should each have a specific replacement suggestion."""
+
+        _mode_overlay = build_mode_instructions("developmental_editor", context.inputs.get("user_constraints", {}))
+        if _mode_overlay:
+            prompt += "\n" + _mode_overlay
 
         return await llm.generate(
             prompt,
@@ -1119,6 +1126,7 @@ TITLE: {_chapter_title(ch)}
 TEXT:
 {current_text}
 """
+                    prompt += build_mode_instructions("structural_rewrite", context.inputs.get("user_constraints", {}))
                     out = await llm.generate(prompt, response_format="json", temperature=0.4)
                     new_text = out.get("text") or current_text
                     if isinstance(new_text, str) and len(new_text.split()) > 100:
@@ -1318,6 +1326,7 @@ Return ONLY valid JSON:
 Chapter text:
 {_chapter_text(ch)}
 """
+                prompt += build_mode_instructions("line_edit", context.inputs.get("user_constraints", {}))
                 out = await llm.generate(prompt, response_format="json", temperature=0.2)
                 new_text = out.get("text") or _chapter_text(ch)
                 edited.append(
@@ -1658,6 +1667,7 @@ Requirements:
 - bisac_categories: Exactly 2 BISAC subject codes with labels that best fit this book (required for KDP). Use real BISAC codes (e.g. FIC028000 for Science Fiction, FIC027000 for Romance).
 - series_hooks: 2-3 potential sequel hooks or series possibilities.
 - author_bio: A 50-word author bio placeholder appropriate for the genre."""
+        prompt += build_mode_instructions("publishing_package", constraints)
         return await llm.generate(prompt, response_format="json", temperature=0.4, max_tokens=2500)
 
     return {

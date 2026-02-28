@@ -9,6 +9,7 @@ These agents design the story's operating system:
 
 from typing import Dict, Any
 from core.orchestrator import ExecutionContext
+from agents.modes import build_mode_instructions
 
 
 # =============================================================================
@@ -290,6 +291,7 @@ async def execute_world_rules(context: ExecutionContext) -> Dict[str, Any]:
         genre=constraints.get("genre", "general fiction"),
         user_constraints=constraints
     )
+    prompt += build_mode_instructions("world_rules", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -331,12 +333,14 @@ async def execute_world_rules(context: ExecutionContext) -> Dict[str, Any]:
 async def execute_character_architecture(context: ExecutionContext) -> Dict[str, Any]:
     """Execute character architecture agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
     prompt = CHARACTER_ARCHITECTURE_PROMPT.format(
         primary_theme=context.inputs.get("thematic_architecture", {}).get("primary_theme", {}),
         central_dramatic_question=context.inputs.get("story_question", {}).get("central_dramatic_question", ""),
         world_rules=context.inputs.get("world_rules", {})
     )
+    prompt += build_mode_instructions("character_architecture", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -409,12 +413,14 @@ async def execute_character_architecture(context: ExecutionContext) -> Dict[str,
 async def execute_relationship_dynamics(context: ExecutionContext) -> Dict[str, Any]:
     """Execute relationship dynamics agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
     prompt = RELATIONSHIP_DYNAMICS_PROMPT.format(
         character_architecture=context.inputs.get("character_architecture", {}),
         primary_theme=context.inputs.get("thematic_architecture", {}).get("primary_theme", {}),
         value_conflict=context.inputs.get("thematic_architecture", {}).get("value_conflict", {})
     )
+    prompt += build_mode_instructions("relationship_dynamics", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")

@@ -14,6 +14,7 @@ import logging
 import os
 from typing import Callable, Dict, Any, List, Optional
 from core.orchestrator import ExecutionContext
+from agents.modes import build_mode_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -583,12 +584,14 @@ def _build_story_state(state: dict) -> str:
 async def execute_plot_structure(context: ExecutionContext) -> Dict[str, Any]:
     """Execute plot structure agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
     prompt = PLOT_STRUCTURE_PROMPT.format(
         central_dramatic_question=context.inputs.get("story_question", {}).get("central_dramatic_question", ""),
         protagonist_arc=context.inputs.get("character_architecture", {}).get("protagonist_arc", {}),
         relationship_dynamics=context.inputs.get("relationship_dynamics", {})
     )
+    prompt += build_mode_instructions("plot_structure", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -638,6 +641,7 @@ async def execute_pacing_design(context: ExecutionContext) -> Dict[str, Any]:
         plot_structure=context.inputs.get("plot_structure", {}),
         genre=constraints.get("genre", "general fiction")
     )
+    prompt += build_mode_instructions("pacing_design", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -703,6 +707,7 @@ async def execute_chapter_blueprint(context: ExecutionContext) -> Dict[str, Any]
         suggested_chapter_count=suggested_chapter_count,
         suggested_words_per_chapter=avg_words_per_chapter
     )
+    prompt += build_mode_instructions("chapter_blueprint", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -787,6 +792,7 @@ async def execute_voice_specification(context: ExecutionContext) -> Dict[str, An
         reader_avatar=context.inputs.get("market_intelligence", {}).get("reader_avatar", {}),
         protagonist_profile=context.inputs.get("character_architecture", {}).get("protagonist_profile", {})
     )
+    prompt += build_mode_instructions("voice_specification", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -959,6 +965,7 @@ async def execute_draft_generation(
                     if not dialogue_voices:
                         dialogue_voices = "No dialogue voice profiles available. Differentiate characters by vocabulary, sentence length, and speech patterns."
 
+                    _constraints = context.inputs.get("user_constraints", {})
                     prompt = DRAFT_GENERATION_PROMPT.format(
                         chapter_number=chapter_num,
                         chapter_title=chapter_title,
@@ -971,6 +978,7 @@ async def execute_draft_generation(
                         story_state=story_state_text,
                         word_target=word_target
                     )
+                    prompt += build_mode_instructions("draft_generation", _constraints)
 
                     timeout = _DRAFT_CHAPTER_TIMEOUT
                     chapter_text = await asyncio.wait_for(llm.generate(prompt), timeout=timeout)

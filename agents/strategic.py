@@ -12,6 +12,7 @@ These agents establish the foundational strategy for the book:
 from typing import Dict, Any
 from core.orchestrator import ExecutionContext
 from models.agents import AGENT_REGISTRY, get_agent_execution_order
+from agents.modes import build_mode_instructions
 
 
 # =============================================================================
@@ -248,10 +249,10 @@ Create the central story question:
 async def execute_market_intelligence(context: ExecutionContext) -> Dict[str, Any]:
     """Execute market intelligence agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
-    prompt = MARKET_INTELLIGENCE_PROMPT.format(
-        constraints=context.inputs.get("user_constraints", {})
-    )
+    prompt = MARKET_INTELLIGENCE_PROMPT.format(constraints=constraints)
+    prompt += build_mode_instructions("market_intelligence", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -284,11 +285,13 @@ async def execute_market_intelligence(context: ExecutionContext) -> Dict[str, An
 async def execute_concept_definition(context: ExecutionContext) -> Dict[str, Any]:
     """Execute concept definition agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
     prompt = CONCEPT_DEFINITION_PROMPT.format(
         market_intelligence=context.inputs.get("market_intelligence", {}),
-        user_constraints=context.inputs.get("user_constraints", {})
+        user_constraints=constraints,
     )
+    prompt += build_mode_instructions("concept_definition", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -313,10 +316,12 @@ async def execute_concept_definition(context: ExecutionContext) -> Dict[str, Any
 async def execute_thematic_architecture(context: ExecutionContext) -> Dict[str, Any]:
     """Execute thematic architecture agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
     prompt = THEMATIC_ARCHITECTURE_PROMPT.format(
         concept_definition=context.inputs.get("concept_definition", {})
     )
+    prompt += build_mode_instructions("thematic_architecture", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")
@@ -345,11 +350,13 @@ async def execute_thematic_architecture(context: ExecutionContext) -> Dict[str, 
 async def execute_story_question(context: ExecutionContext) -> Dict[str, Any]:
     """Execute story question agent."""
     llm = context.llm_client
+    constraints = context.inputs.get("user_constraints", {})
 
     prompt = STORY_QUESTION_PROMPT.format(
         thematic_architecture=context.inputs.get("thematic_architecture", {}),
         concept_definition=context.inputs.get("concept_definition", {})
     )
+    prompt += build_mode_instructions("story_question", constraints)
 
     if llm:
         response = await llm.generate(prompt, response_format="json")

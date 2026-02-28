@@ -206,6 +206,7 @@ class ProjectCreate(BaseModel):
     themes: Optional[List[str]] = None
     target_audience: Optional[str] = None
     tone: Optional[str] = None
+    content_mode: Optional[str] = None  # "book" (default) or "teaching"
     additional_constraints: Optional[Dict[str, Any]] = None
 
 
@@ -491,6 +492,8 @@ async def create_project(request: ProjectCreate, auth: bool = Depends(require_au
         "target_audience": request.target_audience,
         "tone": request.tone,
     }
+    if request.content_mode and request.content_mode in ("book", "teaching"):
+        constraints["content_mode"] = request.content_mode
     if request.additional_constraints:
         constraints.update(request.additional_constraints)
 

@@ -413,15 +413,29 @@
             <!-- New Project Tab -->
             <div id="newProjectTab" class="hidden">
                 <div class="card">
-                    <h2>Create New Book Project</h2>
+                    <h2>Create New Project</h2>
                     <form id="newProjectForm">
+                        <div style="margin-bottom:1rem;">
+                            <label>Content Mode *</label>
+                            <div style="display:flex;gap:0.75rem;margin-top:0.25rem;">
+                                <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;padding:0.5rem 1rem;border:2px solid #333;border-radius:8px;transition:all 0.2s;" id="modeBookLabel">
+                                    <input type="radio" name="contentMode" value="book" checked style="width:auto;margin:0;" onchange="updateModeUI()">
+                                    <span>Book</span>
+                                </label>
+                                <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;padding:0.5rem 1rem;border:2px solid #333;border-radius:8px;transition:all 0.2s;" id="modeTeachingLabel">
+                                    <input type="radio" name="contentMode" value="teaching" style="width:auto;margin:0;" onchange="updateModeUI()">
+                                    <span>Teaching / Course</span>
+                                </label>
+                            </div>
+                            <p id="modeDescription" style="font-size:0.8rem;color:#888;margin-top:0.4rem;">Standard book generation — fiction or non-fiction.</p>
+                        </div>
                         <div class="grid-2">
                             <div>
-                                <label>Book Title *</label>
+                                <label id="titleLabel">Book Title *</label>
                                 <input type="text" id="projectTitle" required placeholder="Your book title">
                             </div>
                             <div>
-                                <label>Genre *</label>
+                                <label id="genreLabel">Genre *</label>
                                 <select id="projectGenre" required>
                                     <option value="">Select genre</option>
                                     <option value="literary_fiction">Literary Fiction</option>
@@ -1290,6 +1304,7 @@ The AI will sort everything into the right categories and fill in gaps." style="
             const seriesNum = document.getElementById('projectSeriesNumber')?.value;
             if (seriesNum) additional.series_number = parseInt(seriesNum);
 
+            const contentMode = document.querySelector('input[name="contentMode"]:checked')?.value || 'book';
             const body = {
                 title: document.getElementById('projectTitle').value,
                 genre: document.getElementById('projectGenre').value,
@@ -1298,6 +1313,7 @@ The AI will sort everything into the right categories and fill in gaps." style="
                 target_audience: document.getElementById('projectAudience').value,
                 comparable_titles: document.getElementById('projectComps').value.split(',').map(s => s.trim()).filter(s => s),
                 themes: document.getElementById('projectThemes').value.split(',').map(s => s.trim()).filter(s => s),
+                content_mode: contentMode !== 'book' ? contentMode : undefined,
                 additional_constraints: Object.keys(additional).length > 0 ? additional : undefined
             };
 
@@ -2039,6 +2055,37 @@ The AI will sort everything into the right categories and fill in gaps." style="
         // =================================================================
         // Story Bible Import
         // =================================================================
+
+        function updateModeUI() {
+            const mode = document.querySelector('input[name="contentMode"]:checked')?.value || 'book';
+            const desc = document.getElementById('modeDescription');
+            const titleLabel = document.getElementById('titleLabel');
+            const genreLabel = document.getElementById('genreLabel');
+            const bookLabel = document.getElementById('modeBookLabel');
+            const teachLabel = document.getElementById('modeTeachingLabel');
+
+            if (mode === 'teaching') {
+                desc.textContent = 'Instructional course content — step-by-step modules with exercises, templates, and homework.';
+                titleLabel.textContent = 'Course Title *';
+                document.getElementById('projectTitle').placeholder = 'e.g., Write Your Novel in 90 Days';
+                genreLabel.textContent = 'Subject Area *';
+                bookLabel.style.borderColor = '#333';
+                bookLabel.style.background = 'transparent';
+                teachLabel.style.borderColor = '#e67e22';
+                teachLabel.style.background = 'rgba(230,126,34,0.1)';
+            } else {
+                desc.textContent = 'Standard book generation \u2014 fiction or non-fiction.';
+                titleLabel.textContent = 'Book Title *';
+                document.getElementById('projectTitle').placeholder = 'Your book title';
+                genreLabel.textContent = 'Genre *';
+                bookLabel.style.borderColor = '#3498db';
+                bookLabel.style.background = 'rgba(52,152,219,0.1)';
+                teachLabel.style.borderColor = '#333';
+                teachLabel.style.background = 'transparent';
+            }
+        }
+        // Initialize mode UI on load
+        document.addEventListener('DOMContentLoaded', updateModeUI);
 
         function toggleStoryBibleRequired() {
             const enabled = document.getElementById('storyBibleEnabled').checked;
