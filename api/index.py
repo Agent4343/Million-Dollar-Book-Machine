@@ -572,6 +572,154 @@ _STORY_BIBLE_AGENTS = [
     "relationship_dynamics",
 ]
 
+_TEACHING_BIBLE_PROMPT = """You are an expert course-development AI. An instructor has provided a content bible — a freeform document containing their expertise, frameworks, processes, tools, strategies, and teaching material for a course or instructional book.
+
+Your job is to organize this content bible into the structured outputs that our course-development pipeline expects for Layers 0-7. Extract what's there, infer what's missing based on the material provided, and produce complete JSON for each agent.
+
+CRITICAL: This is instructional/course content — NOT fiction. Every field must be interpreted through a teaching lens. Preserve ALL specific details (tool names, prices, URLs, timelines, platform names, step-by-step processes).
+
+## Instructor's Content Bible:
+{story_bible}
+
+## Project Info:
+- Title: {title}
+- Subject/Niche: {genre}
+- Description: {description}
+- Target students: {audience}
+- Core skills taught: {themes}
+- Comparable courses/books: {comps}
+
+## Required Agent Outputs:
+
+Produce a single JSON object with these exact keys. Each key maps to one pipeline agent. Fill in everything you can extract from the content bible, and intelligently infer the rest based on the subject matter and material provided.
+
+{{
+  "market_intelligence": {{
+    "reader_avatar": {{
+      "demographics": "target student demographics (age, income, experience level, current job/situation)",
+      "psychographics": "values, fears, desires, motivation for taking this course",
+      "reading_habits": "how they consume learning content (video, text, audio, preferred platforms)",
+      "problems_to_solve": ["specific problems students want this course to solve"]
+    }},
+    "market_gap": {{
+      "underserved_need": "what existing courses/books on this topic fail to teach",
+      "timing_opportunity": "why now is the right time for this course",
+      "gap_description": "the specific gap in the market this course fills"
+    }},
+    "positioning_angle": {{
+      "unique_value_proposition": "what makes this course different from competitors",
+      "key_differentiators": ["specific differentiator 1", "differentiator 2"],
+      "competitive_advantage": "core advantage over other courses/books on this topic"
+    }},
+    "comp_analysis": [
+      {{"title": "Comparable Course/Book", "strengths": "what it teaches well", "weaknesses": "what it misses or teaches poorly", "how_we_improve": "our angle"}}
+    ]
+  }},
+  "concept_definition": {{
+    "one_line_hook": "A single compelling sentence that sells the course — the transformation promise",
+    "core_promise": "The specific outcome students will achieve by completing this course",
+    "unique_engine": "The teaching methodology or framework that makes this course work (e.g., project-based, 90-day sprint, template-driven)",
+    "elevator_pitch": "2-3 sentence pitch for the course"
+  }},
+  "thematic_architecture": {{
+    "primary_theme": "The core skill or knowledge domain being taught",
+    "counter_theme": "The common misconception or wrong approach students typically try first",
+    "value_conflict": "The core tension students face (e.g., speed vs. quality, free vs. paid tools, perfectionism vs. shipping)",
+    "thematic_question": "The learning question the course wrestles with and answers"
+  }},
+  "story_question": {{
+    "central_dramatic_question": "Can I actually [achieve specific outcome] even if [common student fear/obstacle]?",
+    "stakes_ladder": ["personal stake (self-confidence, identity)", "financial stake (income, investment)", "lifestyle stake (freedom, time, career change)"],
+    "binary_outcome": {{"success": "what the student's life looks like after completing the course", "failure": "what happens if they give up or never start"}},
+    "reader_investment": "Why the student will stay motivated through the entire course"
+  }},
+  "world_rules": {{
+    "physical_rules": {{
+      "possibilities": ["what becomes possible with these skills/tools"],
+      "impossibilities": ["realistic limitations — what this course CANNOT do for students"],
+      "technology_level": "tools, software, platforms, and accounts required",
+      "geography": "any location constraints or opportunities (e.g., US-only platforms, global access)"
+    }},
+    "social_rules": {{
+      "power_structures": "how the industry/market is structured (platforms, gatekeepers, algorithms)",
+      "norms_and_taboos": ["industry norms, best practices, common mistakes to avoid"],
+      "economic_system": "how money flows — pricing, royalties, revenue models, costs"
+    }},
+    "power_rules": {{
+      "who_has_power": "who controls the platforms/market (e.g., Amazon, algorithm, audience)",
+      "how_power_is_gained": "how students build authority, audience, and income in this space",
+      "limitations": ["real-world constraints on growth, income, speed"]
+    }},
+    "world_bible": {{
+      "history": "relevant background on the industry/niche — how we got here",
+      "culture": "community norms, expected behaviors, professional standards",
+      "terminology": ["key terms, jargon, and concepts students must learn"]
+    }},
+    "constraint_list": ["time constraint", "budget constraint", "skill-level constraint", "platform constraint"]
+  }},
+  "character_architecture": {{
+    "protagonist_profile": {{
+      "name": "Student Persona name (e.g., 'Aspiring Author Alex')",
+      "age": "typical student age range",
+      "role": "where they are right now — their current situation",
+      "personality": "common traits of ideal students (motivated, frustrated, curious, skeptical)",
+      "backstory": "what led them to seek this course — their journey so far",
+      "strengths": ["what students bring to the table — existing skills"],
+      "weaknesses": ["gaps in knowledge, bad habits, limiting beliefs"],
+      "voice": "how students talk about their problems and goals"
+    }},
+    "protagonist_arc": {{
+      "starting_state": "where students begin (confused, overwhelmed, broke, stuck)",
+      "ending_state": "where they end up after completing the course (confident, earning, skilled)",
+      "transformation": "the specific shift that happens — what they learn and internalize"
+    }},
+    "want_vs_need": {{
+      "want": "what students THINK they need (e.g., 'just tell me the steps')",
+      "need": "what they ACTUALLY need (e.g., a system, mindset shift, foundational understanding)",
+      "conflict": "how the want and need create tension in the learning process"
+    }},
+    "antagonist_profile": {{
+      "name": "Primary Obstacle (e.g., 'Imposter Syndrome', 'Information Overload', 'Analysis Paralysis')",
+      "motivation": "why this obstacle is so persistent — what feeds it",
+      "methods": "how it manifests — specific ways students get stuck or quit",
+      "humanity": "why this obstacle is understandable and relatable — students shouldn't feel bad about facing it"
+    }},
+    "antagonistic_force": "the broader force working against student success (e.g., market noise, shiny object syndrome, perfectionism)",
+    "supporting_cast": [
+      {{"name": "Instructor Persona", "role": "mentor and guide", "relationship_to_protagonist": "trusted expert who has been where they are", "arc": "reveals deeper expertise as student advances"}},
+      {{"name": "Success Story", "role": "proof of concept", "relationship_to_protagonist": "someone like them who succeeded", "arc": "their journey from beginner to success"}},
+      {{"name": "Common Pitfall", "role": "cautionary example", "relationship_to_protagonist": "what happens when students skip steps or give up", "arc": "the cost of not following through"}}
+    ],
+    "character_functions": {{
+      "mirror": "case study or student example who reflects the reader's own situation",
+      "mentor": "the instructor persona — voice, credentials, teaching style",
+      "catalyst": "the specific moment or realization that pushes students to take action"
+    }}
+  }},
+  "relationship_dynamics": {{
+    "conflict_web": [
+      {{"characters": ["Student", "Material Difficulty"], "conflict_type": "learning curve", "evolution": "starts overwhelming, becomes manageable, then empowering"}},
+      {{"characters": ["Student", "Self-Doubt"], "conflict_type": "internal resistance", "evolution": "fades as quick wins build confidence"}},
+      {{"characters": ["Student", "Instructor"], "conflict_type": "trust gap", "evolution": "skepticism → testing → trust → independence"}}
+    ],
+    "power_shifts": [
+      {{"description": "Student completes first project/sale/milestone", "from": "Material", "to": "Student", "trigger": "hands-on success builds agency"}}
+    ],
+    "dependency_arcs": [
+      {{"characters": ["Student", "Instructor"], "dependency": "guided learning with templates and step-by-step", "evolution": "gradually shifts to independent execution"}}
+    ],
+    "relationship_matrix": "Summary of the student's journey through the course: trust arc, difficulty curve, confidence trajectory"
+  }}
+}}
+
+IMPORTANT:
+- Extract as much as possible from the content bible. Don't ignore provided details.
+- Preserve ALL specific details: tool names, prices, URLs, platform names, step counts, timelines, revenue figures.
+- For anything not explicitly in the content bible, make intelligent inferences based on the subject matter and what IS provided.
+- Frameworks, processes, and step-by-step methods from the content bible must be preserved exactly.
+- Return ONLY valid JSON. No markdown, no explanation, just the JSON object."""
+
+
 _STORY_BIBLE_PROMPT = """You are an expert book development AI. A writer has provided a story bible — a freeform document containing their worldbuilding, characters, plot notes, themes, and any other creative material.
 
 Your job is to organize this story bible into the structured outputs that our book development pipeline expects for Layers 0-7. Extract what's there, infer what's missing based on the material provided, and produce complete JSON for each agent.
@@ -740,9 +888,13 @@ async def import_story_bible(project_id: str, request: Request, auth: bool = Dep
 
     constraints = project.user_constraints or {}
 
-    # Build the prompt — inject teaching-mode reframe if applicable
-    from agents.modes import build_mode_instructions, is_teaching_mode
-    prompt = _STORY_BIBLE_PROMPT.format(
+    # Pick the right prompt — teaching mode gets a fully native course prompt
+    from agents.modes import is_teaching_mode
+    if is_teaching_mode(constraints):
+        prompt_template = _TEACHING_BIBLE_PROMPT
+    else:
+        prompt_template = _STORY_BIBLE_PROMPT
+    prompt = prompt_template.format(
         story_bible=story_bible[:80000],  # Cap at 80k chars
         title=project.title,
         genre=constraints.get("genre", "fiction"),
@@ -751,26 +903,6 @@ async def import_story_bible(project_id: str, request: Request, auth: bool = Dep
         themes=", ".join(constraints.get("themes", [])) or "not specified",
         comps=", ".join(constraints.get("comparable_titles", [])) or "not specified",
     )
-    if is_teaching_mode(constraints):
-        prompt += """
-
-## MODE: TEACHING / COURSE CONTENT
-CRITICAL: This is NOT a fiction story bible. This is instructional/course content being imported.
-
-Reframe ALL of your extraction through a teaching lens:
-- "protagonist_profile" → Student Persona (who is learning this, their starting point, frustrations)
-- "protagonist_arc" → Student Transformation Arc (where they start → what they learn → where they end up)
-- "antagonist_profile" → Resistance & Obstacles (imposter syndrome, overwhelm, "this won't work for me")
-- "want_vs_need" → What students THINK they need vs what they ACTUALLY need
-- "world_rules" → Prerequisites, tools needed, environment setup, time commitment
-- "central_dramatic_question" → Central Learning Question ("Can I actually [achieve specific outcome]?")
-- "relationship_dynamics" → Student↔Instructor trust arc, Student↔Material difficulty curve
-- "supporting_cast" → Teaching archetypes (instructor persona, case studies, student success stories)
-- "thematic_architecture" → Core skill being taught + supporting skills + learning progression
-
-Extract the actual instructional content — the steps, frameworks, processes, and business model
-described in this document. Preserve ALL specific details (tools, prices, timelines, platform names).
-The structural data you produce will drive a course-generation pipeline, not a fiction pipeline."""
 
     try:
         result = await llm.generate(prompt, response_format="json", temperature=0.4)
