@@ -740,7 +740,8 @@ async def import_story_bible(project_id: str, request: Request, auth: bool = Dep
 
     constraints = project.user_constraints or {}
 
-    # Build the prompt
+    # Build the prompt — inject teaching-mode reframe if applicable
+    from agents.modes import build_mode_instructions, is_teaching_mode
     prompt = _STORY_BIBLE_PROMPT.format(
         story_bible=story_bible[:80000],  # Cap at 80k chars
         title=project.title,
@@ -750,6 +751,26 @@ async def import_story_bible(project_id: str, request: Request, auth: bool = Dep
         themes=", ".join(constraints.get("themes", [])) or "not specified",
         comps=", ".join(constraints.get("comparable_titles", [])) or "not specified",
     )
+    if is_teaching_mode(constraints):
+        prompt += """
+
+## MODE: TEACHING / COURSE CONTENT
+CRITICAL: This is NOT a fiction story bible. This is instructional/course content being imported.
+
+Reframe ALL of your extraction through a teaching lens:
+- "protagonist_profile" → Student Persona (who is learning this, their starting point, frustrations)
+- "protagonist_arc" → Student Transformation Arc (where they start → what they learn → where they end up)
+- "antagonist_profile" → Resistance & Obstacles (imposter syndrome, overwhelm, "this won't work for me")
+- "want_vs_need" → What students THINK they need vs what they ACTUALLY need
+- "world_rules" → Prerequisites, tools needed, environment setup, time commitment
+- "central_dramatic_question" → Central Learning Question ("Can I actually [achieve specific outcome]?")
+- "relationship_dynamics" → Student↔Instructor trust arc, Student↔Material difficulty curve
+- "supporting_cast" → Teaching archetypes (instructor persona, case studies, student success stories)
+- "thematic_architecture" → Core skill being taught + supporting skills + learning progression
+
+Extract the actual instructional content — the steps, frameworks, processes, and business model
+described in this document. Preserve ALL specific details (tools, prices, timelines, platform names).
+The structural data you produce will drive a course-generation pipeline, not a fiction pipeline."""
 
     try:
         result = await llm.generate(prompt, response_format="json", temperature=0.4)
